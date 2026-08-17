@@ -10,6 +10,7 @@ Plain English is the shared Markdown linter for the writing-style experiment. It
 | `install.sh` | Checkout-only CLI installer; creates a user-local symlink and does not install the skill or hook. |
 | `lib/linter.py` | Vendored linter, shared exclusions, checks, reports, and retry state. |
 | `hooks/gate.sh` | PreToolUse wrapper for Markdown Write and Edit calls. |
+| `hooks/reminder.sh` | UserPromptSubmit per-turn style reminder hook (47-word précis). |
 | `skills/plain-english/SKILL.md` | On-demand check for work written through Bash or outside Claude Code. |
 | `tests/` | Bad, good, and excluded Markdown fixtures with the two required test files. |
 
@@ -40,15 +41,16 @@ tools/plain-english/install.sh --bin-dir /path/to/bin
 
 The installer neither downloads code nor installs the skill or Claude Code hook. Task 1 builds and tests it only; Task 5 may run it after the experiment's verdict. Ensure the chosen bin directory is on `PATH` before using the skill.
 
-## Claude Code hook
+## Claude Code hooks
 
-The installed hook is a pair. Copy both files into one private directory so the wrapper can find the Python module without a repository-relative path:
+Copy the hook files into one private directory so the gate wrapper can find the Python module without a repository-relative path:
 
 ```bash
 mkdir -p ~/.claude/hooks/plain-english
 cp tools/plain-english/hooks/gate.sh ~/.claude/hooks/plain-english/gate.sh
+cp tools/plain-english/hooks/reminder.sh ~/.claude/hooks/plain-english/reminder.sh
 cp tools/plain-english/lib/linter.py ~/.claude/hooks/plain-english/linter.py
-chmod +x ~/.claude/hooks/plain-english/gate.sh
+chmod +x ~/.claude/hooks/plain-english/gate.sh ~/.claude/hooks/plain-english/reminder.sh
 ```
 
 Then add this fragment under `hooks` in `~/.claude/settings.json`:
@@ -62,6 +64,16 @@ Then add this fragment under `hooks` in `~/.claude/settings.json`:
         {
           "type": "command",
           "command": "~/.claude/hooks/plain-english/gate.sh"
+        }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "~/.claude/hooks/plain-english/reminder.sh"
         }
       ]
     }
