@@ -53,7 +53,7 @@ def parse_timestamp(value: object) -> datetime | None:
         return None
 
 
-def texts(root: str, stream: str, since: datetime | None = None):
+def texts(root: str, stream: str, since: datetime | None = None, until: datetime | None = None):
     for path in glob.glob(f"{root}/**/*.jsonl", recursive=True):
         try:
             with open(path, errors="ignore") as fh:
@@ -66,6 +66,8 @@ def texts(root: str, stream: str, since: datetime | None = None):
                         continue
                     timestamp = parse_timestamp(rec.get("timestamp"))
                     if since is not None and (timestamp is None or timestamp < since):
+                        continue
+                    if until is not None and (timestamp is None or timestamp >= until):
                         continue
                     msg = rec.get("message") or {}
                     for block in msg.get("content") or []:
@@ -106,9 +108,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("root", help="directory containing Claude Code transcript JSONL files")
     parser.add_argument("--stream", choices=("chat", "docs"), required=True, help="measure one stream; streams are never combined")
     parser.add_argument("--since", type=parse_timestamp, metavar="ISO-8601", help="include records at or after this timestamp")
+    parser.add_argument("--until", type=parse_timestamp, metavar="ISO-8601", help="include records before this timestamp")
     arguments = parser.parse_args(argv)
 
-    blocks = list(texts(arguments.root, arguments.stream, arguments.since))
+    blocks = list(texts(arguments.root, arguments.stream, arguments.since, arguments.until))
     total_words, counts = count_texts(blocks)
     print(f"stream: {arguments.stream}")
     print(f"text blocks: {len(blocks)}")

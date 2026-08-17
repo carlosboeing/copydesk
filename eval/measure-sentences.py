@@ -46,7 +46,7 @@ def parse_timestamp(value: object) -> datetime | None:
         return None
 
 
-def transcript_texts(path: str, stream: str, since: datetime | None = None):
+def transcript_texts(path: str, stream: str, since: datetime | None = None, until: datetime | None = None):
     with open(path, errors="ignore") as fh:
         for line in fh:
             try:
@@ -57,6 +57,8 @@ def transcript_texts(path: str, stream: str, since: datetime | None = None):
                 continue
             timestamp = parse_timestamp(record.get("timestamp"))
             if since is not None and (timestamp is None or timestamp < since):
+                continue
+            if until is not None and (timestamp is None or timestamp >= until):
                 continue
             for block in (record.get("message") or {}).get("content") or []:
                 if not isinstance(block, dict):
@@ -81,12 +83,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("paths", nargs="+", help="Markdown files or transcript JSONL files")
     parser.add_argument("--stream", choices=("chat", "docs"), required=True, help="measure one stream; streams are never combined")
     parser.add_argument("--since", type=parse_timestamp, metavar="ISO-8601", help="include transcript records at or after this timestamp")
+    parser.add_argument("--until", type=parse_timestamp, metavar="ISO-8601", help="include transcript records before this timestamp")
     arguments = parser.parse_args(argv)
 
     print(f"stream: {arguments.stream}")
     for path in arguments.paths:
         if path.endswith(".jsonl"):
-            blocks = list(transcript_texts(path, arguments.stream, arguments.since))
+            blocks = list(transcript_texts(path, arguments.stream, arguments.since, arguments.until))
             report(f"[{path}, {arguments.stream}]", "\n\n".join(blocks))
         elif arguments.stream == "docs":
             report(Path(path).name, Path(path).read_text(encoding="utf-8", errors="ignore"))
