@@ -1,0 +1,15 @@
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
+- Teams review notes before each release.
