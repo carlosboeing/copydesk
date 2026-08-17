@@ -1,0 +1,34 @@
+# sequence 06 — design review, the architecture and configuration docs
+# target: crossrev, pinned at c72d978
+# Turns are fixed text. No turn may refer to the model's previous answer.
+# Checkpoints: turns 1, 5 and 10.
+
+### turn 1
+Read `docs/architecture.md` and tell me what CrossRev actually does, in your own words.
+
+### turn 2
+Which claim in that document is least supported by the code? Name it and show the evidence.
+
+### turn 3
+`docs/adrs/` holds the decision records. Which one is most likely to be out of date? Justify it.
+
+### turn 4
+Review `docs/configuration.md` for anything that would mislead a new user.
+
+### turn 5
+Is the terminology consistent between `docs/usage.md` and `docs/configuration.md`? List every mismatch.
+
+### turn 6
+Rewrite the weakest section of `docs/architecture.md`.
+
+### turn 7
+What is missing from the documentation that a new contributor would need on day one?
+
+### turn 8
+Rank everything you have found by how much it would hurt a real user.
+
+### turn 9
+Write the commit message for the rewrite.
+
+### turn 10
+Summarise what is done and what is left.

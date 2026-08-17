@@ -1,0 +1,34 @@
+# sequence 05 — brainstorm, reviewing a branch with no remote
+# target: crossrev, pinned at c72d978
+# Turns are fixed text. No turn may refer to the model's previous answer.
+# Checkpoints: turns 1, 5 and 10.
+
+### turn 1
+I want CrossRev to review a local branch that has no GitHub remote. Tell me what you would need to know before proposing anything.
+
+### turn 2
+What breaks first when there is no pull request to anchor comments to?
+
+### turn 3
+Propose two options for where findings go instead. One line of trade-off each.
+
+### turn 4
+Which of those two is cheaper to build, given `lib/github.sh` as it stands today?
+
+### turn 5
+What would you cut from the first version to ship it in a day?
+
+### turn 6
+Does this conflict with anything in `docs/architecture.md`? Check and answer.
+
+### turn 7
+Give me the three biggest risks, ranked, with what you would do about each.
+
+### turn 8
+Write this up as a brainstorm document in `docs/`, following the repository's own conventions.
+
+### turn 9
+What should the ROADMAP line for this say?
+
+### turn 10
+Summarise the decision and what still needs my input.

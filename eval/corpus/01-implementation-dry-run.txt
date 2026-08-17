@@ -1,0 +1,34 @@
+# sequence 01 — long implementation, a --dry-run flag
+# target: crossrev, pinned at c72d978
+# Turns are fixed text. No turn may refer to the model's previous answer.
+# Checkpoints: turns 1, 5 and 10.
+
+### turn 1
+Add a `--dry-run` flag to `bin/crossrev` that prints what a review run would do without calling any model. Before writing code, tell me every place the flag has to be threaded through.
+
+### turn 2
+Implement the flag parsing in `bin/crossrev`.
+
+### turn 3
+Now make `lib/run.sh` respect it.
+
+### turn 4
+What should `lib/state.sh` do under dry-run? Decide, then implement it.
+
+### turn 5
+Add a test for the dry-run path in `tests/`.
+
+### turn 6
+Run the test suite and report what happened.
+
+### turn 7
+Update `docs/usage.md` for the new flag.
+
+### turn 8
+Does `--dry-run` interact badly with `--resume`? Check the code and answer.
+
+### turn 9
+Write the commit message for this change.
+
+### turn 10
+Summarise what is done and what is left.

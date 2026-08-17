@@ -1,0 +1,34 @@
+# sequence 08 — code explanation, how a review run works
+# target: crossrev, pinned at c72d978
+# Turns are fixed text. No turn may refer to the model's previous answer.
+# Checkpoints: turns 1, 5 and 10.
+
+### turn 1
+Explain what `lib/legs.sh` does.
+
+### turn 2
+Walk me through one full review run, from `bin/crossrev` to a posted comment.
+
+### turn 3
+What is a "leg" in this codebase, and why is it called that?
+
+### turn 4
+Explain `lib/state.sh` — what state is kept, and where it lives.
+
+### turn 5
+How does `lib/diff.sh` decide what gets sent to a model?
+
+### turn 6
+Explain the sandbox in `lib/sandbox.sh` to someone who has never seen this repository.
+
+### turn 7
+Which part of this codebase would be hardest for a new contributor to understand? Explain that part.
+
+### turn 8
+Draw the control flow of a review run as a Mermaid diagram.
+
+### turn 9
+Explain `action.yml` and when it matters.
+
+### turn 10
+If you had to explain this whole system in five sentences, what would you say?

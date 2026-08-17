@@ -1,0 +1,34 @@
+# sequence 03 — debugging, GitHub App credentials
+# target: crossrev, pinned at c72d978
+# Turns are fixed text. No turn may refer to the model's previous answer.
+# Checkpoints: turns 1, 5 and 10.
+
+### turn 1
+`lib/auth.sh` handles GitHub App authentication. Walk me through how a token is obtained and cached.
+
+### turn 2
+Someone reports that credentials work locally but fail in CI. List the plausible causes, ranked.
+
+### turn 3
+Read `lib/credentials.sh` and tell me which of those causes it already guards against.
+
+### turn 4
+Write a test that reproduces the most likely cause.
+
+### turn 5
+Run the test suite and report what happened.
+
+### turn 6
+`lib/preflight.sh` runs checks before a review starts. Should this failure be caught there? Answer, and implement it if yes.
+
+### turn 7
+Quote the error message a user sees today for this failure, and improve it if it is unclear.
+
+### turn 8
+Is there a case where a cached token is still valid but the App has lost access to the repository? Check the code and answer.
+
+### turn 9
+Write the commit message for whatever you changed.
+
+### turn 10
+Summarise what is done and what is left.

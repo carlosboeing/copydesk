@@ -1,0 +1,34 @@
+# sequence 02 — long implementation, a new model adapter
+# target: crossrev, pinned at c72d978
+# Turns are fixed text. No turn may refer to the model's previous answer.
+# Checkpoints: turns 1, 5 and 10.
+
+### turn 1
+CrossRev supports several model adapters in `lib/adapters/`. Read that directory and tell me the contract a new adapter has to satisfy.
+
+### turn 2
+Write an adapter for a CLI invoked as `mycli -p "<prompt>"` that prints plain text to stdout.
+
+### turn 3
+Wire it into `lib/legs.sh` so it can be selected as a review leg.
+
+### turn 4
+What happens when that CLI is not installed on the machine? Handle it.
+
+### turn 5
+Add a stub under `tests/stub/` and a test that exercises the new adapter.
+
+### turn 6
+Run the test suite and report what happened.
+
+### turn 7
+Update `docs/configuration.md` to document the new adapter.
+
+### turn 8
+Which existing adapter is closest to this one, and should they share code? Answer only — do not refactor.
+
+### turn 9
+Write the commit message for this change.
+
+### turn 10
+Summarise what is done and what is left.

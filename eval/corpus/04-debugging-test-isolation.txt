@@ -1,0 +1,34 @@
+# sequence 04 — debugging, test isolation and state leaks
+# target: crossrev, pinned at c72d978
+# Turns are fixed text. No turn may refer to the model's previous answer.
+# Checkpoints: turns 1, 5 and 10.
+
+### turn 1
+Run `tests/run.sh` and report what happens.
+
+### turn 2
+`tests/harness.sh` sets up the test environment. Explain how an individual test gets an isolated sandbox.
+
+### turn 3
+Several tests use stubs in `tests/stub/`. Explain what a stub replaces, and when it is used.
+
+### turn 4
+A test passes alone but fails in the full suite. Given this harness, rank the candidate causes.
+
+### turn 5
+Check whether any test writes outside its sandbox. Report file and line for each one you find.
+
+### turn 6
+Write a test that fails if a test leaks state into `$HOME`.
+
+### turn 7
+Run the suite again and report what happened.
+
+### turn 8
+Would running these tests in parallel be safe? Answer with evidence from the harness.
+
+### turn 9
+Write the commit message for this change.
+
+### turn 10
+Summarise what is done and what is left.

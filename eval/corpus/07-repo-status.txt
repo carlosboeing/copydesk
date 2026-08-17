@@ -1,0 +1,34 @@
+# sequence 07 — repo status and orientation
+# target: crossrev, pinned at c72d978
+# Turns are fixed text. No turn may refer to the model's previous answer.
+# Checkpoints: turns 1, 5 and 10.
+
+### turn 1
+What is the state of this repository right now?
+
+### turn 2
+What changed in the last five commits?
+
+### turn 3
+Is the working tree clean, and is the branch ahead of or behind its remote?
+
+### turn 4
+What does `docs/ROADMAP.md` say is next?
+
+### turn 5
+Are there open TODO or FIXME markers in `lib/`? List them with file and line.
+
+### turn 6
+Which file has changed most often in the last month?
+
+### turn 7
+Does `docs/CHANGELOG.md` cover everything in the last five commits?
+
+### turn 8
+If I had two hours, what should I work on, and why that rather than the alternatives?
+
+### turn 9
+Is there anything in this repository that looks half-finished?
+
+### turn 10
+Give me the one-paragraph status I could paste to someone else.
