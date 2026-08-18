@@ -273,17 +273,21 @@ class TestTelemetry(unittest.TestCase):
         # Point state dir to an unwriteable directory
         unwriteable = self.state_dir / "unwriteable"
         unwriteable.mkdir(mode=0o444)
-        env = os.environ.copy()
-        env["PLAIN_ENGLISH_STATE_DIR"] = str(unwriteable / "nested")
-
-        # run_hook must not raise
-        payload = {
-            "session_id": "test-resilience",
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/tmp/resilience.md", "content": "Simple text."},
-        }
-        res = linter.run_hook(json.dumps(payload))
-        self.assertEqual(res, 0)
+        saved = os.environ.get("PLAIN_ENGLISH_STATE_DIR")
+        os.environ["PLAIN_ENGLISH_STATE_DIR"] = str(unwriteable / "nested")
+        try:
+            payload = {
+                "session_id": "test-resilience",
+                "tool_name": "Write",
+                "tool_input": {"file_path": "/tmp/resilience.md", "content": "Simple text."},
+            }
+            res = linter.run_hook(json.dumps(payload))
+            self.assertEqual(res, 0)
+        finally:
+            if saved is not None:
+                os.environ["PLAIN_ENGLISH_STATE_DIR"] = saved
+            else:
+                os.environ.pop("PLAIN_ENGLISH_STATE_DIR", None)
 
     def test_flagged_text_opt_out(self) -> None:
         os.environ["PLAIN_ENGLISH_LOG_FLAGGED_TEXT"] = "0"
