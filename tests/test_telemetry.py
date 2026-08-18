@@ -458,6 +458,25 @@ class TestTelemetry(unittest.TestCase):
         self.assertTrue(out_md.is_file())
         self.assertIn("# Plain English telemetry", out_md.read_text(encoding="utf-8"))
 
+    def test_unconfigured_test_context_skips_writing(self) -> None:
+        # When PLAIN_ENGLISH_STATE_DIR is not set in os.environ and running under unittest,
+        # _record_event must skip writing and never touch ~/.claude/plain-english/events.jsonl
+        saved_env = os.environ.pop("PLAIN_ENGLISH_STATE_DIR", None)
+        try:
+            default_events = Path.home() / ".claude" / "plain-english" / "events.jsonl"
+            existed_before = default_events.is_file()
+            mtime_before = default_events.stat().st_mtime if existed_before else 0.0
+
+            linter.record_turn_event("guard-test-turn")
+
+            if existed_before:
+                self.assertEqual(default_events.stat().st_mtime, mtime_before)
+            else:
+                self.assertFalse(default_events.is_file())
+        finally:
+            if saved_env is not None:
+                os.environ["PLAIN_ENGLISH_STATE_DIR"] = saved_env
+
 
 if __name__ == "__main__":
     unittest.main()

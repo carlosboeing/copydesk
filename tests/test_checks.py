@@ -18,14 +18,39 @@ GATE = REPOSITORY_ROOT / "tools" / "plain-english" / "hooks" / "gate.sh"
 INSTALLER = REPOSITORY_ROOT / "tools" / "plain-english" / "install.sh"
 FIXTURES = Path(__file__).parent / "fixtures"
 
+_MODULE_TEMP_DIR: tempfile.TemporaryDirectory | None = None
+_ORIG_STATE_DIR: str | None = None
+
+
+def setUpModule() -> None:
+    global _MODULE_TEMP_DIR, _ORIG_STATE_DIR
+    _MODULE_TEMP_DIR = tempfile.TemporaryDirectory()
+    _ORIG_STATE_DIR = os.environ.get("PLAIN_ENGLISH_STATE_DIR")
+    os.environ["PLAIN_ENGLISH_STATE_DIR"] = _MODULE_TEMP_DIR.name
+
+
+def tearDownModule() -> None:
+    global _MODULE_TEMP_DIR, _ORIG_STATE_DIR
+    if _ORIG_STATE_DIR is not None:
+        os.environ["PLAIN_ENGLISH_STATE_DIR"] = _ORIG_STATE_DIR
+    else:
+        os.environ.pop("PLAIN_ENGLISH_STATE_DIR", None)
+    if _MODULE_TEMP_DIR is not None:
+        _MODULE_TEMP_DIR.cleanup()
+        _MODULE_TEMP_DIR = None
+
 
 class PlainEnglishCliTests(unittest.TestCase):
     def run_fixture(self, name: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        if "PLAIN_ENGLISH_STATE_DIR" not in env and _MODULE_TEMP_DIR is not None:
+            env["PLAIN_ENGLISH_STATE_DIR"] = _MODULE_TEMP_DIR.name
         return subprocess.run(
             [sys.executable, str(CLI), str(FIXTURES / name)],
             check=False,
             capture_output=True,
             text=True,
+            env=env,
         )
 
     def assert_blocking_check(self, fixture: str, check: str) -> None:

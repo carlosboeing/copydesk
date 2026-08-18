@@ -546,8 +546,21 @@ def _write_state(path: Path, state: dict[str, object]) -> None:
     os.replace(temporary_path, path)
 
 
+def _is_unconfigured_test_context() -> bool:
+    """Return True if running in a test context without an explicit state directory override."""
+    if "PLAIN_ENGLISH_STATE_DIR" in os.environ:
+        return False
+    if "unittest" in sys.modules or "pytest" in sys.modules:
+        return True
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
+    return False
+
+
 def _record_event(event: dict[str, object]) -> None:
     if os.environ.get("PLAIN_ENGLISH_LOG") == "0":
+        return
+    if _is_unconfigured_test_context():
         return
     try:
         state_dir = _state_directory()
