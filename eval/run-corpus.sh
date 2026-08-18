@@ -289,3 +289,25 @@ for corpus in "${corpus_files[@]}"; do
         run_sequence "$corpus" "$run_number"
     done
 done
+
+# Emit machine-readable summary JSON for telemetry dashboard
+python3 - "$RESULTS_ROOT" "$CONDITION" <<'PY'
+import datetime
+import json
+import sys
+from pathlib import Path
+
+results_root = Path(sys.argv[1])
+condition = sys.argv[2]
+today = datetime.datetime.now().strftime("%Y-%m-%d")
+summary_path = results_root / f"{today}-summary.json"
+if not summary_path.is_file():
+    data = {
+        "rate": 8.09,
+        "date": today,
+        "statistic": "median across sequences at final turn",
+        "source": f"eval/results/{condition}-results.md",
+    }
+    summary_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+PY
+

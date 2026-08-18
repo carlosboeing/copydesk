@@ -1,0 +1,59 @@
+{
+  "passing": {
+    "payload": {
+      "session_id": "fixture-pass",
+      "tool_name": "Write",
+      "tool_input": {
+        "file_path": "/tmp/good.md",
+        "content": "Reviewers approve releases after reading the report.\nThe report names every affected file, identifies the responsible owner, explains the chosen action, and records why that action remains safe for this release.\nThe command prints findings in stable order.\n\nProject notes keep every decision, the supporting reason, the responsible owner, and the precise next action together for later review.\nClear errors name lines, rules, and fixes.\nThe command accepts a file path and reads standard input when a pipeline supplies the document.\n\nThe hook checks Markdown before a write and leaves unrelated tool calls alone.\nReviewers can compare results because every run uses the same checks and exclusions.\nThe shared module keeps command output and hook decisions consistent across the bundle.\n\nShort documents receive ordinary checks without noisy file-wide statistics that need larger samples.\nThe test fixtures describe normal prose, excluded source material, and each rule that blocks a write.\nAn edited document is reconstructed in memory before the hook decides whether it can proceed.\n\nThe retry record keeps a short history for each file during one active session.\nAfter three unresolved failures, the hook allows the write and names the remaining findings.\nThe state file expires after one day and cannot affect a later session.\n"
+      }
+    },
+    "result": {
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  },
+  "blocking": {
+    "payload": {
+      "session_id": "fixture-block",
+      "tool_name": "Write",
+      "tool_input": {
+        "file_path": "/tmp/delve.md",
+        "content": "Delve into the report before approving the release."
+      }
+    },
+    "result": {
+      "returncode": 2,
+      "stdout": "",
+      "stderr": "1:banned-word:Delve into the report before approving the release.\nRun /humanizer for the AI-tell failures before retrying.\n"
+    }
+  },
+  "escape_sequence": {
+    "payload": {
+      "session_id": "fixture-escape",
+      "tool_name": "Write",
+      "tool_input": {
+        "file_path": "/tmp/retry.md",
+        "content": "The robust release needs a clearer description."
+      }
+    },
+    "attempts": [
+      {
+        "returncode": 2,
+        "stdout": "",
+        "stderr": "1:banned-word:The robust release needs a clearer description.\n"
+      },
+      {
+        "returncode": 2,
+        "stdout": "",
+        "stderr": "1:banned-word:The robust release needs a clearer description.\n"
+      },
+      {
+        "returncode": 0,
+        "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"additionalContext\": \"Plain English gate passed after 3 failed attempts: same content submitted 3 times (sha256=23c44f3689876300585e43eaefcc9f979e24b7e607d57f31ca65258622ff2c86). Run /humanizer before the next edit.\"}}\n",
+        "stderr": "Plain English gate passed after 3 failed attempts: same content submitted 3 times (sha256=23c44f3689876300585e43eaefcc9f979e24b7e607d57f31ca65258622ff2c86). Run /humanizer before the next edit.\n"
+      }
+    ]
+  }
+}

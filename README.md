@@ -6,13 +6,13 @@ Plain English is the shared Markdown linter for the writing-style experiment. It
 
 | Path | Purpose |
 |---|---|
-| `bin/plain-english` | CLI for Markdown paths or standard input. |
+| `bin/plain-english` | CLI for Markdown paths, stdin, stats, and reports. |
 | `install.sh` | Checkout-only CLI installer; creates a user-local symlink and does not install the skill or hook. |
-| `lib/linter.py` | Vendored linter, shared exclusions, checks, reports, and retry state. |
+| `lib/linter.py` | Vendored linter, shared exclusions, checks, telemetry writer, and summariser. |
 | `hooks/gate.sh` | PreToolUse wrapper for Markdown Write and Edit calls. |
-| `hooks/reminder.sh` | UserPromptSubmit per-turn style reminder hook (47-word précis). |
+| `hooks/reminder.sh` | UserPromptSubmit per-turn style reminder hook (47-word précis) with turn telemetry tick. |
 | `skills/plain-english/SKILL.md` | On-demand check for work written through Bash or outside Claude Code. |
-| `tests/` | Bad, good, and excluded Markdown fixtures with the two required test files. |
+| `tests/` | Bad, good, and excluded Markdown fixtures with automated test suite. |
 
 ## Use from this bundle
 
@@ -24,6 +24,31 @@ printf '%s\n' 'A short sentence has enough words for this check.' | tools/plain-
 ```
 
 It prints each result as `line:check:excerpt`. Errors return exit code 1. Warnings remain visible but do not fail the command.
+
+## Telemetry dashboard and reports
+
+Inspect live telemetry metrics across the gate and CLI surfaces:
+
+```bash
+# Print terminal dashboard for all recorded events
+plain-english stats
+
+# Filter by window (e.g. 30 days, 14 days, or YYYY-MM-DD)
+plain-english stats --since 30d
+
+# Machine-readable JSON summary
+plain-english stats --json
+
+# Generate Markdown report in eval/telemetry/ (or custom destination)
+plain-english report
+plain-english report --out docs/telemetry-report.md
+```
+
+### Telemetry environment variables
+
+- `PLAIN_ENGLISH_LOG=0`: Disables event writing entirely.
+- `PLAIN_ENGLISH_LOG_FLAGGED_TEXT=0`: Logs rule names and line numbers while omitting `flagged_text` snippets for privacy.
+- `PLAIN_ENGLISH_STATE_DIR`: Overrides the default state directory (`~/.claude/plain-english/`).
 
 ## Install the CLI from a checkout
 
