@@ -477,6 +477,131 @@ class TestTelemetry(unittest.TestCase):
             if saved_env is not None:
                 os.environ["PLAIN_ENGLISH_STATE_DIR"] = saved_env
 
+    def test_reminder_word_count_matches_hook_text(self) -> None:
+        script = (HOOK_DIR / "reminder.sh").read_text(encoding="utf-8")
+        body = script.split("cat << 'EOF'\n", 1)[1].split("\nEOF", 1)[0]
+        self.assertEqual(len(body.split()), linter.REMINDER_WORD_COUNT)
+
+    def test_pass_after_block_records_the_attempt_number(self) -> None:
+        target = self.state_dir / "retry_streak.md"
+        target.write_text("Placeholder.\n", encoding="utf-8")
+        blocked = {
+            "session_id": "test-streak",
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(target), "content": "Delve into the report.\n"},
+        }
+        self.assertEqual(linter.run_hook(json.dumps(blocked)), 2)
+        cleaned = {
+            "session_id": "test-streak",
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(target), "content": "Read the report before approving it.\n"},
+        }
+        self.assertEqual(linter.run_hook(json.dumps(cleaned)), 0)
+
+        events = [e for e in linter.read_events(self.state_dir) if e.get("session_id") == "test-streak"]
+        self.assertEqual([e["decision"] for e in events], ["block", "pass"])
+        self.assertEqual(events[0]["streak"], 1)
+        # The pass cleared a block, so it is attempt 2 rather than a first pass.
+        self.assertEqual(events[1]["streak"], 2)
+
+        summary = linter.summarize_events(events)
+        self.assertEqual(summary["work"]["passed_first"], 0)
+        self.assertEqual(summary["cost"]["rework_rewrites"], 1)
+
+    def test_first_pass_keeps_streak_zero(self) -> None:
+        payload = {
+            "session_id": "test-clean-pass",
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/tmp/clean.md", "content": "Read the report before approving it.\n"},
+        }
+        self.assertEqual(linter.run_hook(json.dumps(payload)), 0)
+        event = [e for e in linter.read_events(self.state_dir) if e.get("session_id") == "test-clean-pass"][0]
+        self.assertEqual(event["streak"], 0)
+        self.assertEqual(linter.summarize_events([event])["work"]["passed_first"], 1)
+
+    def test_origin_rollup_survives_the_finding_cap(self) -> None:
+        target = self.state_dir / "capped_origin.md"
+        target.write_text("".join(f"Delve into existing item {i}.\n\n" for i in range(25)), encoding="utf-8")
+        payload = {
+            "session_id": "test-cap-origin",
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(target),
+                "old_string": "Delve into existing item 24.",
+                "new_string": "Delve into a freshly written item.",
+                "replace_all": False,
+            },
+        }
+        self.assertEqual(linter.run_hook(json.dumps(payload)), 2)
+        event = [e for e in linter.read_events(self.state_dir) if e.get("session_id") == "test-cap-origin"][0]
+
+        self.assertEqual(len(event["findings"]), 20)
+        self.assertGreater(event["findings_total"], 20)
+        # Every stored finding is existing, so the capped list alone would call
+        # this an existing-only block. The rollup keeps the one new finding.
+        self.assertTrue(all(f["origin"] == "existing" for f in event["findings"]))
+        self.assertEqual(event["origin_totals"]["new"], 1)
+        self.assertGreater(event["origin_totals"]["existing"], 20)
+
+        summary = linter.summarize_events([event])
+        self.assertEqual(summary["blocks_by_origin"]["mixed"], 1)
+        self.assertEqual(summary["blocks_by_origin"]["existing_only"], 0)
+
+    def test_rule_rollup_counts_findings_beyond_the_cap(self) -> None:
+        payload = {
+            "session_id": "test-cap-rules",
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/tmp/many_rules.md",
+                "content": "\n\n".join(f"Delve into item {i}." for i in range(25)),
+            },
+        }
+        linter.run_hook(json.dumps(payload))
+        event = [e for e in linter.read_events(self.state_dir) if e.get("session_id") == "test-cap-rules"][0]
+        self.assertEqual(event["rule_totals"]["banned-word"], 25)
+        top = linter.summarize_events([event])["top_rules"]
+        self.assertEqual([r for r in top if r["rule"] == "banned-word"][0]["count"], 25)
+
+    def test_cli_lints_excluded_from_gate_metrics(self) -> None:
+        events = [
+            {
+                "ts": 1700000000.0, "event": "lint", "surface": "gate", "tool": "Write",
+                "path": "/p/a.md", "decision": "block", "streak": 1, "payload_words": 10,
+                "origin_totals": {"new": 1}, "rule_totals": {"banned-word": 1},
+                "findings": [{"rule": "banned-word", "severity": "error", "origin": "new"}],
+                "session_id": "s1",
+            },
+            {
+                "ts": 1700000100.0, "event": "lint", "surface": "cli", "tool": None,
+                "path": "/p/b.md", "decision": "block", "streak": 0, "payload_words": 500,
+                "rule_totals": {"sentence-length": 4},
+                "findings": [{"rule": "sentence-length", "severity": "error", "origin": "new"}],
+            },
+        ]
+        summary = linter.summarize_events(events)
+        self.assertEqual(summary["work"]["total_writes"], 1)
+        self.assertEqual(summary["work"]["blocked"], 1)
+        self.assertEqual(summary["blocks_by_origin"]["new_only"], 1)
+        self.assertEqual([r["rule"] for r in summary["rework_by_rule"]], ["banned-word"])
+        self.assertEqual([r["rule"] for r in summary["top_rules"]], ["banned-word"])
+        self.assertEqual(summary["cli"], {"lints": 1, "blocked": 1, "words": 500})
+        # Linter wall time still covers every surface it ran on.
+        self.assertEqual(summary["time"]["runs"], 2)
+
+    def test_summariser_falls_back_to_findings_without_rollups(self) -> None:
+        legacy = {
+            "ts": 1700000000.0, "event": "lint", "surface": "gate", "tool": "Edit",
+            "path": "/p/legacy.md", "decision": "block", "streak": 1, "payload_words": 30,
+            "findings": [
+                {"rule": "banned-word", "severity": "error", "origin": "new"},
+                {"rule": "sentence-length", "severity": "error", "origin": "existing"},
+            ],
+            "session_id": "s-legacy",
+        }
+        summary = linter.summarize_events([legacy])
+        self.assertEqual(summary["blocks_by_origin"]["mixed"], 1)
+        self.assertEqual(sorted(r["rule"] for r in summary["top_rules"]), ["banned-word", "sentence-length"])
+
 
 if __name__ == "__main__":
     unittest.main()

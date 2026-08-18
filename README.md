@@ -10,7 +10,7 @@ Plain English is the shared Markdown linter for the writing-style experiment. It
 | `install.sh` | Checkout-only CLI installer; creates a user-local symlink and does not install the skill or hook. |
 | `lib/linter.py` | Vendored linter, shared exclusions, checks, telemetry writer, and summariser. |
 | `hooks/gate.sh` | PreToolUse wrapper for Markdown Write and Edit calls. |
-| `hooks/reminder.sh` | UserPromptSubmit per-turn style reminder hook (47-word précis) with turn telemetry tick. |
+| `hooks/reminder.sh` | UserPromptSubmit per-turn style reminder hook (49-word précis) with turn telemetry tick. |
 | `skills/plain-english/SKILL.md` | On-demand check for work written through Bash or outside Claude Code. |
 | `tests/` | Bad, good, and excluded Markdown fixtures with automated test suite. |
 

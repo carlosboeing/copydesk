@@ -57,6 +57,9 @@ RETRY_LIMIT = 3
 STATE_TTL_SECONDS = 24 * 60 * 60
 ROTATION_SIZE_BYTES = 8 * 1024 * 1024  # 8 MB
 MAX_STORED_FINDINGS = 20
+# Whitespace-delimited words emitted by hooks/reminder.sh on every user prompt.
+# tests/test_telemetry.py reads the hook and fails if this drifts from the text.
+REMINDER_WORD_COUNT = 49
 
 
 @dataclass(frozen=True)
@@ -473,6 +476,20 @@ def _compute_edit_origins(
     return result
 
 
+def _finding_rollups(findings: list[Finding]) -> dict[str, dict[str, int]]:
+    """Return complete origin and rule counts, taken before the display cap.
+
+    ``_serialize_findings`` keeps only the first ``MAX_STORED_FINDINGS`` entries,
+    so the summariser reads these rollups instead of counting the stored list.
+    """
+    origin_totals: dict[str, int] = {}
+    rule_totals: dict[str, int] = {}
+    for finding in findings:
+        origin_totals[finding.origin] = origin_totals.get(finding.origin, 0) + 1
+        rule_totals[finding.check] = rule_totals.get(finding.check, 0) + 1
+    return {"origin_totals": origin_totals, "rule_totals": rule_totals}
+
+
 def _serialize_findings(findings: list[Finding]) -> list[dict[str, object]]:
     log_text = os.environ.get("PLAIN_ENGLISH_LOG_FLAGGED_TEXT") != "0"
     serialized: list[dict[str, object]] = []
@@ -697,6 +714,7 @@ def run_hook(raw_payload: str) -> int:
         doc_bytes = len(proposed.encode("utf-8"))
         body_sentences = len(_sentence_records(exclude_markdown(proposed)))
         findings_total = len(findings)
+        rollups = _finding_rollups(findings_with_origin)
 
         state_dir = _state_directory()
         now = time.time()
@@ -709,6 +727,14 @@ def run_hook(raw_payload: str) -> int:
             return 0
 
         if not has_blocking_findings(findings):
+            # A pass that clears an earlier block is attempt N, not a first-pass
+            # success. Zero is reserved for a file with no preceding block.
+            cleared = files.get(file_path)
+            cleared_streak = cleared.get("streak", 0) if isinstance(cleared, dict) else 0
+            if not isinstance(cleared_streak, int) or cleared_streak < 1:
+                pass_streak = 0
+            else:
+                pass_streak = cleared_streak + 1
             files.pop(file_path, None)
             _write_state(state_path, state)
             _record_event({
@@ -718,13 +744,15 @@ def run_hook(raw_payload: str) -> int:
                 "tool": tool_name,
                 "path": str(file_path),
                 "decision": "pass",
-                "streak": 0,
+                "streak": pass_streak,
                 "duration_ms": duration_ms,
                 "bytes": doc_bytes,
                 "payload_bytes": payload_bytes,
                 "payload_words": payload_words,
                 "sentences": body_sentences,
                 "findings_total": findings_total,
+                "origin_totals": rollups["origin_totals"],
+                "rule_totals": rollups["rule_totals"],
                 "findings": _serialize_findings(findings_with_origin),
                 "session_id": session_id,
             })
@@ -754,6 +782,8 @@ def run_hook(raw_payload: str) -> int:
                 "payload_words": payload_words,
                 "sentences": body_sentences,
                 "findings_total": findings_total,
+                "origin_totals": rollups["origin_totals"],
+                "rule_totals": rollups["rule_totals"],
                 "findings": _serialize_findings(findings_with_origin),
                 "session_id": session_id,
             })
@@ -780,6 +810,8 @@ def run_hook(raw_payload: str) -> int:
             "payload_words": payload_words,
             "sentences": body_sentences,
             "findings_total": findings_total,
+            "origin_totals": rollups["origin_totals"],
+            "rule_totals": rollups["rule_totals"],
             "findings": _serialize_findings(findings_with_origin),
             "session_id": session_id,
         })
@@ -897,6 +929,47 @@ def get_prevention_summary(
     return None
 
 
+def _counts_from_findings(event: dict[str, object], key: str) -> dict[str, int]:
+    """Count one finding field over the stored list, capped at MAX_STORED_FINDINGS."""
+    counts: dict[str, int] = {}
+    findings = event.get("findings", [])
+    if not isinstance(findings, list):
+        return counts
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        value = str(finding.get(key, "new" if key == "origin" else ""))
+        if value:
+            counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _event_counts(event: dict[str, object], rollup_key: str, finding_key: str) -> dict[str, int]:
+    """Prefer an event's complete rollup, falling back to its capped finding list.
+
+    Events written before rollups existed carry only the capped list, so they
+    stay readable at the accuracy they were recorded with.
+    """
+    rollup = event.get(rollup_key)
+    if isinstance(rollup, dict):
+        counts: dict[str, int] = {}
+        for name, count in rollup.items():
+            try:
+                counts[str(name)] = int(count)
+            except (TypeError, ValueError):
+                continue
+        return counts
+    return _counts_from_findings(event, finding_key)
+
+
+def _event_rule_totals(event: dict[str, object]) -> dict[str, int]:
+    return _event_counts(event, "rule_totals", "rule")
+
+
+def _event_origin_totals(event: dict[str, object]) -> dict[str, int]:
+    return _event_counts(event, "origin_totals", "origin")
+
+
 def summarize_events(
     events: list[dict[str, object]],
     now: Optional[float] = None,
@@ -905,6 +978,10 @@ def summarize_events(
     current_time = now if now is not None else time.time()
     lint_events = [e for e in events if e.get("event") == "lint"]
     turn_events = [e for e in events if e.get("event") == "turn"]
+    # A CLI lint blocks no write and identifies no changed region, so it cannot
+    # answer whether the gate helped. Gate effectiveness reads gate events only.
+    gate_events = [e for e in lint_events if str(e.get("surface", "gate")) != "cli"]
+    cli_events = [e for e in lint_events if str(e.get("surface", "gate")) == "cli"]
 
     if events:
         min_ts = min(float(e.get("ts", current_time)) for e in events)
@@ -917,10 +994,10 @@ def summarize_events(
     end_date = datetime.datetime.fromtimestamp(max_ts).strftime("%Y-%m-%d")
     window_days = max(1, round((max_ts - min_ts) / 86400) + 1) if events else 0
 
-    total_writes = len(lint_events)
-    passed_first = sum(1 for e in lint_events if e.get("decision") == "pass" and int(e.get("streak", 0)) == 0)
-    blocked = sum(1 for e in lint_events if e.get("decision") == "block")
-    escaped = sum(1 for e in lint_events if e.get("decision") == "escape")
+    total_writes = len(gate_events)
+    passed_first = sum(1 for e in gate_events if e.get("decision") == "pass" and int(e.get("streak", 0)) == 0)
+    blocked = sum(1 for e in gate_events if e.get("decision") == "block")
+    escaped = sum(1 for e in gate_events if e.get("decision") == "escape")
 
     passed_first_rate = (passed_first / total_writes * 100) if total_writes else 0.0
     blocked_rate = (blocked / total_writes * 100) if total_writes else 0.0
@@ -942,19 +1019,17 @@ def summarize_events(
     rework_words = 0
     session_file_rework: dict[tuple[str, str], list[int]] = {}
 
-    for e in lint_events:
+    for e in gate_events:
         decision = e.get("decision")
         streak = int(e.get("streak", 0))
         p_words = int(e.get("payload_words", 0))
         file_path = str(e.get("path", ""))
         session_id = str(e.get("session_id", ""))
-        findings = e.get("findings", [])
-        if isinstance(findings, list):
-            for f in findings:
-                if isinstance(f, dict):
-                    rule = str(f.get("rule", ""))
-                    if rule:
-                        top_rules_counts[rule] = top_rules_counts.get(rule, 0) + 1
+        rule_totals = _event_rule_totals(e)
+        origin_totals = _event_origin_totals(e)
+
+        for rule, count in rule_totals.items():
+            top_rules_counts[rule] = top_rules_counts.get(rule, 0) + count
 
         if streak > 1:
             rework_rewrites += 1
@@ -966,32 +1041,21 @@ def summarize_events(
 
         if decision == "block":
             file_block_counts[file_path] = file_block_counts.get(file_path, 0) + 1
-            origins = []
-            block_rules = set()
-            if isinstance(findings, list):
-                for f in findings:
-                    if isinstance(f, dict):
-                        orig = str(f.get("origin", "new"))
-                        origins.append(orig)
-                        rule = str(f.get("rule", ""))
-                        if rule:
-                            block_rules.add(rule)
+            new_count = origin_totals.get("new", 0)
+            existing_count = origin_totals.get("existing", 0)
 
             is_false = False
-            if origins:
-                if all(o == "new" for o in origins):
-                    new_only_blocks += 1
-                elif all(o == "existing" for o in origins):
-                    existing_only_blocks += 1
-                    is_false = True
-                    file_existing_counts[file_path] = file_existing_counts.get(file_path, 0) + 1
-                else:
-                    mixed_blocks += 1
-                    is_false = True
-            else:
+            if not existing_count:
                 new_only_blocks += 1
+            elif not new_count:
+                existing_only_blocks += 1
+                is_false = True
+                file_existing_counts[file_path] = file_existing_counts.get(file_path, 0) + 1
+            else:
+                mixed_blocks += 1
+                is_false = True
 
-            for r in block_rules:
+            for r in rule_totals:
                 rework_by_rule_counts[r] = rework_by_rule_counts.get(r, 0) + 1
                 rework_by_rule_words[r] = rework_by_rule_words.get(r, 0) + p_words
                 if is_false:
@@ -1022,7 +1086,7 @@ def summarize_events(
         p50, p95, total_time_s = 0.0, 0.0, 0.0
 
     weekly_events: dict[str, list[dict[str, object]]] = {}
-    for e in lint_events:
+    for e in gate_events:
         ts = float(e.get("ts", 0))
         dt = datetime.datetime.fromtimestamp(ts)
         monday = dt - datetime.timedelta(days=dt.weekday())
@@ -1068,6 +1132,9 @@ def summarize_events(
             if not all("flagged_text" in f for f in findings if isinstance(f, dict)):
                 events_missing_flagged_text += 1
 
+    cli_blocked = sum(1 for e in cli_events if e.get("decision") == "block")
+    cli_words = sum(int(e.get("payload_words", 0)) for e in cli_events)
+
     prevention = get_prevention_summary(prevention_dir, now=current_time)
 
     return {
@@ -1075,7 +1142,8 @@ def summarize_events(
         "end_date": end_date,
         "days": window_days,
         "total_events": len(events),
-        "lint_events_count": total_writes,
+        "lint_events_count": len(lint_events),
+        "gate_events_count": total_writes,
         "turn_events_count": len(turn_events),
         "work": {
             "total_writes": total_writes,
@@ -1097,12 +1165,18 @@ def summarize_events(
             "p50_ms": p50,
             "p95_ms": p95,
             "total_s": total_time_s,
-            "runs": total_writes,
+            "runs": len(lint_events),
+        },
+        "cli": {
+            "lints": len(cli_events),
+            "blocked": cli_blocked,
+            "words": cli_words,
         },
         "cost": {
             "reminder_turns": len(turn_events),
-            "reminder_words": len(turn_events) * 76,
-            "reminder_tokens_est": round(len(turn_events) * 76 * 4 / 3),
+            "reminder_word_count": REMINDER_WORD_COUNT,
+            "reminder_words": len(turn_events) * REMINDER_WORD_COUNT,
+            "reminder_tokens_est": round(len(turn_events) * REMINDER_WORD_COUNT * 4 / 3),
             "rework_rewrites": rework_rewrites,
             "rework_words": rework_words,
             "rework_tokens_est": round(rework_words * 4 / 3),
@@ -1116,7 +1190,7 @@ def summarize_events(
         "flagged_text_opt_out": {
             "active": events_missing_flagged_text > 0,
             "missing_events": events_missing_flagged_text,
-            "total_events": total_writes,
+            "total_events": len(lint_events),
         },
     }
 
@@ -1144,7 +1218,7 @@ def format_stats_terminal(summary: dict[str, object]) -> str:
     work = summary["work"]
     assert isinstance(work, dict)
     lines.append("Work")
-    lines.append(f"  Markdown writes seen          {work['total_writes']:>3}")
+    lines.append(f"  Markdown writes seen          {work['total_writes']:>3}   gate only; CLI lints counted separately")
     lines.append(f"  Passed first time             {work['passed_first']:>3}   {work['passed_first_rate']:>5.1f}%")
     lines.append(f"  Blocked                        {work['blocked']:>3}   {work['blocked_rate']:>5.1f}%")
     lines.append(f"  Escaped after 3 attempts        {work['escaped']:>3}")
@@ -1178,6 +1252,13 @@ def format_stats_terminal(summary: dict[str, object]) -> str:
     lines.append("")
     lines.append("  Word counts are measured. Token figures are estimated at 4 characters each.")
     lines.append("")
+
+    cli = summary.get("cli")
+    if isinstance(cli, dict) and int(cli.get("lints", 0)) > 0:
+        lines.append("CLI lints (not gate activity)")
+        lines.append(f"  {cli['lints']} runs, {cli['blocked']} with blocking findings, {int(cli['words']):,} words linted")
+        lines.append("  Excluded from the work, origin and rework figures above.")
+        lines.append("")
 
     rework_by_rule = summary.get("rework_by_rule", [])
     if isinstance(rework_by_rule, list) and rework_by_rule:
@@ -1253,6 +1334,8 @@ def format_report_markdown(summary: dict[str, object]) -> str:
     assert isinstance(work, dict)
     lines.append("## Work")
     lines.append("")
+    lines.append("Gate events only. CLI lints block no write, so they are reported separately.")
+    lines.append("")
     lines.append("| Measure | Count | Rate |")
     lines.append("|---|---:|---:|")
     lines.append(f"| Markdown writes seen | {work['total_writes']} | |")
@@ -1283,7 +1366,7 @@ def format_report_markdown(summary: dict[str, object]) -> str:
     assert isinstance(cost, dict)
     lines.append("## Cost")
     lines.append("")
-    lines.append(f"Reminder injection is exact: {cost['reminder_turns']:,} turns at 76 words each.")
+    lines.append(f"Reminder injection is exact: {cost['reminder_turns']:,} turns at {cost['reminder_word_count']} words each.")
     lines.append("Re-authoring is estimated from document size and is marked as an estimate.")
     lines.append("")
     lines.append("| Measure | Count | Words | Tokens |")
@@ -1291,6 +1374,14 @@ def format_report_markdown(summary: dict[str, object]) -> str:
     lines.append(f"| Reminder | {cost['reminder_turns']:,} turns | {cost['reminder_words']:,} words | {_format_token_k(int(cost['reminder_tokens_est']))} input tokens |")
     lines.append(f"| Rework | {cost['rework_rewrites']} rewrites | {cost['rework_words']:,} words | {_format_token_k(int(cost['rework_tokens_est']))} output tokens |")
     lines.append("")
+
+    cli = summary.get("cli")
+    if isinstance(cli, dict) and int(cli.get("lints", 0)) > 0:
+        lines.append("## CLI lints")
+        lines.append("")
+        lines.append(f"{cli['lints']} runs, {cli['blocked']} with blocking findings, {int(cli['words']):,} words linted.")
+        lines.append("A CLI run blocks no write and identifies no changed region, so it is excluded from the figures above.")
+        lines.append("")
 
     rework_by_rule = summary.get("rework_by_rule", [])
     if isinstance(rework_by_rule, list) and rework_by_rule:

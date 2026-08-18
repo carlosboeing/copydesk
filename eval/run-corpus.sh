@@ -290,24 +290,80 @@ for corpus in "${corpus_files[@]}"; do
     done
 done
 
-# Emit machine-readable summary JSON for telemetry dashboard
-python3 - "$RESULTS_ROOT" "$CONDITION" <<'PY'
+# Measure this run's blocking-violation rate and emit the summary JSON the
+# telemetry dashboard reads. The rate is derived from the transcripts just
+# captured, never carried over from an earlier run.
+python3 - "$EVAL_DIR" "$RESULTS_ROOT" "$CONDITION" "$HARNESS" "$RUNS" <<'PY'
 import datetime
+import importlib.util
 import json
+import re
+import statistics
 import sys
 from pathlib import Path
 
-results_root = Path(sys.argv[1])
-condition = sys.argv[2]
+eval_dir = Path(sys.argv[1])
+results_root = Path(sys.argv[2])
+condition, harness, runs = sys.argv[3], sys.argv[4], int(sys.argv[5])
+
+sys.path.insert(0, str(eval_dir.parent / "lib"))
+import linter  # noqa: E402
+
+# The extractor's filename contains a hyphen, so load it by path.
+spec = importlib.util.spec_from_file_location("extract_transcripts", eval_dir / "extract-transcripts.py")
+extract_transcripts = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(extract_transcripts)
+
+WORD = re.compile(r"[A-Za-z0-9'’-]+")
+
+
+def final_turn_measurement(transcript):
+    """Blocking findings per 1,000 qualifying words in the last turn's chat."""
+    streams = extract_transcripts.extract_file(harness, transcript)
+    chat = streams.get("chat") or {}
+    if not chat:
+        return None
+    turn = max(chat)
+    text = "\n\n".join(chat[turn])
+    if not text.strip():
+        return None
+    words = len(WORD.findall(linter.exclude_markdown(text)))
+    if not words:
+        return None
+    blocking = sum(1 for f in linter.lint(text) if f.severity == "error")
+    return {"turn": turn, "words": words, "blocking": blocking, "rate": round(blocking / words * 1000, 2)}
+
+
+transcript_name = {"claude": "claude-session.jsonl", "codex": "codex-session.jsonl", "kimi": "kimi-session.jsonl"}[harness]
+measured = []
+for transcript in sorted((results_root / condition / harness).glob(f"*/run-*/{transcript_name}")):
+    try:
+        entry = final_turn_measurement(transcript)
+    except (OSError, ValueError, KeyError):
+        entry = None
+    if entry is not None:
+        entry["sequence"] = transcript.parent.parent.name
+        entry["run"] = transcript.parent.name
+        measured.append(entry)
+
+if not measured:
+    print("no transcripts measured; skipping summary JSON", file=sys.stderr)
+    raise SystemExit(0)
+
 today = datetime.datetime.now().strftime("%Y-%m-%d")
-summary_path = results_root / f"{today}-summary.json"
-if not summary_path.is_file():
-    data = {
-        "rate": 8.09,
-        "date": today,
-        "statistic": "median across sequences at final turn",
-        "source": f"eval/results/{condition}-results.md",
-    }
-    summary_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+data = {
+    "rate": round(statistics.median([item["rate"] for item in measured]), 2),
+    "date": today,
+    "statistic": "median across sequence runs of blocking findings per 1,000 words at the final turn",
+    "source": f"eval/results/{condition}-results.md",
+    "condition": condition,
+    "harness": harness,
+    "runs_per_sequence": runs,
+    "measured": measured,
+}
+# Overwrite rather than skip: a second condition on the same day must not leave
+# the first run's rate in place under this date.
+(results_root / f"{today}-summary.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+print(f"summary: rate={data['rate']} across {len(measured)} sequence runs ({condition}/{harness})")
 PY
 

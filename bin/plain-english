@@ -123,10 +123,9 @@ def main(argv: list[str] | None = None) -> int:
         body_sentences = len(linter._sentence_records(linter.exclude_markdown(text)))
         is_blocked = linter.has_blocking_findings(findings)
 
-        findings_with_origin = [
-            linter.Finding(f.line, f.check, f.excerpt, f.severity, origin="new")
-            for f in findings
-        ]
+        # A CLI run lints a whole document with no edit region, so it carries no
+        # origin rollup. The summariser reads origins from gate events only.
+        rollups = linter._finding_rollups(findings)
 
         linter._record_event({
             "ts": round(time.time(), 1),
@@ -142,7 +141,8 @@ def main(argv: list[str] | None = None) -> int:
             "payload_words": doc_words,
             "sentences": body_sentences,
             "findings_total": len(findings),
-            "findings": linter._serialize_findings(findings_with_origin),
+            "rule_totals": rollups["rule_totals"],
+            "findings": linter._serialize_findings(findings),
         })
 
         if findings:

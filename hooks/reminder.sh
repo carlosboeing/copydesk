@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Plain English per-turn chat reminder for Claude Code UserPromptSubmit hook.
-# Hand-written précis (47 words) reinforcing style against long-session decay.
+# Hand-written précis (49 words) reinforcing style against long-session decay.
+# linter.REMINDER_WORD_COUNT must match; tests/test_telemetry.py checks it.
 
 set -u
 
