@@ -392,13 +392,22 @@ class TestTelemetry(unittest.TestCase):
             },
         ]
         summary = linter.summarize_events(events)
-        self.assertEqual(summary["work"]["total_writes"], 5)
-        self.assertEqual(summary["blocks_by_origin"]["new_only"], 2)
+        # Five gate events, but fileA's second block and its passing retry are
+        # the same document again, so three documents were written.
+        self.assertEqual(summary["work"]["total_writes"], 3)
+        self.assertEqual(summary["work"]["blocked"], 3)
+        self.assertEqual(summary["blocks_by_origin"]["new_only"], 1)
         self.assertEqual(summary["blocks_by_origin"]["existing_only"], 1)
         self.assertEqual(summary["blocks_by_origin"]["mixed"], 1)
         self.assertEqual(summary["blocks_by_origin"]["unresolvable_count"], 2)
+        # The three-way split accounts for every block the headline counts.
+        origin = summary["blocks_by_origin"]
+        self.assertEqual(
+            origin["new_only"] + origin["mixed"] + origin["existing_only"],
+            summary["work"]["blocked"],
+        )
 
-        # Rework: attempts with streak > 0 are attempt 2 (100 words), attempt 3 (90 words)
+        # Rework: attempts with streak > 1 are attempt 2 (100 words), attempt 3 (90 words)
         self.assertEqual(summary["cost"]["rework_rewrites"], 2)
         self.assertEqual(summary["cost"]["rework_words"], 190)
 
@@ -523,6 +532,47 @@ class TestTelemetry(unittest.TestCase):
         event = [e for e in linter.read_events(self.state_dir) if e.get("session_id") == "test-clean-pass"][0]
         self.assertEqual(event["streak"], 0)
         self.assertEqual(linter.summarize_events([event])["work"]["passed_first"], 1)
+
+    def test_block_rate_counts_first_attempts_not_retries(self) -> None:
+        def gate(ts: float, decision: str, streak: int, words: int) -> dict:
+            return {
+                "ts": ts, "event": "lint", "surface": "gate", "tool": "Write",
+                "path": "/p/a.md", "decision": decision, "streak": streak,
+                "payload_words": words, "session_id": "s1",
+                "origin_totals": {"new": 1}, "rule_totals": {"banned-word": 1},
+                "blocking_origin_totals": {"new": 1},
+                "blocking_rule_totals": {"banned-word": 1},
+                "findings": [],
+            }
+
+        # One document, blocked on its first attempt and passing on the retry.
+        summary = linter.summarize_events([
+            gate(1700000000.0, "block", 1, 100),
+            gate(1700000010.0, "pass", 2, 90),
+        ])
+        self.assertEqual(summary["work"]["total_writes"], 1)
+        self.assertEqual(summary["work"]["blocked"], 1)
+        self.assertEqual(summary["work"]["blocked_rate"], 100.0)
+        self.assertEqual(summary["work"]["passed_first"], 0)
+        self.assertEqual(summary["work"]["passed_first_rate"], 0.0)
+        # The retry is still priced, and the weekly rate matches the headline.
+        self.assertEqual(summary["cost"]["rework_rewrites"], 1)
+        self.assertEqual(summary["cost"]["rework_words"], 90)
+        self.assertEqual([w["rate"] for w in summary["weekly_rates"]], [100.0])
+        # Both gate events are still recorded; only the work basis narrowed.
+        self.assertEqual(summary["gate_events_count"], 2)
+
+        # An escape ends a cycle rather than starting one, so it adds no write.
+        escaped = linter.summarize_events([
+            gate(1700000100.0, "block", 1, 100),
+            gate(1700000110.0, "block", 2, 100),
+            gate(1700000120.0, "escape", 3, 100),
+        ])
+        self.assertEqual(escaped["work"]["total_writes"], 1)
+        self.assertEqual(escaped["work"]["blocked"], 1)
+        self.assertEqual(escaped["work"]["escaped"], 1)
+        self.assertEqual(escaped["work"]["escaped_rate"], 100.0)
+        self.assertEqual(escaped["blocks_by_origin"]["new_only"], 1)
 
     def test_origin_rollup_survives_the_finding_cap(self) -> None:
         target = self.state_dir / "capped_origin.md"

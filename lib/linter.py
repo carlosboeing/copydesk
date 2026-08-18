@@ -1014,6 +1014,14 @@ def _event_counts(
     return _counts_from_findings(event, finding_key, blocking_only=blocking_only)
 
 
+def _event_streak(event: dict[str, object]) -> int:
+    """Return an event's attempt number, treating an unreadable value as zero."""
+    try:
+        return int(event.get("streak", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _event_rule_totals(event: dict[str, object]) -> dict[str, int]:
     return _event_counts(event, "rule_totals", "rule")
 
@@ -1050,9 +1058,15 @@ def summarize_events(
     end_date = datetime.datetime.fromtimestamp(max_ts).strftime("%Y-%m-%d")
     window_days = max(1, round((max_ts - min_ts) / 86400) + 1) if events else 0
 
-    total_writes = len(gate_events)
-    passed_first = sum(1 for e in gate_events if e.get("decision") == "pass" and int(e.get("streak", 0)) == 0)
-    blocked = sum(1 for e in gate_events if e.get("decision") == "block")
+    # Work counts first attempts alone: a pass at streak 0, a block at streak 1.
+    # A retry re-sends a document the gate already saw, so counting it as a new
+    # write would lower the block rate every time a block gets resolved. Retries
+    # are priced in the rework figures instead.
+    initial_events = [e for e in gate_events if _event_streak(e) <= 1]
+
+    total_writes = len(initial_events)
+    passed_first = sum(1 for e in initial_events if e.get("decision") == "pass" and _event_streak(e) == 0)
+    blocked = sum(1 for e in initial_events if e.get("decision") == "block")
     escaped = sum(1 for e in gate_events if e.get("decision") == "escape")
 
     passed_first_rate = (passed_first / total_writes * 100) if total_writes else 0.0
@@ -1080,7 +1094,7 @@ def summarize_events(
 
     for e in sorted(gate_events, key=lambda ev: float(ev.get("ts", 0))):
         decision = e.get("decision")
-        streak = int(e.get("streak", 0))
+        streak = _event_streak(e)
         p_words = int(e.get("payload_words", 0))
         file_path = str(e.get("path", ""))
         session_id = str(e.get("session_id", ""))
@@ -1111,20 +1125,23 @@ def summarize_events(
 
         if decision == "block":
             pending_block_rules[key] = list(blocking_rule_totals)
-            file_block_counts[file_path] = file_block_counts.get(file_path, 0) + 1
             new_count = blocking_origin_totals.get("new", 0)
             existing_count = blocking_origin_totals.get("existing", 0)
+            is_false = bool(existing_count)
 
-            is_false = False
-            if not existing_count:
-                new_only_blocks += 1
-            elif not new_count:
-                existing_only_blocks += 1
-                is_false = True
-                file_existing_counts[file_path] = file_existing_counts.get(file_path, 0) + 1
-            else:
-                mixed_blocks += 1
-                is_false = True
+            # The origin split and the per-file counts read first blocks alone,
+            # so they keep summing to the block total above. The per-rule
+            # columns below count every firing, retries included, because they
+            # measure how often a rule fires rather than how often work began.
+            if streak <= 1:
+                file_block_counts[file_path] = file_block_counts.get(file_path, 0) + 1
+                if not existing_count:
+                    new_only_blocks += 1
+                elif not new_count:
+                    existing_only_blocks += 1
+                    file_existing_counts[file_path] = file_existing_counts.get(file_path, 0) + 1
+                else:
+                    mixed_blocks += 1
 
             for r in blocking_rule_totals:
                 rework_by_rule_counts[r] = rework_by_rule_counts.get(r, 0) + 1
@@ -1156,8 +1173,10 @@ def summarize_events(
     else:
         p50, p95, total_time_s = 0.0, 0.0, 0.0
 
+    # Weekly rates use the same basis as the headline block rate, so a week of
+    # heavy retrying does not read as a week of falling blocks.
     weekly_events: dict[str, list[dict[str, object]]] = {}
-    for e in gate_events:
+    for e in initial_events:
         ts = float(e.get("ts", 0))
         dt = datetime.datetime.fromtimestamp(ts)
         monday = dt - datetime.timedelta(days=dt.weekday())
@@ -1214,7 +1233,7 @@ def summarize_events(
         "days": window_days,
         "total_events": len(events),
         "lint_events_count": len(lint_events),
-        "gate_events_count": total_writes,
+        "gate_events_count": len(gate_events),
         "turn_events_count": len(turn_events),
         "work": {
             "total_writes": total_writes,
@@ -1297,7 +1316,7 @@ def format_stats_terminal(summary: dict[str, object]) -> str:
     work = summary["work"]
     assert isinstance(work, dict)
     lines.append("Work")
-    lines.append(f"  Markdown writes seen          {work['total_writes']:>3}   gate only; CLI lints counted separately")
+    lines.append(f"  Markdown writes seen          {work['total_writes']:>3}   gate first attempts; retries and CLI lints counted separately")
     lines.append(f"  Passed first time             {work['passed_first']:>3}   {work['passed_first_rate']:>5.1f}%")
     lines.append(f"  Blocked                        {work['blocked']:>3}   {work['blocked_rate']:>5.1f}%")
     lines.append(f"  Escaped after 3 attempts        {work['escaped']:>3}")
@@ -1418,7 +1437,7 @@ def format_report_markdown(summary: dict[str, object], source: Optional[Path] = 
     assert isinstance(work, dict)
     lines.append("## Work")
     lines.append("")
-    lines.append("Gate events only. CLI lints block no write, so they are reported separately.")
+    lines.append("Gate events only, counting first attempts. A retry is rework rather than a new write. A CLI lint blocks no write, so it is reported separately.")
     lines.append("")
     lines.append("| Measure | Count | Rate |")
     lines.append("|---|---:|---:|")
