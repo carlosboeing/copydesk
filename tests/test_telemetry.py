@@ -597,6 +597,8 @@ class TestTelemetry(unittest.TestCase):
                 "payload_words": words, "session_id": "s1",
                 "origin_totals": {"new": 1},
                 "rule_totals": {r: 1 for r in rules},
+                "blocking_origin_totals": {"new": 1},
+                "blocking_rule_totals": {r: 1 for r in rules},
                 "findings": [],
             }
 
@@ -665,6 +667,95 @@ class TestTelemetry(unittest.TestCase):
         summary = linter.summarize_events([legacy])
         self.assertEqual(summary["blocks_by_origin"]["mixed"], 1)
         self.assertEqual(sorted(r["rule"] for r in summary["top_rules"]), ["banned-word", "sentence-length"])
+
+    def test_untouched_warning_does_not_make_a_block_mixed(self) -> None:
+        target = self.state_dir / "warning_origin.md"
+        target.write_text(
+            "Line one is clean and short.\n\n"
+            "The team wrote a sentence that runs on for more than twenty-five words in total, "
+            "which trips the warning threshold without ever reaching the error threshold that "
+            "blocks a write here.\n",
+            encoding="utf-8",
+        )
+        payload = {
+            "session_id": "test-warning-origin",
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(target),
+                "old_string": "Line one is clean and short.",
+                "new_string": "Delve into line one.",
+                "replace_all": False,
+            },
+        }
+        self.assertEqual(linter.run_hook(json.dumps(payload)), 2)
+        event = [e for e in linter.read_events(self.state_dir) if e.get("session_id") == "test-warning-origin"][0]
+
+        # The untouched long sentence is a warning, so it appears in the full
+        # rollup and is absent from the blocking one.
+        self.assertEqual(event["origin_totals"], {"new": 1, "existing": 1})
+        self.assertEqual(event["blocking_origin_totals"], {"new": 1})
+        self.assertEqual(event["blocking_rule_totals"], {"banned-word": 1})
+
+        summary = linter.summarize_events([event])
+        self.assertEqual(summary["blocks_by_origin"]["new_only"], 1)
+        self.assertEqual(summary["blocks_by_origin"]["mixed"], 0)
+        self.assertEqual(summary["blocks_by_origin"]["unresolvable_count"], 0)
+        # sentence-length blocked nothing, so it is charged no rework.
+        self.assertEqual([r["rule"] for r in summary["rework_by_rule"]], ["banned-word"])
+
+    def test_warning_rule_is_not_charged_for_a_retry(self) -> None:
+        def gate(ts: float, decision: str, streak: int, words: int) -> dict:
+            return {
+                "ts": ts, "event": "lint", "surface": "gate", "tool": "Edit",
+                "path": "/p/a.md", "decision": decision, "streak": streak,
+                "payload_words": words, "session_id": "s1",
+                "rule_totals": {"banned-word": 1, "sentence-length": 1},
+                "blocking_rule_totals": {"banned-word": 1},
+                "origin_totals": {"new": 1, "existing": 1},
+                "blocking_origin_totals": {"new": 1},
+                "findings": [],
+            }
+
+        summary = linter.summarize_events([
+            gate(1700000000.0, "block", 1, 100),
+            gate(1700000010.0, "pass", 2, 90),
+        ])
+        rows = {str(r["rule"]): r for r in summary["rework_by_rule"]}
+        self.assertEqual(list(rows), ["banned-word"])
+        self.assertEqual(rows["banned-word"]["words_resent"], 90)
+        # The warning still counts as a finding the linter reported.
+        self.assertEqual(
+            sorted(r["rule"] for r in summary["top_rules"]),
+            ["banned-word", "sentence-length"],
+        )
+
+    def test_invalid_since_window_is_an_error(self) -> None:
+        with self.assertRaises(ValueError):
+            linter.read_events(self.state_dir, since="30")
+        with self.assertRaises(ValueError):
+            linter.read_events(self.state_dir, since="last tuesday")
+        # A window the parser understands still filters rather than raising.
+        self.assertEqual(linter.read_events(self.state_dir, since="30d"), [])
+
+        for command in (["stats", "--since", "30"], ["report", "--since", "30"]):
+            result = subprocess.run(
+                [sys.executable, str(BIN_PATH), *command],
+                capture_output=True,
+                text=True,
+                env=os.environ,
+            )
+            self.assertEqual(result.returncode, 64, f"{command} should reject the window")
+            self.assertIn("30", result.stderr)
+            self.assertEqual(result.stdout, "")
+
+    def test_report_names_the_configured_event_log(self) -> None:
+        linter.record_turn_event("source-path")
+        events = linter.read_events(self.state_dir)
+        content = linter.format_report_markdown(linter.summarize_events(events))
+
+        expected = linter._display_path(self.state_dir / "events.jsonl")
+        self.assertIn(f"Source: {expected}", content)
+        self.assertNotIn("~/.claude/plain-english/events.jsonl", content)
 
 
 if __name__ == "__main__":

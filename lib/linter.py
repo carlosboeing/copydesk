@@ -481,13 +481,27 @@ def _finding_rollups(findings: list[Finding]) -> dict[str, dict[str, int]]:
 
     ``_serialize_findings`` keeps only the first ``MAX_STORED_FINDINGS`` entries,
     so the summariser reads these rollups instead of counting the stored list.
+
+    The ``blocking_`` pair counts error-severity findings alone, because only an
+    error blocks a write. A warning left untouched in the rest of the document
+    must not make a block read as mixed, and must not be charged for rework.
     """
     origin_totals: dict[str, int] = {}
     rule_totals: dict[str, int] = {}
+    blocking_origin_totals: dict[str, int] = {}
+    blocking_rule_totals: dict[str, int] = {}
     for finding in findings:
         origin_totals[finding.origin] = origin_totals.get(finding.origin, 0) + 1
         rule_totals[finding.check] = rule_totals.get(finding.check, 0) + 1
-    return {"origin_totals": origin_totals, "rule_totals": rule_totals}
+        if finding.severity == "error":
+            blocking_origin_totals[finding.origin] = blocking_origin_totals.get(finding.origin, 0) + 1
+            blocking_rule_totals[finding.check] = blocking_rule_totals.get(finding.check, 0) + 1
+    return {
+        "origin_totals": origin_totals,
+        "rule_totals": rule_totals,
+        "blocking_origin_totals": blocking_origin_totals,
+        "blocking_rule_totals": blocking_rule_totals,
+    }
 
 
 def _serialize_findings(findings: list[Finding]) -> list[dict[str, object]]:
@@ -753,6 +767,8 @@ def run_hook(raw_payload: str) -> int:
                 "findings_total": findings_total,
                 "origin_totals": rollups["origin_totals"],
                 "rule_totals": rollups["rule_totals"],
+                "blocking_origin_totals": rollups["blocking_origin_totals"],
+                "blocking_rule_totals": rollups["blocking_rule_totals"],
                 "findings": _serialize_findings(findings_with_origin),
                 "session_id": session_id,
             })
@@ -784,6 +800,8 @@ def run_hook(raw_payload: str) -> int:
                 "findings_total": findings_total,
                 "origin_totals": rollups["origin_totals"],
                 "rule_totals": rollups["rule_totals"],
+                "blocking_origin_totals": rollups["blocking_origin_totals"],
+                "blocking_rule_totals": rollups["blocking_rule_totals"],
                 "findings": _serialize_findings(findings_with_origin),
                 "session_id": session_id,
             })
@@ -812,6 +830,8 @@ def run_hook(raw_payload: str) -> int:
             "findings_total": findings_total,
             "origin_totals": rollups["origin_totals"],
             "rule_totals": rollups["rule_totals"],
+            "blocking_origin_totals": rollups["blocking_origin_totals"],
+            "blocking_rule_totals": rollups["blocking_rule_totals"],
             "findings": _serialize_findings(findings_with_origin),
             "session_id": session_id,
         })
@@ -898,8 +918,11 @@ def read_events(
     if since:
         current_time = now if now is not None else time.time()
         cutoff = _parse_since(since, current_time)
-        if cutoff is not None:
-            events = [e for e in events if float(e.get("ts", 0)) >= cutoff]
+        if cutoff is None:
+            # Falling back to every event would present an unfiltered report as
+            # a windowed one, so an unreadable window is an error, not a default.
+            raise ValueError(f"unrecognised --since value {since!r}: expected <N>d or YYYY-MM-DD")
+        events = [e for e in events if float(e.get("ts", 0)) >= cutoff]
 
     return events
 
@@ -951,7 +974,7 @@ def get_prevention_summary(
     return None
 
 
-def _counts_from_findings(event: dict[str, object], key: str) -> dict[str, int]:
+def _counts_from_findings(event: dict[str, object], key: str, blocking_only: bool = False) -> dict[str, int]:
     """Count one finding field over the stored list, capped at MAX_STORED_FINDINGS."""
     counts: dict[str, int] = {}
     findings = event.get("findings", [])
@@ -960,13 +983,20 @@ def _counts_from_findings(event: dict[str, object], key: str) -> dict[str, int]:
     for finding in findings:
         if not isinstance(finding, dict):
             continue
+        if blocking_only and str(finding.get("severity", "")) != "error":
+            continue
         value = str(finding.get(key, "new" if key == "origin" else ""))
         if value:
             counts[value] = counts.get(value, 0) + 1
     return counts
 
 
-def _event_counts(event: dict[str, object], rollup_key: str, finding_key: str) -> dict[str, int]:
+def _event_counts(
+    event: dict[str, object],
+    rollup_key: str,
+    finding_key: str,
+    blocking_only: bool = False,
+) -> dict[str, int]:
     """Prefer an event's complete rollup, falling back to its capped finding list.
 
     Events written before rollups existed carry only the capped list, so they
@@ -981,15 +1011,19 @@ def _event_counts(event: dict[str, object], rollup_key: str, finding_key: str) -
             except (TypeError, ValueError):
                 continue
         return counts
-    return _counts_from_findings(event, finding_key)
+    return _counts_from_findings(event, finding_key, blocking_only=blocking_only)
 
 
 def _event_rule_totals(event: dict[str, object]) -> dict[str, int]:
     return _event_counts(event, "rule_totals", "rule")
 
 
-def _event_origin_totals(event: dict[str, object]) -> dict[str, int]:
-    return _event_counts(event, "origin_totals", "origin")
+def _event_blocking_rule_totals(event: dict[str, object]) -> dict[str, int]:
+    return _event_counts(event, "blocking_rule_totals", "rule", blocking_only=True)
+
+
+def _event_blocking_origin_totals(event: dict[str, object]) -> dict[str, int]:
+    return _event_counts(event, "blocking_origin_totals", "origin", blocking_only=True)
 
 
 def summarize_events(
@@ -1051,7 +1085,11 @@ def summarize_events(
         file_path = str(e.get("path", ""))
         session_id = str(e.get("session_id", ""))
         rule_totals = _event_rule_totals(e)
-        origin_totals = _event_origin_totals(e)
+        # Origin and rework read the blocking subset. A warning changes nothing
+        # about whether the write went through, so it cannot make a block
+        # unresolvable and cannot charge its rule for the retry.
+        blocking_rule_totals = _event_blocking_rule_totals(e)
+        blocking_origin_totals = _event_blocking_origin_totals(e)
         key = (session_id, file_path)
 
         for rule, count in rule_totals.items():
@@ -1072,10 +1110,10 @@ def summarize_events(
                 rework_by_rule_words[rule] = rework_by_rule_words.get(rule, 0) + p_words
 
         if decision == "block":
-            pending_block_rules[key] = list(rule_totals)
+            pending_block_rules[key] = list(blocking_rule_totals)
             file_block_counts[file_path] = file_block_counts.get(file_path, 0) + 1
-            new_count = origin_totals.get("new", 0)
-            existing_count = origin_totals.get("existing", 0)
+            new_count = blocking_origin_totals.get("new", 0)
+            existing_count = blocking_origin_totals.get("existing", 0)
 
             is_false = False
             if not existing_count:
@@ -1088,7 +1126,7 @@ def summarize_events(
                 mixed_blocks += 1
                 is_false = True
 
-            for r in rule_totals:
+            for r in blocking_rule_totals:
                 rework_by_rule_counts[r] = rework_by_rule_counts.get(r, 0) + 1
                 rework_by_rule_words.setdefault(r, 0)
                 if is_false:
@@ -1234,6 +1272,14 @@ def _format_token_k(tokens: int) -> str:
     return f"~{tokens}"
 
 
+def _display_path(path: Path) -> str:
+    """Collapse a path under the home directory to ``~/…`` for readability."""
+    try:
+        return f"~/{path.relative_to(Path.home())}"
+    except ValueError:
+        return str(path)
+
+
 def _format_bar(rate: float) -> str:
     count = int(round(rate * 0.85))
     return "#" * count
@@ -1348,7 +1394,12 @@ def format_stats_terminal(summary: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
-def format_report_markdown(summary: dict[str, object]) -> str:
+def format_report_markdown(summary: dict[str, object], source: Optional[Path] = None) -> str:
+    # The report is the durable record, so its source line names the log the run
+    # actually read. PLAIN_ENGLISH_STATE_DIR moves that log, and a fixed default
+    # would credit the numbers to a file this run never opened.
+    if source is None:
+        source = _state_directory() / "events.jsonl"
     lines: list[str] = []
     report_date = summary["end_date"]
     start_date = summary["start_date"]
@@ -1360,7 +1411,7 @@ def format_report_markdown(summary: dict[str, object]) -> str:
     lines.append(f"# Plain English telemetry — {report_date}")
     lines.append("")
     lines.append(f"Window: {start_date} to {end_date} ({days} days)")
-    lines.append(f"Source: ~/.claude/plain-english/events.jsonl ({lint_count} lint events, {turn_count} turn events)")
+    lines.append(f"Source: {_display_path(Path(source))} ({lint_count} lint events, {turn_count} turn events)")
     lines.append("")
 
     work = summary["work"]

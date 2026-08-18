@@ -34,7 +34,11 @@ def _handle_stats(args: list[str]) -> int:
             print(f"error: unknown stats option '{arg}'", file=sys.stderr)
             return 64
 
-    events = linter.read_events(since=since)
+    try:
+        events = linter.read_events(since=since)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 64
     summary = linter.summarize_events(events)
 
     if as_json:
@@ -66,7 +70,11 @@ def _handle_report(args: list[str]) -> int:
             print(f"error: unknown report option '{arg}'", file=sys.stderr)
             return 64
 
-    events = linter.read_events(since=since)
+    try:
+        events = linter.read_events(since=since)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 64
     summary = linter.summarize_events(events)
     content = linter.format_report_markdown(summary)
 
@@ -142,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
             "sentences": body_sentences,
             "findings_total": len(findings),
             "rule_totals": rollups["rule_totals"],
+            "blocking_rule_totals": rollups["blocking_rule_totals"],
             "findings": linter._serialize_findings(findings),
         })
 
