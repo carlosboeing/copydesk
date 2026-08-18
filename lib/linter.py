@@ -852,24 +852,46 @@ def read_events(
         state_dir = _state_directory()
 
     events: list[dict[str, object]] = []
-    for name in ("events.2.jsonl", "events.1.jsonl", "events.jsonl"):
-        p = state_dir / name
-        if not p.is_file():
-            continue
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        record = json.loads(line)
-                        if isinstance(record, dict) and "ts" in record and "event" in record:
-                            events.append(record)
-                    except json.JSONDecodeError:
-                        continue
-        except OSError:
-            continue
+
+    # Rotation renames every generation under an exclusive lock on .events.lock.
+    # Reading all three under a shared lock keeps the snapshot whole: without it,
+    # a rotation between two generations moves one out of the reader's path and
+    # the run silently loses a full generation. A missing or unwritable state
+    # directory degrades to an unlocked read rather than to no reading at all.
+    lock_file = None
+    try:
+        lock_file = open(state_dir / ".events.lock", "a", encoding="utf-8")
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
+    except OSError:
+        if lock_file is not None:
+            lock_file.close()
+            lock_file = None
+
+    try:
+        for name in ("events.2.jsonl", "events.1.jsonl", "events.jsonl"):
+            p = state_dir / name
+            if not p.is_file():
+                continue
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                            if isinstance(record, dict) and "ts" in record and "event" in record:
+                                events.append(record)
+                        except json.JSONDecodeError:
+                            continue
+            except OSError:
+                continue
+    finally:
+        if lock_file is not None:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            finally:
+                lock_file.close()
 
     events.sort(key=lambda e: float(e.get("ts", 0)))
 
@@ -1018,8 +1040,11 @@ def summarize_events(
     rework_rewrites = 0
     rework_words = 0
     session_file_rework: dict[tuple[str, str], list[int]] = {}
+    # Rules that blocked the previous attempt on a file, per session and path.
+    # The next attempt's payload is the rework those rules charged for.
+    pending_block_rules: dict[tuple[str, str], list[str]] = {}
 
-    for e in gate_events:
+    for e in sorted(gate_events, key=lambda ev: float(ev.get("ts", 0))):
         decision = e.get("decision")
         streak = int(e.get("streak", 0))
         p_words = int(e.get("payload_words", 0))
@@ -1027,19 +1052,27 @@ def summarize_events(
         session_id = str(e.get("session_id", ""))
         rule_totals = _event_rule_totals(e)
         origin_totals = _event_origin_totals(e)
+        key = (session_id, file_path)
 
         for rule, count in rule_totals.items():
             top_rules_counts[rule] = top_rules_counts.get(rule, 0) + count
 
+        # A first attempt ends any earlier cycle for this file without paying it.
+        blocking_rules = pending_block_rules.pop(key, [])
+
         if streak > 1:
             rework_rewrites += 1
             rework_words += p_words
-            key = (session_id, file_path)
             if key not in session_file_rework:
                 session_file_rework[key] = []
             session_file_rework[key].append(p_words)
+            # Charge this retry's words to the rules that forced it, not to the
+            # first attempt, which the model would have sent anyway.
+            for rule in blocking_rules:
+                rework_by_rule_words[rule] = rework_by_rule_words.get(rule, 0) + p_words
 
         if decision == "block":
+            pending_block_rules[key] = list(rule_totals)
             file_block_counts[file_path] = file_block_counts.get(file_path, 0) + 1
             new_count = origin_totals.get("new", 0)
             existing_count = origin_totals.get("existing", 0)
@@ -1057,7 +1090,7 @@ def summarize_events(
 
             for r in rule_totals:
                 rework_by_rule_counts[r] = rework_by_rule_counts.get(r, 0) + 1
-                rework_by_rule_words[r] = rework_by_rule_words.get(r, 0) + p_words
+                rework_by_rule_words.setdefault(r, 0)
                 if is_false:
                     rework_by_rule_false[r] = rework_by_rule_false.get(r, 0) + 1
 

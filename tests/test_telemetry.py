@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -587,6 +588,69 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(summary["cli"], {"lints": 1, "blocked": 1, "words": 500})
         # Linter wall time still covers every surface it ran on.
         self.assertEqual(summary["time"]["runs"], 2)
+
+    def test_rework_words_charge_the_retry_not_the_first_attempt(self) -> None:
+        def gate(ts: float, decision: str, streak: int, words: int, rules: list[str]) -> dict:
+            return {
+                "ts": ts, "event": "lint", "surface": "gate", "tool": "Write",
+                "path": "/p/a.md", "decision": decision, "streak": streak,
+                "payload_words": words, "session_id": "s1",
+                "origin_totals": {"new": 1},
+                "rule_totals": {r: 1 for r in rules},
+                "findings": [],
+            }
+
+        summary = linter.summarize_events([
+            gate(1700000000.0, "block", 1, 100, ["banned-word"]),
+            gate(1700000010.0, "block", 2, 80, ["sentence-length"]),
+            gate(1700000020.0, "pass", 3, 70, []),
+        ])
+        rows = {str(r["rule"]): r for r in summary["rework_by_rule"]}
+        # banned-word blocked attempt 1, so it charged attempt 2's 80 words.
+        self.assertEqual(rows["banned-word"]["words_resent"], 80)
+        # sentence-length blocked attempt 2, so it charged the passing attempt 3.
+        self.assertEqual(rows["sentence-length"]["words_resent"], 70)
+        # The per-rule column and the headline rework figure price the same words.
+        self.assertEqual(
+            sum(int(r["words_resent"]) for r in summary["rework_by_rule"]),
+            summary["cost"]["rework_words"],
+        )
+
+        # A block the model never retried cost nothing to re-send.
+        abandoned = linter.summarize_events([gate(1700000100.0, "block", 1, 500, ["banned-word"])])
+        self.assertEqual(abandoned["rework_by_rule"][0]["blocks"], 1)
+        self.assertEqual(abandoned["rework_by_rule"][0]["words_resent"], 0)
+
+    def test_read_events_waits_for_the_rotation_lock(self) -> None:
+        log_path = self.state_dir / "events.jsonl"
+        log_path.write_text(json.dumps({"ts": 1700000000.0, "event": "turn"}) + "\n", encoding="utf-8")
+        ready = self.state_dir / "lock-held"
+        marker = json.dumps({"ts": 1700000001.0, "event": "turn", "session_id": "written-under-lock"})
+
+        # Hold the writer's exclusive lock, then append only after a delay. A
+        # reader that ignores the lock returns before the append and misses it.
+        script = "\n".join([
+            "import fcntl, pathlib, sys, time",
+            "state = pathlib.Path(sys.argv[1])",
+            "lock = open(state / '.events.lock', 'a')",
+            "fcntl.flock(lock.fileno(), fcntl.LOCK_EX)",
+            "(state / 'lock-held').write_text('1')",
+            "time.sleep(0.5)",
+            "with open(state / 'events.jsonl', 'a') as f:",
+            "    f.write(sys.argv[2] + '\\n')",
+            "fcntl.flock(lock.fileno(), fcntl.LOCK_UN)",
+        ])
+        child = subprocess.Popen([sys.executable, "-c", script, str(self.state_dir), marker])
+        try:
+            deadline = time.time() + 5.0
+            while not ready.is_file() and time.time() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(ready.is_file(), "child never took the exclusive lock")
+            events = linter.read_events(self.state_dir)
+        finally:
+            child.wait(timeout=10)
+
+        self.assertIn("written-under-lock", [e.get("session_id") for e in events])
 
     def test_summariser_falls_back_to_findings_without_rollups(self) -> None:
         legacy = {
