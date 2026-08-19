@@ -271,6 +271,89 @@
     },
     "nested-table": {
       "severity": "error"
+    },
+    "unglossed-term": {
+      "severity": "warn",
+      "vocabulary": {
+        "add": [
+          "AI",
+          "API",
+          "CI",
+          "CLI",
+          "GB",
+          "GPU",
+          "Git",
+          "GitHub",
+          "HTML",
+          "HTTP",
+          "ID",
+          "IDE",
+          "JSON",
+          "JSONL",
+          "Linux",
+          "MB",
+          "MCP",
+          "MIT",
+          "Markdown",
+          "Mermaid",
+          "PID",
+          "PR",
+          "Postgres",
+          "Python",
+          "React",
+          "SHA",
+          "TUI",
+          "TypeScript",
+          "UI",
+          "YAML",
+          "macOS",
+          "npm"
+        ],
+        "rationale": {
+          "file formats and data languages a technical reader never glosses": [
+            "HTML",
+            "JSON",
+            "JSONL",
+            "Markdown",
+            "Mermaid",
+            "YAML"
+          ],
+          "platforms, languages and runtimes with no plainer name": [
+            "Git",
+            "GitHub",
+            "Linux",
+            "Postgres",
+            "Python",
+            "React",
+            "TypeScript",
+            "macOS",
+            "npm"
+          ],
+          "interface and tooling abbreviations older than the tools that use them": [
+            "AI",
+            "API",
+            "CI",
+            "CLI",
+            "IDE",
+            "TUI",
+            "UI"
+          ],
+          "units and identifiers that would be longer written out": [
+            "GB",
+            "GPU",
+            "ID",
+            "MB",
+            "PID",
+            "SHA"
+          ],
+          "protocol and licence names that name themselves": [
+            "HTTP",
+            "MCP",
+            "MIT",
+            "PR"
+          ]
+        }
+      }
     }
   },
   "statistics": {

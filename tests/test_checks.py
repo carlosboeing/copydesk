@@ -13,6 +13,9 @@ from pathlib import Path
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPOSITORY_ROOT / "lib"))
+
+import linter  # noqa: E402
 CLI = REPOSITORY_ROOT / "bin" / "copydesk"
 GATE = REPOSITORY_ROOT / "hooks" / "gate.sh"
 INSTALLER = REPOSITORY_ROOT / "install.sh"
@@ -260,3 +263,130 @@ class PlainEnglishGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class UnglossedTermTests(unittest.TestCase):
+    """The rule orphan-pointer cannot express: a term used before it is defined."""
+
+    def lint_text(self, text: str, path=None):
+        return [f for f in linter.lint(text, path=path) if f.check == "unglossed-term"]
+
+    def test_an_unglossed_first_use_is_flagged(self) -> None:
+        found = self.lint_text("The team moved scheduling onto Kubernetes last spring.")
+        self.assertEqual([f.excerpt.split(" \u2014")[0] for f in found], ["Kubernetes"])
+
+    def test_the_rule_ships_as_a_warning_and_never_blocks(self) -> None:
+        """No learning ships at 0.1.0, so the rule must not refuse a write."""
+        found = self.lint_text("The team moved scheduling onto Kubernetes last spring.")
+        self.assertTrue(found)
+        for finding in found:
+            self.assertEqual(finding.severity, "warning")
+
+    def test_each_gloss_form_suppresses_the_finding(self) -> None:
+        cases = {
+            "appositive": "The team adopted Kubernetes, a container orchestrator, last spring.",
+            "parenthetical": "The team adopted Kubernetes (a container orchestrator) last spring.",
+            "definition": "The tool they picked, Kubernetes, is a container orchestrator.",
+        }
+        for form, text in cases.items():
+            with self.subTest(gloss=form):
+                self.assertEqual(self.lint_text(text), [])
+
+    def test_a_sentence_initial_capital_is_not_a_term(self) -> None:
+        self.assertEqual(self.lint_text("Kubernetes was adopted by the team last spring."), [])
+
+    def test_a_list_item_initial_capital_is_sentence_initial(self) -> None:
+        """The 2026-08-19 scan flagged Step, Modify, Create, Run and Add as terms."""
+        text = "- Step through the queue.\n- Modify the record.\n- Create the namespace.\n- Run the batch.\n- Add the label.\n"
+        self.assertEqual(self.lint_text(text), [])
+
+    def test_a_capital_after_a_bold_marker_is_sentence_initial(self) -> None:
+        """_SENTENCE_SPLIT does not split across a bold marker, so position zero lies."""
+        self.assertEqual(self.lint_text("**Answer first.** **This** is the shape."), [])
+
+    def test_the_masking_sentinels_are_never_terms(self) -> None:
+        """exclude_markdown emits CODESPAN and URL, and both look exactly like terms."""
+        text = "The team ran `Kubernetes` from https://example.com/runbook every morning.\n"
+        found = {f.excerpt.split(" \u2014")[0] for f in self.lint_text(text)}
+        self.assertNotIn("CODESPAN", found)
+        self.assertNotIn("URL", found)
+
+    def test_code_links_and_headings_are_skipped(self) -> None:
+        for label, text in {
+            "code": "The team adopted `Kubernetes` for scheduling.",
+            "link": "The team adopted [it](https://Kubernetes.io) for scheduling.",
+            "heading": "# The team adopted Kubernetes",
+        }.items():
+            with self.subTest(location=label):
+                self.assertEqual(self.lint_text(text), [])
+
+    def test_a_second_use_after_a_glossed_first_use_passes(self) -> None:
+        text = (
+            "The team adopted Kubernetes (a container orchestrator) last spring.\n"
+            "The Kubernetes cluster grew to forty nodes by autumn.\n"
+        )
+        self.assertEqual(self.lint_text(text), [])
+
+    def test_a_sentence_initial_first_use_counts_as_the_first_use(self) -> None:
+        """Otherwise the term's next mid-sentence use is flagged after the reader met it."""
+        text = (
+            "Kubernetes is a container orchestrator the team adopted.\n"
+            "The Kubernetes cluster grew to forty nodes by autumn.\n"
+        )
+        self.assertEqual(self.lint_text(text), [])
+
+    def test_a_single_letter_is_never_a_term(self) -> None:
+        """The pronoun I, a list label, and an initial cannot carry a gloss."""
+        found = {f.excerpt.split(" \u2014")[0] for f in self.lint_text("The plan says I should pick option B here.")}
+        self.assertNotIn("I", found)
+        self.assertNotIn("B", found)
+
+    def test_the_shipped_vocabulary_suppresses_universal_terms(self) -> None:
+        text = "The team stored the JSON in Postgres and served it over HTTP from macOS.\n"
+        self.assertEqual(self.lint_text(text), [])
+
+    def test_a_project_vocabulary_suppresses_project_terms(self) -> None:
+        """CrossRev needs no gloss inside its own repository and needs one in a blog post."""
+        text = "The team wired CopyDesk into CrossRev during the migration.\n"
+        without = self.lint_text(text)
+        self.assertTrue(without, "with no project config both terms are unknown")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (root / "copydesk.config.json").write_text(
+                json.dumps({
+                    "version": 1,
+                    "rules": {"unglossed-term": {"vocabulary": {"add": ["CopyDesk", "CrossRev"]}}},
+                }),
+                encoding="utf-8",
+            )
+            document = root / "note.md"
+            document.write_text(text, encoding="utf-8")
+            linter._PRESET_CACHE.clear()
+            self.assertEqual(self.lint_text(text, path=document), [])
+        linter._PRESET_CACHE.clear()
+
+    def test_severity_off_silences_the_rule(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (root / "copydesk.config.json").write_text(
+                json.dumps({"version": 1, "rules": {"unglossed-term": {"severity": "off"}}}),
+                encoding="utf-8",
+            )
+            document = root / "note.md"
+            document.write_text("The team moved onto Kubernetes.\n", encoding="utf-8")
+            linter._PRESET_CACHE.clear()
+            self.assertEqual(self.lint_text(document.read_text(encoding="utf-8"), path=document), [])
+        linter._PRESET_CACHE.clear()
+
+    def test_the_rule_is_recorded_as_a_rule_never_as_a_pattern(self) -> None:
+        """Recording it as a token list would mislead a port into treating a heuristic as data."""
+        preset = json.loads((REPOSITORY_ROOT / "rules" / "plain-english.json").read_text(encoding="utf-8"))
+        self.assertIn("unglossed-term", preset["rules"])
+        self.assertEqual([b for b in preset["patterns"] if b["id"] == "unglossed-term"], [])
+
+    def test_every_shipped_term_carries_a_recorded_reason(self) -> None:
+        """A reader must be able to challenge one entry rather than the whole list."""
+        preset = json.loads((REPOSITORY_ROOT / "rules" / "plain-english.json").read_text(encoding="utf-8"))
+        vocabulary = preset["rules"]["unglossed-term"]["vocabulary"]
+        explained = {term for group in vocabulary["rationale"].values() for term in group}
+        self.assertSetEqual(set(vocabulary["add"]), explained)

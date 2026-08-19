@@ -393,6 +393,118 @@ def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error") -> 
     return findings
 
 
+# The two sentinels exclude_markdown() substitutes. Both are capitalised, neither
+# is sentence-initial, and neither belongs to any vocabulary, so an unglossed-term
+# rule that does not skip them reports every document. A scan over 182 Markdown
+# files on 2026-08-19 counted 8,967 CODESPAN hits in 114 files.
+_MASKING_SENTINELS = frozenset({"CODESPAN", "URL"})
+
+# A candidate is a capitalised or all-caps token, keeping internal punctuation
+# that real terms carry: macOS, Node.js, C++, well-formed hyphenations.
+# Two characters minimum. A one-letter token is the pronoun I, a list label, or
+# an initial, and none of them can carry a gloss.
+_TERM_CANDIDATE = re.compile(r"\b[A-Z][A-Za-z0-9]+(?:[.+#-][A-Za-z0-9]+)*\b")
+
+# The three gloss forms the design accepts, tested against the sentence the term
+# first appears in.
+# An appositive follows the term: "Kubernetes, a container orchestrator, ...".
+# Requiring a determiner keeps ", and then we left" from reading as a gloss.
+_APPOSITIVE_TAIL = re.compile(r"^,\s+(?:a|an|the)\s+\S")
+_PARENTHETICAL = re.compile(r"\(([^)]*)\)")
+_DEFINITION = re.compile(
+    r"\b(?:is|are|was|were|means|stands for|refers to|short for)\b", re.IGNORECASE
+)
+
+
+def _term_is_sentence_initial(line: str, column: int) -> bool:
+    """Decide sentence-start from the text, never from token position zero.
+
+    _SENTENCE_SPLIT splits on punctuation followed by whitespace, so a bold
+    marker after a full stop prevents the split and the next capital reads as
+    mid-sentence. A list-item-initial capital is sentence-initial too: the
+    2026-08-19 scan flagged Step, Modify, Create, Run and Add, every one a
+    checklist verb opening a bullet.
+    """
+    before = line[:column]
+    stripped = before.strip()
+    if not stripped:
+        return True
+    if _LIST_LINE.match(before):
+        return True
+    # Markdown emphasis and quoting carry no sentence meaning here.
+    bare = stripped.rstrip("*_`\"'“‘>#|[]( \t")
+    if not bare:
+        return True
+    return bare.endswith((".", "!", "?", ":", ";"))
+
+
+def _sentence_around(line: str, column: int) -> str:
+    starts = [0]
+    for match in re.finditer(r"[.!?:]\s+", line):
+        starts.append(match.end())
+    start = max(s for s in starts if s <= column)
+    ends = [m.start() for m in re.finditer(r"[.!?]", line) if m.start() > column]
+    end = min(ends) + 1 if ends else len(line)
+    return line[start:end]
+
+
+def _term_is_glossed(term: str, sentence: str) -> bool:
+    """An appositive, a parenthetical, or a definition clause."""
+    position = sentence.find(term)
+    if position >= 0 and _APPOSITIVE_TAIL.match(sentence[position + len(term):]):
+        return True
+    for match in _PARENTHETICAL.finditer(sentence):
+        inner = match.group(1).strip()
+        if not inner:
+            continue
+        if term in inner and inner != term:
+            return True
+        # "CopyDesk (a prose gate)" glosses the term sitting before the bracket.
+        prefix = sentence[: match.start()].rstrip()
+        if prefix.endswith(term):
+            return True
+    if _DEFINITION.search(sentence):
+        head = sentence.split(term, 1)
+        if len(head) == 2 and _DEFINITION.search(head[1]):
+            return True
+    return False
+
+
+def _vocabulary(preset: dict) -> frozenset:
+    entry = (preset.get("rules") or {}).get("unglossed-term") or {}
+    return frozenset((entry.get("vocabulary") or {}).get("add", ()))
+
+
+def _unglossed_findings(text: str, preset: dict, severity: str):
+    """Flag a term's first use when it carries no gloss.
+
+    Full detection needs named-entity recognition, which is far beyond a regex
+    linter. The workable version is a user-maintained vocabulary: flag a
+    capitalised token that is not sentence-initial, is absent from the merged
+    vocabulary, and appears first with no gloss in its sentence.
+    """
+    if severity == "off":
+        return ()
+    vocabulary = _vocabulary(preset)
+    seen: set = set()
+    findings: list[Finding] = []
+    for index, line in enumerate(text.split("\n"), start=1):
+        for match in _TERM_CANDIDATE.finditer(line):
+            term = match.group(0)
+            if term in seen or term in _MASKING_SENTINELS or term in vocabulary:
+                continue
+            # A sentence-initial appearance still counts as the first one. Marking
+            # it seen after the check would flag the term's next mid-sentence use,
+            # which is a term the reader has already met.
+            seen.add(term)
+            if _term_is_sentence_initial(line, match.start()):
+                continue
+            if _term_is_glossed(term, _sentence_around(line, match.start())):
+                continue
+            findings.append(Finding(index, "unglossed-term", f"{term} — first use carries no gloss", severity))
+    return findings
+
+
 def _pattern_findings(text: str, patterns: Optional[tuple[RulePattern, ...]] = None) -> Iterable[Finding]:
     findings: list[Finding] = []
     for pattern in (RULE_PATTERNS if patterns is None else patterns):
@@ -480,6 +592,7 @@ def lint(text: str, path: Optional[Union[str, Path]] = None) -> list[Finding]:
                 )
 
     findings.extend(_pattern_findings(body, patterns))
+    findings.extend(_unglossed_findings(body, preset, _rule_severity(preset, "unglossed-term", "warning")))
     findings.extend(_nested_table_findings(text))
     return sorted(findings, key=lambda finding: (finding.line, finding.severity != "error", finding.check, finding.excerpt))
 

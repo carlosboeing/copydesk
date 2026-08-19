@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "extends": "plain-english",
+  "rules": {
+    "unglossed-term": {
+      "vocabulary": {
+        "add": [
+          "Agy",
+          "Anthropic",
+          "Antigravity",
+          "Claude",
+          "Codex",
+          "Context7",
+          "CopyDesk",
+          "CrossRev",
+          "Cursor",
+          "Fathom",
+          "Gemini",
+          "Grok",
+          "Headroom",
+          "Kimi",
+          "Ollama",
+          "Opus",
+          "Penmark",
+          "Playwright",
+          "RTK",
+          "Superpowers",
+          "WebBridge"
+        ],
+        "rationale": {
+          "harnesses, models and vendors this repository names constantly": [
+            "Agy",
+            "Anthropic",
+            "Antigravity",
+            "Claude",
+            "Codex",
+            "Cursor",
+            "Gemini",
+            "Grok",
+            "Kimi",
+            "Ollama",
+            "Opus"
+          ],
+          "the author's own projects and the tools they run beside": [
+            "Context7",
+            "CopyDesk",
+            "CrossRev",
+            "Fathom",
+            "Headroom",
+            "Penmark",
+            "Playwright",
+            "RTK",
+            "Superpowers",
+            "WebBridge"
+          ]
+        }
+      }
+    }
+  }
+}
