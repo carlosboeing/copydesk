@@ -6,14 +6,20 @@ on:
 
 jobs:
   suite:
-    name: Python suite
+    name: Python ${{ matrix.python }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # The README states which interpreters are supported. This matrix is
+        # what makes that claim checkable rather than assumed.
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
       - name: Run the suite
         run: python3 -m unittest discover tests/
 
