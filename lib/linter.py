@@ -597,6 +597,30 @@ def lint(text: str, path: Optional[Union[str, Path]] = None) -> list[Finding]:
     return sorted(findings, key=lambda finding: (finding.line, finding.severity != "error", finding.check, finding.excerpt))
 
 
+# long-sentence-rate is the one blocking rule computed over the whole document.
+# It is always reported at line 1, so origin filtering cannot place it: filtering
+# by origin would make it block only when line 1 happens to sit inside an edit,
+# which is arbitrary. It blocks when it newly fires instead.
+DOCUMENT_SCOPED_BLOCKING_RULES = frozenset({"long-sentence-rate"})
+
+
+def blocking_findings_for_retry(findings: Iterable[Finding]) -> list[Finding]:
+    """The error-severity findings the writer is responsible for.
+
+    Issue 27 measured 205 of 265 Markdown files here as blocking an edit, and
+    none of those refusals came from the text being written. Narrowing the
+    decision to newly written text is what makes refusal usable rather than
+    obstructive.
+    """
+    return [
+        finding
+        for finding in findings
+        if finding.severity == "error"
+        and finding.origin == "new"
+        and finding.check not in DOCUMENT_SCOPED_BLOCKING_RULES
+    ]
+
+
 def has_blocking_findings(findings: Iterable[Finding]) -> bool:
     return any(finding.severity == "error" for finding in findings)
 
@@ -919,7 +943,31 @@ def run_hook(raw_payload: str) -> int:
         if not isinstance(files, dict):
             return 0
 
-        if not has_blocking_findings(findings):
+        # The block decision reads origins rather than the whole document. Write
+        # is unaffected: every Write finding is already marked new above.
+        blocking = blocking_findings_for_retry(findings_with_origin)
+
+        # long-sentence-rate is document-scoped, so it blocks when it newly fires:
+        # absent from lint(existing) and present in lint(proposed). The extra lint
+        # runs only when there is nothing else to block on, so the common path
+        # keeps its measured 17 ms median.
+        if not blocking:
+            rate_findings = [f for f in findings if f.check in DOCUMENT_SCOPED_BLOCKING_RULES and f.severity == "error"]
+            if rate_findings:
+                if tool_name == "Write":
+                    blocking = rate_findings
+                else:
+                    previous = lint(existing, path=file_path) if existing else []
+                    already = {f.check for f in previous if f.severity == "error"}
+                    blocking = [f for f in rate_findings if f.check not in already]
+
+        preexisting_errors = sum(
+            1
+            for finding in findings_with_origin
+            if finding.severity == "error" and finding not in blocking
+        )
+
+        if not blocking:
             # A pass that clears an earlier block is attempt N, not a first-pass
             # success. Zero is reserved for a file with no preceding block.
             cleared = files.get(file_path)
@@ -1014,10 +1062,18 @@ def run_hook(raw_payload: str) -> int:
             "findings": _serialize_findings(findings_with_origin),
             "session_id": session_id,
         })
-        for finding in findings:
-            if finding.severity == "error":
-                print(finding.render(), file=sys.stderr)
-        if has_ai_tell_finding(proposed, findings):
+        # Print only what caused the block. Asking the model to fix text it did
+        # not write is what made refusal obstructive.
+        for finding in blocking:
+            print(finding.render(), file=sys.stderr)
+        if preexisting_errors:
+            plural = "" if preexisting_errors == 1 else "s"
+            print(
+                f"{preexisting_errors} pre-existing error{plural} in this file did not cause the block "
+                "and need no change.",
+                file=sys.stderr,
+            )
+        if has_ai_tell_finding(proposed, blocking):
             print("Run /humanizer for the AI-tell failures before retrying.", file=sys.stderr)
         return 2
     except (OSError, TypeError, ValueError):
