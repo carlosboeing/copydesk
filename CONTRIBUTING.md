@@ -8,6 +8,8 @@ Thanks for looking. CopyDesk is early, so the most useful contributions are bug 
 python3 -m unittest discover tests/
 ```
 
+**The suite needs Python 3.11 or later**, because `eval/` uses `tomllib`. The shipped linter itself runs on 3.9, and a separate continuous-integration job proves that on every push.
+
 No dependencies beyond the Python standard library. The gate runs on every Write and Edit in a hooked harness, so a third-party import on that path is a latency and install-friction cost the project will not take.
 
 ## The pre-commit hook
