@@ -1,0 +1,40 @@
+{
+  "name": "copydesk",
+  "version": "0.1.0",
+  "description": "A cross-harness prose gate for AI agents",
+  "license": "MIT",
+  "author": "Carlos Boeing",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/carlosboeing/copydesk.git"
+  },
+  "homepage": "https://github.com/carlosboeing/copydesk#readme",
+  "bugs": {
+    "url": "https://github.com/carlosboeing/copydesk/issues"
+  },
+  "keywords": [
+    "prose",
+    "linter",
+    "writing",
+    "style",
+    "markdown",
+    "ai",
+    "agents",
+    "hooks"
+  ],
+  "bin": {
+    "copydesk": "bin/copydesk"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "rules/",
+    "hooks/",
+    "output-styles/",
+    "VERSION",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
