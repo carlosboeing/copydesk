@@ -8,6 +8,7 @@ jobs:
   suite:
     name: Python suite
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,6 +20,7 @@ jobs:
   carriers:
     name: Generated carriers match the preset
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,10 +33,11 @@ jobs:
   shellcheck:
     name: shellcheck
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      # shellcheck is preinstalled on the GitHub-hosted Ubuntu image. Installing
+      # it through apt added minutes and then hung.
       - name: Check every shell script
         run: |
           shellcheck \
@@ -48,6 +51,7 @@ jobs:
   self-check:
     name: CopyDesk checks its own documentation
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -55,6 +55,17 @@ claude_path = root / ("claude/settings.json" if test_layout else ".claude/settin
 codex_path = root / ("codex/config.toml" if test_layout else ".codex/config.toml")
 kimi_path = root / ("kimi/config.toml" if test_layout else ".kimi-code/config.toml")
 
+missing = [str(p) for p in (claude_path, codex_path, kimi_path) if not p.is_file()]
+if missing:
+    print(
+        "error  the corpus runner records the harness settings it ran under, and "
+        "cannot find:\n  " + "\n  ".join(missing) +
+        "\nPass --settings-root to point at a directory holding claude/settings.json, "
+        "codex/config.toml and kimi/config.toml.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
 claude = json.loads(claude_path.read_text(encoding="utf-8"))
 codex = tomllib.loads(codex_path.read_text(encoding="utf-8"))
 kimi = tomllib.loads(kimi_path.read_text(encoding="utf-8"))
@@ -85,18 +96,24 @@ for harness, control in controls.items():
 PY
 }
 
+# Argument validation and the confirmation guard run before anything reads a
+# home directory. write_controls used to run first, so on a machine without the
+# three harness config files a refusal exited 1 with a traceback rather than 2
+# with a message.
+if ! "$PREFLIGHT"; then
+    case "$HARNESS" in
+        claude|codex|kimi) ;;
+        *) die "--harness must be claude, codex, or kimi" ;;
+    esac
+    [[ -n "$CONDITION" ]] || die "--condition is required"
+    "$CONFIRMED" || die "refusing to launch a corpus condition without --confirmed"
+fi
+
 write_controls
 if "$PREFLIGHT"; then
     printf '%s\n' "No corpus launched. Review eval/results/controls.json, then re-run with --confirmed."
     exit 0
 fi
-
-case "$HARNESS" in
-    claude|codex|kimi) ;;
-    *) die "--harness must be claude, codex, or kimi" ;;
-esac
-[[ -n "$CONDITION" ]] || die "--condition is required"
-"$CONFIRMED" || die "refusing to launch a corpus condition without --confirmed"
 [[ -n "$REPO" ]] || die "--repo must name the CrossRev checkout"
 git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "--repo is not a git checkout: $REPO"
 git -C "$REPO" rev-parse --verify "$PINNED_CROSSREV_COMMIT^{commit}" >/dev/null
