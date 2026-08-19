@@ -13,7 +13,18 @@ Every other prose tool reads your text after it is written. CopyDesk sits one st
 
 ## What it looks like
 
-Check a file the way you would with any linter:
+The part no other tool does happens when an agent tries to write. The gate refuses, and the agent revises before anything reaches your disk:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/gate-demo-dark.png">
+  <img alt="A terminal showing an agent's edit refused by the CopyDesk gate. One finding is reported, banned-word on line 5, followed by a note that one pre-existing error in the file did not cause the block and needs no change. The agent revises and the second edit is written." src="docs/assets/gate-demo-light.png" width="100%">
+</picture>
+
+Two details there matter more than they look.
+
+The gate blocked on **one** finding, not on every problem in the file. It reports the pre-existing error and explicitly says not to fix it. Asking a model to clean up prose it did not write is how a writing gate becomes something people switch off.
+
+You can also use it as an ordinary linter, on files or standard input:
 
 ```console
 $ copydesk check release-notes.md
@@ -27,18 +38,6 @@ release-notes.md:
 8:orphan-pointer:That said, we should circle back on the remaining items. As noted above, the
 9:soft-offer:former approach is deprecated. Happy to walk through any of this if you'd like.
 ```
-
-The part no other tool does happens when an agent tries to write that file. The gate refuses, and the agent revises before anything hits your disk:
-
-```console
-$ # the agent attempts an edit that introduces a banned word
-5:banned-word:The rollout is comprehensive.
-1 pre-existing error in this file did not cause the block and need no change.
-```
-
-Two details in that second example matter more than they look.
-
-The gate blocked on **one** finding, not on every problem in the file. It reports the pre-existing error and explicitly says not to fix it. Asking a model to clean up prose it did not write is how a writing gate becomes something people switch off.
 
 ## Why this exists
 

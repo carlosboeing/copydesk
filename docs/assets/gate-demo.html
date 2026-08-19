@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CopyDesk — the gate refusing a write</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f4f5;
+    --term-bg: #ffffff;
+    --term-border: #e4e4e7;
+    --chrome: #fafafa;
+    --dot: #d4d4d8;
+    --fg: #27272a;
+    --dim: #71717a;
+    --faint: #a1a1aa;
+    --prompt: #16a34a;
+    --path: #2563eb;
+    --rule: #dc2626;
+    --line: #a855f7;
+    --ok: #16a34a;
+    --warnbg: #fef2f2;
+    --warnborder: #fecaca;
+    --okbg: #f0fdf4;
+    --okborder: #bbf7d0;
+    --caption: #52525b;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06);
+  }
+  html[data-theme="dark"] {
+    --bg: #09090b;
+    --term-bg: #18181b;
+    --term-border: #27272a;
+    --chrome: #1f1f23;
+    --dot: #3f3f46;
+    --fg: #e4e4e7;
+    --dim: #a1a1aa;
+    --faint: #71717a;
+    --prompt: #4ade80;
+    --path: #60a5fa;
+    --rule: #f87171;
+    --line: #c084fc;
+    --ok: #4ade80;
+    --warnbg: #2a1416;
+    --warnborder: #7f1d1d;
+    --okbg: #0f2417;
+    --okborder: #166534;
+    --caption: #a1a1aa;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 32px rgba(0,0,0,.5);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding: 36px 36px 30px;
+    width: 1180px;
+  }
+  .term {
+    background: var(--term-bg);
+    border: 1px solid var(--term-border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .chrome {
+    background: var(--chrome);
+    border-bottom: 1px solid var(--term-border);
+    padding: 11px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--dot); }
+  .chrome .title {
+    margin-left: 10px;
+    font-size: 12.5px;
+    color: var(--faint);
+    font-weight: 500;
+    letter-spacing: .01em;
+  }
+  pre {
+    font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 14.5px;
+    line-height: 1.72;
+    color: var(--fg);
+    padding: 20px 24px 4px;
+    white-space: pre-wrap;
+    tab-size: 2;
+  }
+  .p { color: var(--prompt); font-weight: 700; }
+  .c { color: var(--fg); font-weight: 500; }
+  .d { color: var(--dim); }
+  .f { color: var(--faint); }
+  .ln { color: var(--line); font-weight: 500; }
+  .rl { color: var(--rule); font-weight: 700; }
+  .pa { color: var(--path); font-weight: 500; }
+  .ok { color: var(--ok); font-weight: 700; }
+  .blk, .pass {
+    display: block;
+    margin: 10px -24px;
+    padding: 9px 24px 9px 21px;
+  }
+  .blk { background: var(--warnbg); border-left: 3px solid var(--warnborder); }
+  .pass { background: var(--okbg); border-left: 3px solid var(--okborder); }
+  .note {
+    margin-top: 18px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--caption);
+    max-width: 96ch;
+  }
+  .note strong { color: var(--fg); font-weight: 600; }
+  .note code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.8px;
+    background: var(--chrome);
+    border: 1px solid var(--term-border);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+</style>
+</head>
+<body>
+  <div class="term">
+    <div class="chrome">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="title">agent session — CopyDesk gate active on Write and Edit</span>
+    </div>
+<pre><span class="f"># The agent edits a release note. Its new sentence uses a banned word.</span>
+<span class="f"># The file already contained one, written by somebody else, weeks ago.</span>
+
+<span class="p">▸</span> <span class="c">Edit</span> <span class="pa">release-notes.md</span>
+
+<span class="blk"><span class="ln">5</span>:<span class="rl">banned-word</span>:The rollout is comprehensive.
+<span class="d">1 pre-existing error in this file did not cause the block and need no change.</span></span>
+<span class="d">   the write never reached disk</span>  <span class="f">(exit 2)</span>
+
+<span class="f"># The agent revises the sentence it wrote, and only that sentence.</span>
+
+<span class="p">▸</span> <span class="c">Edit</span> <span class="pa">release-notes.md</span>
+
+<span class="pass"><span class="ok">✓</span> <span class="d">written</span>  <span class="f">(exit 0)</span></span></pre>
+  </div>
+  <p class="note">
+    <strong>The gate blocked on one finding, not on every problem in the file.</strong>
+    It named the pre-existing error and said explicitly not to fix it. Asking a model to
+    clean up prose it did not write is how a writing gate becomes something people
+    switch off — across a 167-file corpus, that single change took the block rate for an
+    ordinary edit from <code>72%</code> to <code>2%</code>.
+  </p>
+</body>
+</html>
