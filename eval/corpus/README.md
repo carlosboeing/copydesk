@@ -1,14 +1,14 @@
 # The fixed prompt corpus
 
-Eight sequences of ten turns, used to measure whether CopyDesk v2 changed how Claude Code writes, and whether that change survives a long session. Authored 2026-08-17 by Carlos and Claude, before any condition was run.
+Eight sequences of ten turns, used to measure whether a rule change alters how an agent writes, and whether that change survives a long session. The prompts were authored before any measurement ran against them.
 
-**Do not change these files once condition A has been measured against them.** Every before-and-after comparison is anchored to this exact text. Editing a turn discards the comparison rather than improving it. Every other threshold in this design is free to tune; this is the one that is not.
+**Do not change these files once a baseline has been measured against them.** Every before-and-after comparison is anchored to this exact text. Editing a turn discards the comparison rather than improving it. Every threshold in this corpus is free to tune; the prompts are not.
 
 ## Target
 
 All eight sequences run against **CrossRev, pinned at `c72d978`**.
 
-Not `claude-code-resources`. Running the corpus there would make the model read the CopyDesk design, plan and output style, priming it to write plainly in every condition and contaminating the thing being measured. CrossRev is real work, varied enough to carry all six categories, and contains no writing-style content.
+Deliberately not this repository. Running the corpus against CopyDesk itself would let the model read the rules, the output style and this very page, priming it to write plainly in every run and contaminating the thing being measured. CrossRev is real work, varied enough to carry all six categories, and contains no writing-style content.
 
 Several turns write files, so the checkout is reset between runs. Run two must start from the same tree as run one.
 
@@ -23,7 +23,7 @@ Several turns write files, so the checkout is reset between runs. Run two must s
 | 07 | Repo status — short factual answers, where padding shows |
 | 08 | Code explanation — the "explain it plainly" complaint, directly |
 
-Each sequence mixes turns that write Markdown with turns that only answer in chat. Those two streams are measured separately and never summed: chat is governed by the rules alone, while a file write also passes the gate in conditions B and C.
+Each sequence mixes turns that write Markdown with turns that only answer in chat. Those two streams are measured separately and never summed: chat is governed by the rules alone, while a file write also passes the gate when one is installed.
 
 ## The rule that shaped the writing
 
