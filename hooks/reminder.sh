@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Plain English per-turn chat reminder for Claude Code UserPromptSubmit hook.
+# CopyDesk per-turn chat reminder for Claude Code UserPromptSubmit hook.
 # Hand-written précis (49 words) reinforcing style against long-session decay.
 # linter.REMINDER_WORD_COUNT must match; tests/test_telemetry.py checks it.
 
@@ -7,7 +7,7 @@ set -u
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$HOOK_DIR/linter.py" ]]; then
-  LINTER="$HOOK_DIR/linter.py"             # installed ~/.claude/hooks/plain-english/
+  LINTER="$HOOK_DIR/linter.py"             # installed ~/.claude/hooks/copydesk/
 elif [[ -f "$HOOK_DIR/../lib/linter.py" ]]; then
   LINTER="$HOOK_DIR/../lib/linter.py"      # source bundle
 else

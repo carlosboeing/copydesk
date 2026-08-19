@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plain English Markdown linter.
+"""CopyDesk Markdown linter.
 
 Vendored and adapted from ``evals/ste_lint.py`` in
 https://github.com/AminBlg/SimpleEnglish at commit
@@ -505,7 +505,7 @@ def _finding_rollups(findings: list[Finding]) -> dict[str, dict[str, int]]:
 
 
 def _serialize_findings(findings: list[Finding]) -> list[dict[str, object]]:
-    log_text = os.environ.get("PLAIN_ENGLISH_LOG_FLAGGED_TEXT") != "0"
+    log_text = os.environ.get("COPYDESK_LOG_FLAGGED_TEXT") != "0"
     serialized: list[dict[str, object]] = []
     for f in findings[:MAX_STORED_FINDINGS]:
         entry: dict[str, object] = {
@@ -521,8 +521,14 @@ def _serialize_findings(findings: list[Finding]) -> list[dict[str, object]]:
 
 
 def _state_directory() -> Path:
-    configured = os.environ.get("PLAIN_ENGLISH_STATE_DIR")
-    return Path(configured) if configured else Path.home() / ".claude" / "plain-english"
+    # CopyDesk is harness-neutral, so the default state path is XDG rather than
+    # any one harness's directory. COPYDESK_STATE_DIR still overrides both.
+    configured = os.environ.get("COPYDESK_STATE_DIR")
+    if configured:
+        return Path(configured)
+    xdg_state = os.environ.get("XDG_STATE_HOME")
+    base = Path(xdg_state) if xdg_state else Path.home() / ".local" / "state"
+    return base / "copydesk"
 
 
 def _state_path(state_dir: Path, session_id: str) -> Path:
@@ -579,7 +585,7 @@ def _write_state(path: Path, state: dict[str, object]) -> None:
 
 def _is_unconfigured_test_context() -> bool:
     """Return True if running in a test context without an explicit state directory override."""
-    if "PLAIN_ENGLISH_STATE_DIR" in os.environ:
+    if "COPYDESK_STATE_DIR" in os.environ:
         return False
     if "unittest" in sys.modules or "pytest" in sys.modules:
         return True
@@ -589,7 +595,7 @@ def _is_unconfigured_test_context() -> bool:
 
 
 def _record_event(event: dict[str, object]) -> None:
-    if os.environ.get("PLAIN_ENGLISH_LOG") == "0":
+    if os.environ.get("COPYDESK_LOG") == "0":
         return
     if _is_unconfigured_test_context():
         return
@@ -673,7 +679,7 @@ def _warning_for_retry(hashes: list[str]) -> str:
         detail = f"3 different attempts still failing (sha256={', '.join(hashes)})"
     else:
         detail = f"3 attempts still failing (sha256={', '.join(hashes)})"
-    return f"Plain English gate passed after 3 failed attempts: {detail}. Run /humanizer before the next edit."
+    return f"CopyDesk gate passed after 3 failed attempts: {detail}. Run /humanizer before the next edit."
 
 
 def _write_retry_warning(message: str) -> None:
@@ -1310,7 +1316,7 @@ def format_stats_terminal(summary: dict[str, object]) -> str:
     end_date = summary["end_date"]
     days = summary["days"]
 
-    lines.append(f"Plain English — {start_date} to {end_date} ({days} days)")
+    lines.append(f"CopyDesk — {start_date} to {end_date} ({days} days)")
     lines.append("")
 
     work = summary["work"]
@@ -1402,12 +1408,12 @@ def format_stats_terminal(summary: dict[str, object]) -> str:
         lines.append(f"  from {prevention['source']}, measured {prevention['date']}{prevention.get('age_str', '')}")
     else:
         lines.append("  not measured — no corpus results under eval/results/")
-        lines.append("  run eval/run-corpus.sh, or plain-english baseline for a free estimate")
+        lines.append("  run eval/run-corpus.sh, or copydesk baseline for a free estimate")
 
     opt_out = summary.get("flagged_text_opt_out")
     if isinstance(opt_out, dict) and opt_out.get("active"):
         lines.append("")
-        lines.append(f"Note: PLAIN_ENGLISH_LOG_FLAGGED_TEXT=0 was set for {opt_out['missing_events']} of {opt_out['total_events']} events.")
+        lines.append(f"Note: COPYDESK_LOG_FLAGGED_TEXT=0 was set for {opt_out['missing_events']} of {opt_out['total_events']} events.")
         lines.append("Rule counts are complete. Per-finding text is unavailable for that period.")
 
     return "\n".join(lines)
@@ -1415,7 +1421,7 @@ def format_stats_terminal(summary: dict[str, object]) -> str:
 
 def format_report_markdown(summary: dict[str, object], source: Optional[Path] = None) -> str:
     # The report is the durable record, so its source line names the log the run
-    # actually read. PLAIN_ENGLISH_STATE_DIR moves that log, and a fixed default
+    # actually read. COPYDESK_STATE_DIR moves that log, and a fixed default
     # would credit the numbers to a file this run never opened.
     if source is None:
         source = _state_directory() / "events.jsonl"
@@ -1427,7 +1433,7 @@ def format_report_markdown(summary: dict[str, object], source: Optional[Path] = 
     lint_count = summary["lint_events_count"]
     turn_count = summary["turn_events_count"]
 
-    lines.append(f"# Plain English telemetry — {report_date}")
+    lines.append(f"# CopyDesk telemetry — {report_date}")
     lines.append("")
     lines.append(f"Window: {start_date} to {end_date} ({days} days)")
     lines.append(f"Source: {_display_path(Path(source))} ({lint_count} lint events, {turn_count} turn events)")

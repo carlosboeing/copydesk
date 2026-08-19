@@ -8,14 +8,14 @@ from pathlib import Path
 import re
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-LIBRARY = REPOSITORY_ROOT / "tools" / "plain-english" / "lib"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+LIBRARY = REPOSITORY_ROOT / "lib"
 sys.path.insert(0, str(LIBRARY))
 
 import linter  # noqa: E402
 
 
-CANONICAL_DESIGN = REPOSITORY_ROOT / "docs" / "2-design" / "2026-08-16-plain-english-v2-design.md"
+CANONICAL_DESIGN = REPOSITORY_ROOT / "docs" / "2-design" / "2026-08-16-copydesk-v2-design.md"
 
 
 def extract_rules_block(text: str) -> str:
@@ -56,7 +56,7 @@ class RulesSyncTests(unittest.TestCase):
         if not claude_md.is_file():
             self.skipTest("~/.claude/CLAUDE.md is absent; no installed copy to compare")
 
-        output_style = REPOSITORY_ROOT / "tools" / "plain-english" / "output-styles" / "plain-english.md"
+        output_style = REPOSITORY_ROOT / "output-styles" / "plain-english.md"
         if not output_style.is_file():
             self.skipTest("Task 3 has not moved the canonical output style into the bundle")
 

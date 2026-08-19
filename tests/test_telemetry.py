@@ -10,11 +10,11 @@ import tempfile
 import time
 import unittest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-LIB_DIR = REPO_ROOT / "tools" / "plain-english" / "lib"
-BIN_PATH = REPO_ROOT / "tools" / "plain-english" / "bin" / "plain-english"
-HOOK_DIR = REPO_ROOT / "tools" / "plain-english" / "hooks"
-FIXTURES_DIR = REPO_ROOT / "tools" / "plain-english" / "tests" / "fixtures"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+LIB_DIR = REPO_ROOT / "lib"
+BIN_PATH = REPO_ROOT / "bin" / "copydesk"
+HOOK_DIR = REPO_ROOT / "hooks"
+FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 
 if str(LIB_DIR) not in sys.path:
     sys.path.insert(0, str(LIB_DIR))
@@ -26,14 +26,14 @@ class TestTelemetry(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.state_dir = Path(self.temp_dir.name)
-        self.orig_state_dir = os.environ.get("PLAIN_ENGLISH_STATE_DIR")
-        os.environ["PLAIN_ENGLISH_STATE_DIR"] = str(self.state_dir)
+        self.orig_state_dir = os.environ.get("COPYDESK_STATE_DIR")
+        os.environ["COPYDESK_STATE_DIR"] = str(self.state_dir)
 
     def tearDown(self) -> None:
         if self.orig_state_dir is not None:
-            os.environ["PLAIN_ENGLISH_STATE_DIR"] = self.orig_state_dir
+            os.environ["COPYDESK_STATE_DIR"] = self.orig_state_dir
         else:
-            os.environ.pop("PLAIN_ENGLISH_STATE_DIR", None)
+            os.environ.pop("COPYDESK_STATE_DIR", None)
         self.temp_dir.cleanup()
 
     def test_gate_output_equivalence_against_baseline_fixtures(self) -> None:
@@ -45,7 +45,7 @@ class TestTelemetry(unittest.TestCase):
 
         def run_gate(payload: dict) -> dict[str, object]:
             env = os.environ.copy()
-            env["PLAIN_ENGLISH_STATE_DIR"] = str(self.state_dir)
+            env["COPYDESK_STATE_DIR"] = str(self.state_dir)
             res = subprocess.run(
                 ["/usr/bin/env", "bash", str(gate_sh)],
                 input=json.dumps(payload),
@@ -238,7 +238,7 @@ class TestTelemetry(unittest.TestCase):
     def test_turn_tick_reminder_hook_and_cli(self) -> None:
         reminder_sh = HOOK_DIR / "reminder.sh"
         env = os.environ.copy()
-        env["PLAIN_ENGLISH_STATE_DIR"] = str(self.state_dir)
+        env["COPYDESK_STATE_DIR"] = str(self.state_dir)
 
         # Run reminder hook
         res = subprocess.run(
@@ -273,8 +273,8 @@ class TestTelemetry(unittest.TestCase):
         # Point state dir to an unwriteable directory
         unwriteable = self.state_dir / "unwriteable"
         unwriteable.mkdir(mode=0o444)
-        saved = os.environ.get("PLAIN_ENGLISH_STATE_DIR")
-        os.environ["PLAIN_ENGLISH_STATE_DIR"] = str(unwriteable / "nested")
+        saved = os.environ.get("COPYDESK_STATE_DIR")
+        os.environ["COPYDESK_STATE_DIR"] = str(unwriteable / "nested")
         try:
             payload = {
                 "session_id": "test-resilience",
@@ -285,12 +285,12 @@ class TestTelemetry(unittest.TestCase):
             self.assertEqual(res, 0)
         finally:
             if saved is not None:
-                os.environ["PLAIN_ENGLISH_STATE_DIR"] = saved
+                os.environ["COPYDESK_STATE_DIR"] = saved
             else:
-                os.environ.pop("PLAIN_ENGLISH_STATE_DIR", None)
+                os.environ.pop("COPYDESK_STATE_DIR", None)
 
     def test_flagged_text_opt_out(self) -> None:
-        os.environ["PLAIN_ENGLISH_LOG_FLAGGED_TEXT"] = "0"
+        os.environ["COPYDESK_LOG_FLAGGED_TEXT"] = "0"
         try:
             payload = {
                 "session_id": "test-opt-out",
@@ -303,7 +303,7 @@ class TestTelemetry(unittest.TestCase):
             for f in event["findings"]:
                 self.assertNotIn("flagged_text", f)
         finally:
-            os.environ.pop("PLAIN_ENGLISH_LOG_FLAGGED_TEXT", None)
+            os.environ.pop("COPYDESK_LOG_FLAGGED_TEXT", None)
 
     def test_log_rotation_8mb(self) -> None:
         log_path = self.state_dir / "events.jsonl"
@@ -456,7 +456,7 @@ class TestTelemetry(unittest.TestCase):
         # Test stats
         res_stats = subprocess.run([sys.executable, str(BIN_PATH), "stats"], capture_output=True, text=True, env=os.environ)
         self.assertEqual(res_stats.returncode, 0)
-        self.assertIn("Plain English", res_stats.stdout)
+        self.assertIn("CopyDesk", res_stats.stdout)
         self.assertIn("Work", res_stats.stdout)
 
         # Test stats --json
@@ -470,14 +470,16 @@ class TestTelemetry(unittest.TestCase):
         res_report = subprocess.run([sys.executable, str(BIN_PATH), "report", "--out", str(out_md)], capture_output=True, text=True, env=os.environ)
         self.assertEqual(res_report.returncode, 0)
         self.assertTrue(out_md.is_file())
-        self.assertIn("# Plain English telemetry", out_md.read_text(encoding="utf-8"))
+        self.assertIn("# CopyDesk telemetry", out_md.read_text(encoding="utf-8"))
 
     def test_unconfigured_test_context_skips_writing(self) -> None:
-        # When PLAIN_ENGLISH_STATE_DIR is not set in os.environ and running under unittest,
-        # _record_event must skip writing and never touch ~/.claude/plain-english/events.jsonl
-        saved_env = os.environ.pop("PLAIN_ENGLISH_STATE_DIR", None)
+        # When COPYDESK_STATE_DIR is not set in os.environ and running under unittest,
+        # _record_event must skip writing and never touch the default event log.
+        # The default resolves the same way _state_directory does, so this test keeps
+        # its teeth if the default moves again.
+        saved_env = os.environ.pop("COPYDESK_STATE_DIR", None)
         try:
-            default_events = Path.home() / ".claude" / "plain-english" / "events.jsonl"
+            default_events = linter._state_directory() / "events.jsonl"
             existed_before = default_events.is_file()
             mtime_before = default_events.stat().st_mtime if existed_before else 0.0
 
@@ -489,7 +491,7 @@ class TestTelemetry(unittest.TestCase):
                 self.assertFalse(default_events.is_file())
         finally:
             if saved_env is not None:
-                os.environ["PLAIN_ENGLISH_STATE_DIR"] = saved_env
+                os.environ["COPYDESK_STATE_DIR"] = saved_env
 
     def test_reminder_word_count_matches_hook_text(self) -> None:
         script = (HOOK_DIR / "reminder.sh").read_text(encoding="utf-8")
@@ -809,7 +811,15 @@ class TestTelemetry(unittest.TestCase):
 
         expected = linter._display_path(self.state_dir / "events.jsonl")
         self.assertIn(f"Source: {expected}", content)
-        self.assertNotIn("~/.claude/plain-english/events.jsonl", content)
+        # The report must name the configured log, never the default one. Computing
+        # the default keeps this assertion meaningful after the XDG move.
+        saved = os.environ.pop("COPYDESK_STATE_DIR", None)
+        try:
+            default_events = linter._display_path(linter._state_directory() / "events.jsonl")
+        finally:
+            if saved is not None:
+                os.environ["COPYDESK_STATE_DIR"] = saved
+        self.assertNotIn(default_events, content)
 
 
 if __name__ == "__main__":

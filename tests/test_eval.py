@@ -14,9 +14,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-EVALUATION = REPOSITORY_ROOT / "tools" / "plain-english" / "eval"
-LIBRARY = REPOSITORY_ROOT / "tools" / "plain-english" / "lib"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+EVALUATION = REPOSITORY_ROOT / "eval"
+LIBRARY = REPOSITORY_ROOT / "lib"
 sys.path.insert(0, str(LIBRARY))
 
 import linter  # noqa: E402

@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Git pre-commit hook for claude-code-resources.
-# Runs Plain English tests before committing to prevent regressions in rules or linter checks.
+# Git pre-commit hook for CopyDesk.
+# Runs the CopyDesk test suite before committing, so a rule or linter
+# regression cannot reach a commit.
+#
+# No path guard. An earlier version guarded on a bundle path and exited 0
+# in silence once that path moved, which is the failure mode this hook
+# exists to prevent.
 
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-if [ -f "tools/plain-english/tests/test_checks.py" ] && [ -f "tools/plain-english/tests/test_rules_sync.py" ]; then
-    python3 -m unittest discover tools/plain-english/tests/
-fi
+python3 -m unittest discover tests/

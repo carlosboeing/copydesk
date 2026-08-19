@@ -1,0 +1,8 @@
+# The private working-memory sidecar. carlosboeing/copydesk-workbench is
+# cloned here as an independent git repository, nested rather than
+# submoduled, so this public repository must never track it.
+.workbench/
+
+# Python bytecode
+__pycache__/
+*.pyc

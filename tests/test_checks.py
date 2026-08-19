@@ -1,4 +1,4 @@
-"""Behavior tests for the Plain English CLI and PreToolUse wrapper."""
+"""Behavior tests for the CopyDesk CLI and PreToolUse wrapper."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ import unittest
 from pathlib import Path
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-CLI = REPOSITORY_ROOT / "tools" / "plain-english" / "bin" / "plain-english"
-GATE = REPOSITORY_ROOT / "tools" / "plain-english" / "hooks" / "gate.sh"
-INSTALLER = REPOSITORY_ROOT / "tools" / "plain-english" / "install.sh"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+CLI = REPOSITORY_ROOT / "bin" / "copydesk"
+GATE = REPOSITORY_ROOT / "hooks" / "gate.sh"
+INSTALLER = REPOSITORY_ROOT / "install.sh"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 _MODULE_TEMP_DIR: tempfile.TemporaryDirectory | None = None
@@ -25,16 +25,16 @@ _ORIG_STATE_DIR: str | None = None
 def setUpModule() -> None:
     global _MODULE_TEMP_DIR, _ORIG_STATE_DIR
     _MODULE_TEMP_DIR = tempfile.TemporaryDirectory()
-    _ORIG_STATE_DIR = os.environ.get("PLAIN_ENGLISH_STATE_DIR")
-    os.environ["PLAIN_ENGLISH_STATE_DIR"] = _MODULE_TEMP_DIR.name
+    _ORIG_STATE_DIR = os.environ.get("COPYDESK_STATE_DIR")
+    os.environ["COPYDESK_STATE_DIR"] = _MODULE_TEMP_DIR.name
 
 
 def tearDownModule() -> None:
     global _MODULE_TEMP_DIR, _ORIG_STATE_DIR
     if _ORIG_STATE_DIR is not None:
-        os.environ["PLAIN_ENGLISH_STATE_DIR"] = _ORIG_STATE_DIR
+        os.environ["COPYDESK_STATE_DIR"] = _ORIG_STATE_DIR
     else:
-        os.environ.pop("PLAIN_ENGLISH_STATE_DIR", None)
+        os.environ.pop("COPYDESK_STATE_DIR", None)
     if _MODULE_TEMP_DIR is not None:
         _MODULE_TEMP_DIR.cleanup()
         _MODULE_TEMP_DIR = None
@@ -43,8 +43,8 @@ def tearDownModule() -> None:
 class PlainEnglishCliTests(unittest.TestCase):
     def run_fixture(self, name: str) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
-        if "PLAIN_ENGLISH_STATE_DIR" not in env and _MODULE_TEMP_DIR is not None:
-            env["PLAIN_ENGLISH_STATE_DIR"] = _MODULE_TEMP_DIR.name
+        if "COPYDESK_STATE_DIR" not in env and _MODULE_TEMP_DIR is not None:
+            env["COPYDESK_STATE_DIR"] = _MODULE_TEMP_DIR.name
         return subprocess.run(
             [sys.executable, str(CLI), str(FIXTURES / name)],
             check=False,
@@ -145,7 +145,7 @@ class PlainEnglishInstallTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             bin_dir = Path(temporary) / "bin"
-            installed = bin_dir / "plain-english"
+            installed = bin_dir / "copydesk"
             result = subprocess.run(
                 ["/usr/bin/env", "bash", str(INSTALLER), "--yes", "--bin-dir", str(bin_dir)],
                 check=False,
@@ -160,7 +160,7 @@ class PlainEnglishInstallTests(unittest.TestCase):
             environment = os.environ.copy()
             environment["PATH"] = f"{bin_dir}{os.pathsep}{environment['PATH']}"
             invocation = subprocess.run(
-                ["plain-english", str(FIXTURES / "good.md")],
+                ["copydesk", str(FIXTURES / "good.md")],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -175,7 +175,7 @@ class PlainEnglishGateTests(unittest.TestCase):
     def run_gate(self, payload: dict[str, object], state_dir: str) -> subprocess.CompletedProcess[str]:
         """Run the real shell wrapper with isolated retry-state storage."""
         environment = os.environ.copy()
-        environment["PLAIN_ENGLISH_STATE_DIR"] = state_dir
+        environment["COPYDESK_STATE_DIR"] = state_dir
         return subprocess.run(
             ["/usr/bin/env", "bash", str(GATE)],
             input=json.dumps(payload),
@@ -191,7 +191,7 @@ class PlainEnglishGateTests(unittest.TestCase):
             "session_id": "write-test",
             "tool_name": "Write",
             "tool_input": {
-                "file_path": "/tmp/plain-english-write.md",
+                "file_path": "/tmp/copydesk-write.md",
                 "content": "Delve into the report before approving the release.",
             },
         }
@@ -242,7 +242,7 @@ class PlainEnglishGateTests(unittest.TestCase):
             "session_id": "retry-test",
             "tool_name": "Write",
             "tool_input": {
-                "file_path": "/tmp/plain-english-retry.md",
+                "file_path": "/tmp/copydesk-retry.md",
                 "content": "The robust release needs a clearer description.",
             },
         }

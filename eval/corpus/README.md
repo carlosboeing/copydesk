@@ -1,6 +1,6 @@
 # The fixed prompt corpus
 
-Eight sequences of ten turns, used to measure whether Plain English v2 changed how Claude Code writes, and whether that change survives a long session. Authored 2026-08-17 by Carlos and Claude, before any condition was run.
+Eight sequences of ten turns, used to measure whether CopyDesk v2 changed how Claude Code writes, and whether that change survives a long session. Authored 2026-08-17 by Carlos and Claude, before any condition was run.
 
 **Do not change these files once condition A has been measured against them.** Every before-and-after comparison is anchored to this exact text. Editing a turn discards the comparison rather than improving it. Every other threshold in this design is free to tune; this is the one that is not.
 
@@ -8,7 +8,7 @@ Eight sequences of ten turns, used to measure whether Plain English v2 changed h
 
 All eight sequences run against **CrossRev, pinned at `c72d978`**.
 
-Not `claude-code-resources`. Running the corpus there would make the model read the Plain English design, plan and output style, priming it to write plainly in every condition and contaminating the thing being measured. CrossRev is real work, varied enough to carry all six categories, and contains no writing-style content.
+Not `claude-code-resources`. Running the corpus there would make the model read the CopyDesk design, plan and output style, priming it to write plainly in every condition and contaminating the thing being measured. CrossRev is real work, varied enough to carry all six categories, and contains no writing-style content.
 
 Several turns write files, so the checkout is reset between runs. Run two must start from the same tree as run one.
 

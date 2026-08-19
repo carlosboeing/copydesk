@@ -4,8 +4,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLI="$HERE/bin/plain-english"
-BIN_DIR="${PLAIN_ENGLISH_BIN_DIR:-$HOME/.local/bin}"
+CLI="$HERE/bin/copydesk"
+BIN_DIR="${COPYDESK_BIN_DIR:-$HOME/.local/bin}"
 ASSUME_YES=0
 
 while (( $# )); do
@@ -22,11 +22,11 @@ while (( $# )); do
 done
 
 if [[ ! -x "$CLI" || ! -f "$HERE/lib/linter.py" ]]; then
-  echo "error  install.sh must run from a complete Plain English bundle." >&2
+  echo "error  install.sh must run from a complete CopyDesk bundle." >&2
   exit 1
 fi
 
-TARGET="$BIN_DIR/plain-english"
+TARGET="$BIN_DIR/copydesk"
 if [[ -e "$TARGET" || -L "$TARGET" ]]; then
   if [[ -d "$TARGET" && ! -L "$TARGET" ]]; then
     echo "error  $TARGET is a directory." >&2

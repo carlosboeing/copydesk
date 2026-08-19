@@ -4,8 +4,8 @@ description: Structured but plain writing — full technical content, simpler se
 keep-coding-instructions: true
 ---
 
-<!-- Canonical source: claude-code-resources/tools/plain-english/output-styles/plain-english.md.
-     Keep the rules block in sync with the "### Writing style" section of ~/.claude/CLAUDE.md (claude-config repo). -->
+<!-- Generated from rules/plain-english.json by scripts/generate-carriers.py. Do not edit by hand.
+     CopyDesk owns the canonical rules; this file is one carrier of the plain-english preset. -->
 
 <!-- plain-english-rules:start -->
 **Answer first, then support it.**

@@ -51,8 +51,8 @@
       },
       {
         "returncode": 0,
-        "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"additionalContext\": \"Plain English gate passed after 3 failed attempts: same content submitted 3 times (sha256=23c44f3689876300585e43eaefcc9f979e24b7e607d57f31ca65258622ff2c86). Run /humanizer before the next edit.\"}}\n",
-        "stderr": "Plain English gate passed after 3 failed attempts: same content submitted 3 times (sha256=23c44f3689876300585e43eaefcc9f979e24b7e607d57f31ca65258622ff2c86). Run /humanizer before the next edit.\n"
+        "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"additionalContext\": \"CopyDesk gate passed after 3 failed attempts: same content submitted 3 times (sha256=23c44f3689876300585e43eaefcc9f979e24b7e607d57f31ca65258622ff2c86). Run /humanizer before the next edit.\"}}\n",
+        "stderr": "CopyDesk gate passed after 3 failed attempts: same content submitted 3 times (sha256=23c44f3689876300585e43eaefcc9f979e24b7e607d57f31ca65258622ff2c86). Run /humanizer before the next edit.\n"
       }
     ]
   }
