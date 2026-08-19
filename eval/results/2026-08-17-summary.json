@@ -2,5 +2,5 @@
   "rate": 8.09,
   "date": "2026-08-17",
   "statistic": "median across sequences at final turn",
-  "source": "eval/results/baseline-results.md"
+  "source": "docs/evidence/baseline-results.md"
 }

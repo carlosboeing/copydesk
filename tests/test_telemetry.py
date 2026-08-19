@@ -416,7 +416,9 @@ class TestTelemetry(unittest.TestCase):
         self.assertIsNotNone(summary)
         self.assertEqual(summary["rate"], 8.09)
         self.assertEqual(summary["date"], "2026-08-17")
-        self.assertEqual(summary["source"], "eval/results/baseline-results.md")
+        # The evidence page graduated to docs/evidence/ for a public reader; the
+        # summary must name where it actually lives.
+        self.assertEqual(summary["source"], "docs/evidence/baseline-results.md")
 
         # Empty directory fallback
         empty_dir = self.state_dir / "empty_results"

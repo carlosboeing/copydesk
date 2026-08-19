@@ -1,0 +1,21 @@
+{
+  "claude": {
+    "model": "opus[1m]",
+    "effort": "high",
+    "approval_mode": "auto",
+    "output_style": "plain-english",
+    "source": "~/.claude/settings.json"
+  },
+  "codex": {
+    "model": "gpt-5.6-terra",
+    "effort": "xhigh",
+    "approval_mode": "CLI default; no user-config override",
+    "source": "~/.codex/config.toml"
+  },
+  "kimi": {
+    "model": "kimi-code/k3",
+    "effort": "high",
+    "approval_mode": "prompt mode auto-approves tool calls",
+    "source": "~/.kimi-code/config.toml"
+  }
+}
