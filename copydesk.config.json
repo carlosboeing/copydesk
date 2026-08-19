@@ -5,9 +5,12 @@
     "unglossed-term": {
       "vocabulary": {
         "add": [
+          "ADR",
           "Agy",
           "Anthropic",
           "Antigravity",
+          "CHANGELOG.md",
+          "CONTRIBUTING.md",
           "Claude",
           "Codex",
           "Context7",
@@ -19,11 +22,16 @@
           "Grok",
           "Headroom",
           "Kimi",
+          "LICENSE",
           "Ollama",
           "Opus",
           "Penmark",
           "Playwright",
+          "README.md",
+          "ROADMAP.md",
           "RTK",
+          "SECURITY.md",
+          "SKILL.md",
           "Superpowers",
           "WebBridge"
         ],
@@ -52,6 +60,16 @@
             "RTK",
             "Superpowers",
             "WebBridge"
+          ],
+          "repository filenames this project names in prose and links": [
+            "ADR",
+            "CHANGELOG.md",
+            "CONTRIBUTING.md",
+            "LICENSE",
+            "README.md",
+            "ROADMAP.md",
+            "SECURITY.md",
+            "SKILL.md"
           ]
         }
       }

@@ -14,7 +14,9 @@ jobs:
       matrix:
         # The README states which interpreters are supported. This matrix is
         # what makes that claim checkable rather than assumed.
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        # The suite exercises eval/ as well as the linter, and eval/ needs
+        # tomllib. The shipped surface is tested separately and reaches lower.
+        python: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -65,3 +67,33 @@ jobs:
           python-version: "3.12"
       - name: Lint the public docs with the tool itself
         run: python3 bin/copydesk check README.md CONTRIBUTING.md SECURITY.md CHANGELOG.md docs/*.md docs/adrs/*.md docs/evidence/*.md
+
+  shipped-surface:
+    name: Shipped surface on Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.10"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # Only what npm publishes: bin, lib, rules, hooks, output-styles. The
+      # README states a floor of 3.9, and this is what makes that checkable.
+      - name: Exercise the published files on an older interpreter
+        run: |
+          set -euo pipefail
+          python3 bin/copydesk --version
+          python3 bin/copydesk doctor > /dev/null
+          printf 'A short sentence has enough words for this check.\n' \
+            | python3 bin/copydesk check -
+          set +e
+          printf 'This approach is robust and comprehensive.\n' \
+            | python3 bin/copydesk check -
+          status=$?
+          set -e
+          test "$status" -eq 1 || { echo "expected exit 1 for findings, got $status"; exit 1; }
+          echo "shipped surface works on $(python3 --version)"
