@@ -1,6 +1,6 @@
 # CopyDesk — instructions for AI agents
 
-This file is auto-loaded on every session. `AGENTS.md` symlinks to it for harnesses that expect that filename.
+Auto-loaded on every session. `AGENTS.md` symlinks here for harnesses that expect that filename.
 
 CopyDesk is a prose gate for AI agents. It occupies two pipeline positions no other tool stands in: rules enter the model's context before generation, and a write is refused at write time so the model must revise. The rule engine is harness-neutral; per-harness adapters translate payloads at the edge.
 
@@ -18,7 +18,7 @@ The trap that catches people: in help text, `copydesk check README.md` stays low
 
 ## Two repositories, one working tree
 
-This public repository has a private working-memory sidecar, `carlosboeing/copydesk-workbench`, cloned as an independent git repository at `.workbench/` and git-ignored here. Penmark and CrossRev both use the same arrangement.
+A private working-memory sidecar sits beside this repository: `carlosboeing/copydesk-workbench`, cloned as an independent git repository at `.workbench/` and git-ignored here. Penmark and CrossRev both use the same arrangement.
 
 **Never cross-commit.** Plain `git …` targets this public repository. `git -C .workbench …` targets the private workbench. No command legitimately stages both.
 
@@ -45,7 +45,9 @@ The telemetry event schema is versioned separately and joins this list unchanged
 
 ## Distribution
 
-Published to npm as `copydesk`. **The decided fallback is `copydesk-ai`**, matching `crossrev-ai`, which took the same suffix for the same reason. npm's similarity check runs only at publish time and refused `crossrev` with no appeal. The installed command stays `copydesk` under either name, because `bin` decides that rather than the package name.
+Published to npm as **`copydesk`**. The name was free and npm accepted it, so the `copydesk-ai` fallback was never needed.
+
+The fallback existed because npm refused `crossrev` for a sibling project, and that check runs only at publish time with no advance query and no appeal. The `-ai` suffix is a collision workaround for that one name rather than a house convention.
 
 Versioning follows the house pattern: a root `VERSION` file, `vX.Y.Z` tags, a floating `v0`, and Keep a Changelog format.
 

@@ -32,7 +32,17 @@ The trap that catches people: in help text, `copydesk check README.md` stays low
 
 ## Consequences
 
-The npm package may need to be `copydesk-ai`. npm's similarity check runs only at publish time, and it refused `crossrev` with no appeal. The installed command stays `copydesk` either way, because `bin` decides that rather than the package name.
+**npm accepted `copydesk`.** Published as `copydesk@0.1.0` on 2026-08-19, so the `copydesk-ai` fallback recorded here in advance was never used.
+
+npm's similarity check runs at publish time only. There is no advance query and no appeal, and it had refused the bare name for a sibling project. Deciding a fallback beforehand meant a rejection could not stall the release.
+
+The sibling rejection was re-tested on the same day and is permanent. npm names `cross-env` as the collision. It normalises to `crossenv`, which differs from `crossrev` at two positions, and it is among the most-downloaded packages on the registry.
+
+Nothing on npm sits that close to `copydesk`.
+
+The `-ai` suffix is therefore a workaround for one name rather than a convention. A scoped `@carlosboeing/copydesk` was considered and declined. It buys symmetry with a constraint this project does not have, at the cost of a longer name everywhere.
+
+The installed command is `copydesk` regardless, because the `bin` field decides that rather than the package name.
 
 ## The instructive rejections
 

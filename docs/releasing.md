@@ -61,6 +61,8 @@ Run the workflow manually from the Actions tab with **dry run** left ticked. The
 
 ## If npm refuses the name
 
-npm's similarity check runs at publish time, not before. If `copydesk` is refused, the fallback is **`copydesk-ai`**, matching `crossrev-ai`, which took the same suffix for the same reason.
+npm accepted `copydesk` at `0.1.0`, so this does not apply to the current name. It is kept because the check runs at publish time only, with no advance query and no appeal, and a future rename would face it again.
+
+The fallback is **`copydesk-ai`**. A sibling project publishes as `crossrev-ai` for exactly this reason: npm refuses the bare `crossrev` as too similar to `cross-env`.
 
 Change `name` in `package.json` only. The installed command stays `copydesk`, because the `bin` field decides that rather than the package name. Record the refusal in `README.md` and in an ADR rather than hiding it.
