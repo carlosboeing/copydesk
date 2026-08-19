@@ -103,125 +103,98 @@ def _compiled(expression: str, flags: int = re.IGNORECASE) -> re.Pattern[str]:
     return re.compile(expression, flags)
 
 
-# This inventory is verified by tests/test_rules_sync.py. Its text mirrors the
-# mechanically enforceable quoted phrases in the Decision 2 rules block.
-RULE_PATTERNS: tuple[RulePattern, ...] = (
-    RulePattern("as noted above", _compiled(r"\bas noted above\b"), "orphan-pointer", "error"),
-    RulePattern("as mentioned earlier", _compiled(r"\bas mentioned earlier\b"), "orphan-pointer", "error"),
-    RulePattern("the former", _compiled(r"\bthe former\b"), "orphan-pointer", "error"),
-    RulePattern("the latter", _compiled(r"\bthe latter\b"), "orphan-pointer", "error"),
-    RulePattern("per point N", _compiled(r"\bper point \d+\b"), "orphan-pointer", "error"),
-    RulePattern("see above", _compiled(r"\bsee above\b"), "orphan-pointer", "error"),
-    RulePattern("seam", _compiled(r"\bseams?\b"), "banned-word", "error"),
-    RulePattern("load-bearing", _compiled(r"\bload-bearing\b"), "banned-word", "error"),
-    RulePattern("blast radius", _compiled(r"\bblast radius\b"), "banned-word", "error"),
-    RulePattern("affordance", _compiled(r"\baffordances?\b"), "banned-word", "error"),
-    RulePattern("first-class", _compiled(r"\bfirst-class\b"), "banned-word", "error"),
-    RulePattern("escape hatch", _compiled(r"\bescape hatch\b"), "banned-word", "error"),
-    RulePattern("actually", _compiled(r"\bactually\b"), "banned-word", "error"),
-    RulePattern("genuinely", _compiled(r"\bgenuinely\b"), "banned-word", "error"),
-    RulePattern("simply", _compiled(r"\bsimply\b"), "banned-word", "error"),
-    RulePattern("basically", _compiled(r"\bbasically\b"), "banned-word", "error"),
-    RulePattern("really", _compiled(r"\breally\b"), "banned-word", "error"),
-    RulePattern("effectively", _compiled(r"\beffectively\b"), "banned-word", "error"),
-    RulePattern("essentially", _compiled(r"\bessentially\b"), "banned-word", "error"),
-    RulePattern("fundamentally", _compiled(r"\bfundamentally\b"), "banned-word", "error"),
-    RulePattern("materially", _compiled(r"\bmaterially\b"), "banned-word", "error"),
-    RulePattern("arguably", _compiled(r"\barguably\b"), "banned-word", "error"),
-    RulePattern("meaningfully", _compiled(r"\bmeaningfully\b"), "banned-word", "error"),
-    RulePattern("honestly", _compiled(r"\bhonestly\b"), "banned-word", "error"),
-    RulePattern("delve", _compiled(r"\bdelv\w*\b"), "banned-word", "error"),
-    RulePattern("utilize", _compiled(r"\butiliz\w*\b"), "banned-word", "error"),
-    RulePattern("it's worth noting", _compiled(r"\bit(?:'|’)s worth noting\b"), "banned-word", "error"),
-    RulePattern("a testament to", _compiled(r"\ba testament to\b"), "banned-word", "error"),
-    RulePattern("crucial", _compiled(r"\bcrucial\b"), "banned-word", "error"),
-    RulePattern("pivotal", _compiled(r"\bpivotal\b"), "banned-word", "error"),
-    RulePattern("showcase", _compiled(r"\bshowcas\w*\b"), "banned-word", "error"),
-    RulePattern("intricate", _compiled(r"\bintricat\w*\b"), "banned-word", "error"),
-    RulePattern("robust", _compiled(r"\brobust\b"), "banned-word", "error"),
-    RulePattern("comprehensive", _compiled(r"\bcomprehensive\b"), "banned-word", "error"),
-    RulePattern("surface", _compiled(r"\bsurfac(?:e|ed|es|ing)\b"), "verb-jargon", "warning"),
-    RulePattern("land", _compiled(r"\bland(?:s|ed|ing)?\b"), "verb-jargon", "warning"),
-    RulePattern("leverage", _compiled(r"\bleverag\w*\b"), "verb-jargon", "warning"),
-    RulePattern("underscore", _compiled(r"\bunderscor\w*\b"), "verb-jargon", "warning"),
-    RulePattern("landscape", _compiled(r"\blandscape\b"), "verb-jargon", "warning"),
-    RulePattern(
-        "It's not just X — it's Y",
-        _compiled(r"\b(?:it\s+(?:is|was)|it(?:'|’)s)?\s*not just\b.{0,160}?(?:\bbut\b|[—–-]\s*(?:it\s+(?:is|was)|it(?:'|’)s)\b)"),
-        "contrast-construction",
-        "error",
-    ),
-    RulePattern("say the word", _compiled(r"\bsay the word\b"), "soft-offer", "error"),
-    RulePattern("just let me know", _compiled(r"\bjust let me know\b"), "soft-offer", "error"),
-    RulePattern("happy to", _compiled(r"\bhappy to\b"), "soft-offer", "error"),
-    RulePattern("feel free to", _compiled(r"\bfeel free to\b"), "soft-offer", "error"),
-    RulePattern("if you'd like", _compiled(r"\bif you(?:'|’)d like\b"), "soft-offer", "error"),
-    RulePattern("would you like", _compiled(r"\bwould you like\b"), "soft-offer", "error"),
-    RulePattern("want me to", _compiled(r"\bwant me to\b"), "soft-offer", "error"),
-    RulePattern("should I continue", _compiled(r"\bshould i continue\b"), "soft-offer", "error"),
-    RulePattern("I hope this helps", _compiled(r"\bi hope this helps\b"), "soft-offer", "error"),
-    RulePattern("Great question", _compiled(r"(?m)^[ \t]*great question\b"), "announcing-opener", "error"),
-    RulePattern("Let me…", _compiled(r"(?m)^[ \t]*let me\b"), "announcing-opener", "error"),
-    RulePattern("I'll…", _compiled(r"(?m)^[ \t]*i(?:'|’)ll\b"), "announcing-opener", "error"),
-    RulePattern("Sure!", _compiled(r"(?m)^[ \t]*sure(?:!|\b)"), "announcing-opener", "error"),
-    RulePattern("Looking at your…", _compiled(r"(?m)^[ \t]*looking at your\b"), "announcing-opener", "error"),
-    RulePattern("To answer your question…", _compiled(r"(?m)^[ \t]*to answer your question\b"), "announcing-opener", "error"),
-    RulePattern("Moreover", _compiled(r"(?m)^[ \t]*moreover\b"), "announcing-opener", "error"),
-    RulePattern("Furthermore", _compiled(r"(?m)^[ \t]*furthermore\b"), "announcing-opener", "error"),
-    RulePattern("Additionally", _compiled(r"(?m)^[ \t]*additionally\b"), "announcing-opener", "error"),
-    RulePattern("In conclusion", _compiled(r"(?m)^[ \t]*in conclusion\b"), "announcing-opener", "error"),
-    RulePattern("circle back", _compiled(r"\bcircle back\b"), "idiom", "error"),
-    RulePattern("get the ball rolling", _compiled(r"\bget the ball rolling\b"), "idiom", "error"),
-    RulePattern("on the same page", _compiled(r"\bon the same page\b"), "idiom", "error"),
-    RulePattern("moving forward", _compiled(r"\bmoving forward\b"), "idiom", "error"),
-    RulePattern("Uh oh", _compiled(r"(?m)^[ \t]*uh oh\b"), "announcing-opener", "error"),
-    RulePattern("Oh no", _compiled(r"(?m)^[ \t]*oh no\b"), "announcing-opener", "error"),
-    RulePattern("There seems to be a problem", _compiled(r"(?m)^[ \t]*there seems to be a problem\b"), "announcing-opener", "error"),
-    RulePattern("sentence-initial This/That", _compiled(r"(?m)^[ \t]*(?:this|that)\b"), "orphan-pointer", "error"),
-)
+# The rule inventory is data. rules/<preset>.json owns it, and this module
+# compiles it at import. tests/test_rules_sync.py verifies that every executable
+# token reaches the compiled inventory and that the generated carriers match.
+#
+# Compilation order is the preset's order, and it is stable, because lint()
+# sorts findings by line, severity, check and excerpt.
+
+
+def _preset_path() -> Path:
+    """Find the preset document.
+
+    Three locations, in order. The installed hook copy sits beside linter.py
+    with no bundle around it, so that case is searched explicitly rather than
+    left to fail.
+    """
+    override = os.environ.get("COPYDESK_RULES")
+    if override:
+        return Path(override)
+    here = Path(__file__).resolve()
+    candidates = (
+        here.parents[1] / "rules" / "plain-english.json",   # source bundle
+        here.parent / "rules" / "plain-english.json",       # installed beside linter.py
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0]
+
+
+class PresetNotFound(RuntimeError):
+    """The rule data is missing, so there is nothing to compile."""
+
+
+def load_preset(path: Optional[Path] = None) -> dict:
+    target = path or _preset_path()
+    try:
+        return json.loads(target.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise PresetNotFound(
+            f"CopyDesk cannot find its rule data at {target}. "
+            "Install rules/plain-english.json beside linter.py, or point "
+            "COPYDESK_RULES at the preset."
+        ) from error
+
+
+def _anchor(scope: str, body: str) -> str:
+    """Wrap a token body in the anchors its scope implies.
+
+    Token bodies are regular expressions, matching Vale's `existence` tokens.
+    A plain word is a regular expression matching itself, so adding one needs
+    no regex knowledge.
+    """
+    if scope == "word":
+        return r"\b" + body + r"\b"
+    if scope == "line-initial":
+        return r"(?m)^[ \t]*" + body
+    if scope == "raw":
+        return body
+    raise ValueError(f"unknown pattern scope: {scope!r}")
+
+
+def compile_patterns(preset: dict) -> tuple[RulePattern, ...]:
+    compiled: list[RulePattern] = []
+    for block in preset["patterns"]:
+        if block.get("kind", "existence") != "existence":
+            raise ValueError(f"unsupported pattern kind: {block.get('kind')!r}")
+        flags = re.IGNORECASE if block.get("ignorecase", True) else 0
+        for token in block["tokens"]:
+            phrase = token if isinstance(token, str) else token["phrase"]
+            body = token if isinstance(token, str) else token["match"]
+            compiled.append(
+                RulePattern(
+                    phrase,
+                    re.compile(_anchor(block.get("scope", "word"), body), flags),
+                    block["id"],
+                    block["severity"],
+                )
+            )
+    return tuple(compiled)
+
+
+PRESET = load_preset()
+RULE_PATTERNS: tuple[RulePattern, ...] = compile_patterns(PRESET)
 
 # The rules block also quotes advisory instructions and worked examples that a
-# regex must not enforce. Keep their exact text in the same inventory, so a
+# regex must not enforce. Their exact text stays in the same inventory, so a
 # rules-block edit cannot silently escape the sync test. RULE_PATTERNS remains
 # the executable subset; test_checks.py proves its behavior separately.
-CANONICAL_REFERENCE_PHRASES = (
-    "About 15 minutes if tests cover this, an afternoon if not",
-    "I've now updated the schema, added the index and adjusted the migration, which means…",
-    "Login works with magic links. Try `npm run dev`, open `/login`.",
-    "Step 3 of 5 done, next is the backfill.",
-    "What are my options",
-    "and",
-    "anything else?",
-    "by the way",
-    "clean",
-    "do now",
-    "elaborate",
-    "found",
-    "landed",
-    "lands",
-    "later",
-    "raised",
-    "shipped",
-    "showed",
-    "some work",
-    "still broken",
-    "that",
-    "this",
-)
+CANONICAL_REFERENCE_PHRASES = tuple(PRESET["reference_phrases"])
 
 PATTERN_TEXTS = tuple(pattern.phrase for pattern in RULE_PATTERNS) + CANONICAL_REFERENCE_PHRASES
-AI_TELL_PHRASES = frozenset(
-    {
-        "delve",
-        "utilize",
-        "it's worth noting",
-        "a testament to",
-        "crucial",
-        "pivotal",
-        "showcase",
-        "intricate",
-    }
-)
+AI_TELL_PHRASES = frozenset(PRESET["ai_tells"])
 
 
 _FRONTMATTER = re.compile(r"\A---[ \t]*\n.*?^(?:---|\.\.\.)[ \t]*(?:\n|$)", re.MULTILINE | re.DOTALL)

@@ -48,6 +48,7 @@ copydesk report --out docs/telemetry-report.md
 
 - `COPYDESK_LOG=0`: Disables event writing entirely.
 - `COPYDESK_LOG_FLAGGED_TEXT=0`: Logs rule names and line numbers while omitting `flagged_text` snippets for privacy.
+- `COPYDESK_RULES`: Points at the preset document. Defaults to `rules/plain-english.json` beside the bundle, then beside `linter.py` for an installed hook copy.
 - `COPYDESK_STATE_DIR`: Overrides the default state directory (`$XDG_STATE_HOME/copydesk/`, falling back to `~/.local/state/copydesk/`).
 
 ## Install the CLI from a checkout
@@ -75,6 +76,8 @@ mkdir -p ~/.claude/hooks/copydesk
 cp hooks/gate.sh ~/.claude/hooks/copydesk/gate.sh
 cp hooks/reminder.sh ~/.claude/hooks/copydesk/reminder.sh
 cp lib/linter.py ~/.claude/hooks/copydesk/linter.py
+mkdir -p ~/.claude/hooks/copydesk/rules
+cp rules/plain-english.json ~/.claude/hooks/copydesk/rules/
 chmod +x ~/.claude/hooks/copydesk/gate.sh ~/.claude/hooks/copydesk/reminder.sh
 ```
 
