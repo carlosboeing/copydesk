@@ -32,7 +32,10 @@
     "hooks/",
     "output-styles/",
     "VERSION",
-    "LICENSE"
+    "LICENSE",
+    "!**/__pycache__",
+    "!**/*.pyc",
+    "!**/*.pyo"
   ],
   "engines": {
     "node": ">=18"
