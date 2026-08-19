@@ -1,9 +1,10 @@
 # CopyDesk
 
+[![npm](https://img.shields.io/npm/v/copydesk.svg)](https://www.npmjs.com/package/copydesk)
 [![test](https://github.com/carlosboeing/copydesk/actions/workflows/test.yml/badge.svg)](https://github.com/carlosboeing/copydesk/actions/workflows/test.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![python: 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
-[![status: 0.1.0](https://img.shields.io/badge/status-0.1.0%20pre--release-orange.svg)](docs/ROADMAP.md)
+[![status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-orange.svg)](docs/ROADMAP.md)
 
 **A prose gate for AI coding agents.** It refuses the write, so the bad sentence never reaches the file.
 
@@ -72,7 +73,17 @@ There is a second gap. Roughly half of an agent's prose is chat that never becom
 
 ## Install
 
-From a checkout. This puts `copydesk` on your `PATH` and changes nothing else:
+```bash
+npm install -g copydesk
+```
+
+Or run it without installing:
+
+```bash
+npx copydesk check README.md
+```
+
+Or from a checkout, which puts `copydesk` on your `PATH` and changes nothing else:
 
 ```bash
 git clone https://github.com/carlosboeing/copydesk.git
@@ -80,7 +91,7 @@ cd copydesk
 ./install.sh
 ```
 
-CopyDesk needs Python 3.9 or later and nothing else. There are no third-party packages to install, deliberately: the gate runs on every file an agent writes, so a slow import or a dependency conflict would be felt on every keystroke.
+CopyDesk is a Python program distributed through npm, because npm never inspects the language of an executable it places on the path. It needs Python 3.9 or later and nothing else. There are no third-party packages to install, deliberately: the gate runs on every file an agent writes, so a slow import or a dependency conflict would be felt on every keystroke.
 
 Verify the install at any time:
 
