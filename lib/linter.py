@@ -111,6 +111,12 @@ def _compiled(expression: str, flags: int = re.IGNORECASE) -> re.Pattern[str]:
 # sorts findings by line, severity, check and excerpt.
 
 
+try:
+    import config
+except ImportError:  # pragma: no cover - the linter still lints without a cascade
+    config = None
+
+
 def _preset_path() -> Path:
     """Find the preset document.
 
@@ -169,6 +175,8 @@ def compile_patterns(preset: dict) -> tuple[RulePattern, ...]:
     for block in preset["patterns"]:
         if block.get("kind", "existence") != "existence":
             raise ValueError(f"unsupported pattern kind: {block.get('kind')!r}")
+        if block["severity"] == "off":
+            continue
         flags = re.IGNORECASE if block.get("ignorecase", True) else 0
         for token in block["tokens"]:
             phrase = token if isinstance(token, str) else token["phrase"]
@@ -186,6 +194,75 @@ def compile_patterns(preset: dict) -> tuple[RulePattern, ...]:
 
 PRESET = load_preset()
 RULE_PATTERNS: tuple[RulePattern, ...] = compile_patterns(PRESET)
+
+# Resolved presets, keyed by the config files that produced them. The gate runs
+# on every Write and Edit, so re-reading and re-compiling per document would be
+# a latency cost on the measured 17 ms median.
+_PRESET_CACHE: dict[tuple, tuple[dict, tuple[RulePattern, ...]]] = {}
+_REPORTED_CONFIG_ERRORS: set[str] = set()
+
+
+def _rules_dir() -> Path:
+    return _preset_path().parent
+
+
+def effective_preset(path=None) -> tuple[dict, tuple[RulePattern, ...]]:
+    """The preset for one document, after the config cascade.
+
+    Fails open. A config error is reported once and the built-in preset is
+    used, because a gate that blocks on its own misconfiguration is worse
+    than one that lets the write through.
+    """
+    if config is None or path is None:
+        return PRESET, RULE_PATTERNS
+    try:
+        user = config.user_config_path()
+        project = config.project_config_path(path)
+    except config.ConfigError as error:
+        _report_config_error(str(error))
+        return PRESET, RULE_PATTERNS
+
+    if user is None and project is None:
+        return PRESET, RULE_PATTERNS
+
+    key = (
+        (str(user), user.stat().st_mtime_ns) if user else None,
+        (str(project), project.stat().st_mtime_ns) if project else None,
+    )
+    cached = _PRESET_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    try:
+        resolved = config.resolve(_rules_dir(), path, user_path=user, project_path=project)
+        compiled = compile_patterns(resolved)
+    except config.ConfigError as error:
+        _report_config_error(str(error))
+        return PRESET, RULE_PATTERNS
+
+    _PRESET_CACHE[key] = (resolved, compiled)
+    return resolved, compiled
+
+
+def _report_config_error(message: str) -> None:
+    """Say so, once per message, and record it. Never block."""
+    if message in _REPORTED_CONFIG_ERRORS:
+        return
+    _REPORTED_CONFIG_ERRORS.add(message)
+    print(f"copydesk config error  {message}", file=sys.stderr)
+    try:
+        _record_event({"event": "config_error", "message": message})
+    except Exception:
+        pass
+
+
+def _rule_severity(preset: dict, rule_id: str, default: str) -> str:
+    """Config vocabulary in, internal vocabulary out."""
+    entry = (preset.get("rules") or {}).get(rule_id) or {}
+    declared = entry.get("severity")
+    if declared is None:
+        return default
+    return config.SEVERITY_TO_INTERNAL.get(declared, default) if config else default
 
 # The rules block also quotes advisory instructions and worked examples that a
 # regex must not enforce. Their exact text stays in the same inventory, so a
@@ -299,7 +376,7 @@ def _document_is_exempt(path: Optional[Union[str, Path]], text: str) -> bool:
     return list_lines * 2 > len(lines)
 
 
-def _paragraph_findings(text: str, *, exempt: bool) -> Iterable[Finding]:
+def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error") -> Iterable[Finding]:
     if exempt:
         return ()
     findings: list[Finding] = []
@@ -312,13 +389,13 @@ def _paragraph_findings(text: str, *, exempt: bool) -> Iterable[Finding]:
         paragraph_sentences = _sentence_records(paragraph)
         if len(paragraph_sentences) > 4:
             line = _line_number(text, max(0, position))
-            findings.append(Finding(line, "paragraph-length", _excerpt(paragraph), "error"))
+            findings.append(Finding(line, "paragraph-length", _excerpt(paragraph), severity))
     return findings
 
 
-def _pattern_findings(text: str) -> Iterable[Finding]:
+def _pattern_findings(text: str, patterns: Optional[tuple[RulePattern, ...]] = None) -> Iterable[Finding]:
     findings: list[Finding] = []
-    for pattern in RULE_PATTERNS:
+    for pattern in (RULE_PATTERNS if patterns is None else patterns):
         for match in pattern.regex.finditer(text):
             findings.append(
                 Finding(
@@ -355,44 +432,54 @@ def lint(text: str, path: Optional[Union[str, Path]] = None) -> list[Finding]:
     The function is deliberately dependency-free so the CLI, hook, and future
     measurement scripts can import exactly the same exclusions and rules.
     """
+    preset, patterns = effective_preset(path)
     body = exclude_markdown(text)
     records = _sentence_records(body)
     exempt = _document_is_exempt(path, body)
     findings: list[Finding] = []
 
-    for sentence in records:
-        if sentence.words > LONG_SENTENCE_ERROR_WORDS:
-            findings.append(Finding(sentence.line, "sentence-length", _excerpt(sentence.text), "error"))
-        elif sentence.words > LONG_SENTENCE_WARNING_WORDS:
-            findings.append(Finding(sentence.line, "sentence-length", _excerpt(sentence.text), "warning"))
+    sentence_severity = _rule_severity(preset, "sentence-length", "warning")
+    paragraph_severity = _rule_severity(preset, "paragraph-length", "error")
+    rate_severity = _rule_severity(preset, "long-sentence-rate", "error")
+    average_severity = _rule_severity(preset, "avg-sentence-length", "warning")
+    variation_severity = _rule_severity(preset, "sentence-variation", "warning")
 
-    findings.extend(_paragraph_findings(body, exempt=exempt))
+    if sentence_severity != "off":
+        for sentence in records:
+            if sentence.words > LONG_SENTENCE_ERROR_WORDS:
+                findings.append(Finding(sentence.line, "sentence-length", _excerpt(sentence.text), "error"))
+            elif sentence.words > LONG_SENTENCE_WARNING_WORDS:
+                findings.append(Finding(sentence.line, "sentence-length", _excerpt(sentence.text), sentence_severity))
+
+    if paragraph_severity != "off":
+        findings.extend(_paragraph_findings(body, exempt=exempt, severity=paragraph_severity))
 
     if not exempt and len(records) >= FILE_STATISTICS_MIN_SENTENCES:
         long_sentences = [sentence for sentence in records if sentence.words > LONG_SENTENCE_WARNING_WORDS]
-        if len(long_sentences) * 10 > len(records):
+        if rate_severity != "off" and len(long_sentences) * 10 > len(records):
             findings.append(
                 Finding(
                     1,
                     "long-sentence-rate",
                     f"{len(long_sentences)}/{len(records)} qualifying sentences exceed {LONG_SENTENCE_WARNING_WORDS} words",
-                    "error",
+                    rate_severity,
                 )
             )
 
         average = sum(sentence.words for sentence in records) / len(records)
-        if average < AVG_SENTENCE_MIN_WORDS or average > AVG_SENTENCE_MAX_WORDS:
+        if average_severity != "off" and (average < AVG_SENTENCE_MIN_WORDS or average > AVG_SENTENCE_MAX_WORDS):
             findings.append(
-                Finding(1, "avg-sentence-length", f"average sentence length is {average:.1f} words", "warning")
+                Finding(1, "avg-sentence-length", f"average sentence length is {average:.1f} words", average_severity)
             )
 
         variation = sqrt(sum((sentence.words - average) ** 2 for sentence in records) / len(records))
         if variation < MIN_SENTENCE_VARIATION:
-            findings.append(
-                Finding(1, "sentence-variation", f"sentence length variation is {variation:.1f} words", "warning")
-            )
+            if variation_severity != "off":
+                findings.append(
+                    Finding(1, "sentence-variation", f"sentence length variation is {variation:.1f} words", variation_severity)
+                )
 
-    findings.extend(_pattern_findings(body))
+    findings.extend(_pattern_findings(body, patterns))
     findings.extend(_nested_table_findings(text))
     return sorted(findings, key=lambda finding: (finding.line, finding.severity != "error", finding.check, finding.excerpt))
 
