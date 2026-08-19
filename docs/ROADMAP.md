@@ -32,6 +32,32 @@ YAML joins JSON rather than replacing it. Dropping a format is not backwards-com
 
 ## Under consideration
 
+**`copydesk install --git-hook`, a pre-commit hook for a consumer's own repository.** `install` is already reserved in the frozen command surface, so the name is waiting for it.
+
+Today CopyDesk ships a `git-hooks/pre-commit` that runs *its own* test suite. That helps contributors here and nobody else. A consumer wanting their staged Markdown checked has to write the hook themselves, and the obvious one-liner is wrong: it lints whole files rather than staged content, so an unrelated pre-existing error blocks a commit that did not cause it.
+
+The gate made the same mistake before `0.1.0` narrowed the retry scope, and the fix has the same shape. A hook should read `git diff --cached` and judge the added lines, not the file.
+
+**It is a third pipeline position**, between the two CopyDesk occupies and the two it does not.
+
+| When | What happens | Who is there |
+|---|---|---|
+| Before generation | Rules enter the model's context | CopyDesk |
+| At write time | The write is refused | CopyDesk |
+| **Before the commit** | **The commit is refused** | **nobody yet** |
+| After the file is saved | The file is scored | sloptrim |
+| In continuous integration | The build reports or fails | Vale |
+
+It catches what the gate cannot see: prose written through Bash, prose from a harness with no blocking hook, and prose a human typed. Roughly half the reason the on-demand skill exists is that same gap.
+
+Open questions that decide the shape.
+
+1. **Does it lint staged content or the working tree?** Staged is correct and harder. `git show :file` reads the staged blob, and the added-line ranges come from `git diff --cached --unified=0`.
+2. **Does it block, or warn?** A hook people bypass reflexively is worse than none. `--no-verify` must stay obvious and documented.
+3. **Does `install` also cover the harness hooks?** The Claude Code gate is currently five manual `cp` commands in the README. One subcommand covering both is tidier, but it widens a reserved name into a larger promise.
+
+Prior art worth reading before building: the retry-scope narrowing in `0.1.0`, which measured a benign edit's block rate falling from 72 per cent to 2 per cent once the decision moved from the document to the edited region.
+
 **`copydesk import vale <style>`.** Vale's `existence` and `substitution` checks are token lists carrying a message and a severity, and CopyDesk's pattern format deliberately matches that shape. An importer would be a translation rather than a redesign, and would hand CopyDesk the Microsoft and Google style guides plus the write-good, alex and proselint ports as presets. Vale is MIT licensed, so its ecosystem is usable.
 
 **Harness adapters beyond Claude Code.** The core takes text and a path and returns findings; everything harness-specific is payload translation at the edge. Claude Code is verified against live calls. Kimi Code, Cursor and Grok Build TUI each need a live transcript check before their adapter is claimed as working. Codex and Antigravity have no confirmed blocking hook and are covered by the on-demand skill.
