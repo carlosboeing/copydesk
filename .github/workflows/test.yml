@@ -1,0 +1,57 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  suite:
+    name: Python suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run the suite
+        run: python3 -m unittest discover tests/
+
+  carriers:
+    name: Generated carriers match the preset
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Re-render and compare
+        # A hand-edited carrier fails here rather than reaching a release.
+        run: python3 scripts/generate-carriers.py --check
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Check every shell script
+        run: |
+          shellcheck \
+            hooks/gate.sh \
+            hooks/reminder.sh \
+            install.sh \
+            git-hooks/pre-commit \
+            git-hooks/private-workbench-guard/pre-commit \
+            eval/run-corpus.sh
+
+  self-check:
+    name: CopyDesk checks its own documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Lint the public docs with the tool itself
+        run: python3 bin/copydesk check README.md CONTRIBUTING.md SECURITY.md CHANGELOG.md docs/*.md docs/adrs/*.md docs/evidence/*.md

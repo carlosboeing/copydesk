@@ -390,3 +390,81 @@ class UnglossedTermTests(unittest.TestCase):
         vocabulary = preset["rules"]["unglossed-term"]["vocabulary"]
         explained = {term for group in vocabulary["rationale"].values() for term in group}
         self.assertSetEqual(set(vocabulary["add"]), explained)
+
+
+class CommandSurfaceTests(unittest.TestCase):
+    """The frozen surface: commands, flags, environment variables and exit codes."""
+
+    def run_cli(self, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
+        env = dict(os.environ)
+        env.setdefault("COPYDESK_STATE_DIR", tempfile.mkdtemp())
+        return subprocess.run(
+            [sys.executable, str(CLI), *args], input=stdin, text=True, capture_output=True, env=env
+        )
+
+    def test_version_matches_the_version_file(self) -> None:
+        """The tag, VERSION and --version must agree, so read the file here."""
+        expected = (REPOSITORY_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        result = self.run_cli("--version")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), expected)
+
+    def test_check_accepts_paths(self) -> None:
+        result = self.run_cli("check", str(FIXTURES / "good.md"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_check_accepts_standard_input(self) -> None:
+        result = self.run_cli("check", "-", stdin="The design is robust.\n")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("banned-word", result.stdout)
+
+    def test_a_bare_path_still_lints(self) -> None:
+        """Every existing caller passes a path with no subcommand."""
+        result = self.run_cli(str(FIXTURES / "good.md"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_doctor_reports_and_never_mutates(self) -> None:
+        state = Path(tempfile.mkdtemp()) / "untouched"
+        env = dict(os.environ, COPYDESK_STATE_DIR=str(state))
+        result = subprocess.run(
+            [sys.executable, str(CLI), "doctor"], text=True, capture_output=True, env=env
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for section in ("Preset", "Config", "State", "Hooks", "Harness registration"):
+            self.assertIn(section, result.stdout)
+        self.assertFalse(state.exists(), "doctor must not create the state directory")
+
+    def test_doctor_rejects_options(self) -> None:
+        self.assertEqual(self.run_cli("doctor", "--json").returncode, 64)
+
+    def test_every_reserved_subcommand_refuses_clearly(self) -> None:
+        """Reserving them stops a 0.1.0 flag claiming a word a subcommand needs."""
+        for name in ("init", "install", "learn", "fix", "import"):
+            with self.subTest(subcommand=name):
+                result = self.run_cli(name)
+                self.assertEqual(result.returncode, 64)
+                self.assertIn("reserved", result.stderr)
+
+    def test_no_arguments_prints_usage_and_returns_sixty_four(self) -> None:
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 64)
+        self.assertIn("usage:", result.stderr)
+
+    def test_the_usage_text_names_every_subcommand(self) -> None:
+        result = self.run_cli("--help")
+        self.assertEqual(result.returncode, 0)
+        for name in ("check", "doctor", "stats", "report", "--version"):
+            self.assertIn(name, result.stdout)
+
+    def test_stats_and_report_are_unchanged(self) -> None:
+        self.assertEqual(self.run_cli("stats").returncode, 0)
+        self.assertEqual(self.run_cli("stats", "--json").returncode, 0)
+        self.assertEqual(self.run_cli("stats", "--since").returncode, 64)
+
+    def test_the_casing_rule_holds_in_printed_output(self) -> None:
+        """Printed output takes CopyDesk; the command and its arguments stay lowercase."""
+        stats = self.run_cli("stats").stdout
+        self.assertIn("CopyDesk", stats)
+        doctor = self.run_cli("doctor").stdout
+        self.assertIn("CopyDesk", doctor)
+        self.assertIn("copydesk", doctor)

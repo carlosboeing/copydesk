@@ -50,3 +50,5 @@ if [[ ! -x "$TARGET" ]]; then
 fi
 
 echo "installed $TARGET -> $CLI"
+echo "try: copydesk check README.md"
+echo "then: copydesk doctor"

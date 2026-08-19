@@ -212,8 +212,12 @@ run_sequence() {
     kimi_wire=""
 
     run_turn() {
-        local raw="$output_dir/turn-$(printf '%02d' "$turn").jsonl"
-        local stderr="$output_dir/turn-$(printf '%02d' "$turn").stderr"
+        # Declared before assignment, so a printf failure is not masked by local's
+        # own exit status. shellcheck SC2155.
+        local raw
+        local stderr
+        raw="$output_dir/turn-$(printf '%02d' "$turn").jsonl"
+        stderr="$output_dir/turn-$(printf '%02d' "$turn").stderr"
         case "$HARNESS" in
             claude)
                 if [[ -z "$session_id" ]]; then

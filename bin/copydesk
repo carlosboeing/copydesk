@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -91,22 +92,100 @@ def _handle_report(args: list[str]) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
-    if not args:
-        print("usage: copydesk <file.md> [...] | -", file=sys.stderr)
-        print("       copydesk stats [--since <window>] [--json]", file=sys.stderr)
-        print("       copydesk report [--since <window>] [--out <path>]", file=sys.stderr)
+# Reserved for later releases. Naming them now stops a 0.1.0 flag from claiming
+# a word a subcommand will need, and gives a clear message instead of linting a
+# file that does not exist.
+RESERVED_SUBCOMMANDS = ("init", "install", "learn", "fix", "import")
+
+SUBCOMMANDS = ("check", "doctor", "stats", "report")
+
+USAGE = """usage: copydesk check <file.md> [...] | -
+       copydesk doctor
+       copydesk stats [--since <window>] [--json]
+       copydesk report [--since <window>] [--out <path>]
+       copydesk --version
+
+CopyDesk is a prose gate for AI agents. Run `copydesk doctor` to see which
+config files and presets it resolves."""
+
+
+def _version() -> str:
+    try:
+        return (BUNDLE_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "unknown"
+
+
+def _handle_doctor(args: list[str]) -> int:
+    """Report what CopyDesk resolves. Never mutates anything."""
+    if args:
+        print(f"error: doctor takes no options, got '{args[0]}'", file=sys.stderr)
         return 64
 
-    command = args[0]
-    if command == "stats":
-        return _handle_stats(args[1:])
-    if command == "report":
-        return _handle_report(args[1:])
+    print(f"CopyDesk {_version()}")
+    print()
+
+    print("Preset")
+    preset_path = linter._preset_path()
+    print(f"  path      {preset_path}{'' if preset_path.is_file() else '   MISSING'}")
+    if preset_path.is_file():
+        preset = linter.load_preset(preset_path)
+        tokens = sum(len(b["tokens"]) for b in preset["patterns"])
+        print(f"  id        {preset['id']}")
+        print(f"  patterns  {len(preset['patterns'])} blocks, {tokens} tokens")
+        print(f"  rules     {len(preset.get('rules', {}))} metric and structural")
+    print()
+
+    print("Config")
+    discovery = linter.config.describe_discovery(Path.cwd()) if linter.config else {"user": None, "project": None, "errors": []}
+    print(f"  user      {discovery['user'] or 'none'}")
+    print(f"  project   {discovery['project'] or 'none'}")
+    for error in discovery["errors"]:
+        print(f"  error     {error}")
+    print()
+
+    print("State")
+    state_dir = linter._state_directory()
+    events = state_dir / "events.jsonl"
+    print(f"  directory {state_dir}{'' if state_dir.is_dir() else '   (not created yet)'}")
+    print(f"  events    {events if events.is_file() else 'none recorded yet'}")
+    print(f"  logging   {'off (COPYDESK_LOG=0)' if os.environ.get('COPYDESK_LOG') == '0' else 'on'}")
+    print()
+
+    print("Hooks")
+    hook_dir = Path.home() / ".claude" / "hooks" / "copydesk"
+    for name in ("gate.sh", "reminder.sh", "linter.py"):
+        installed = hook_dir / name
+        print(f"  {name:12} {'installed' if installed.is_file() else 'not installed'}   {installed}")
+    hook_preset = hook_dir / "rules" / "plain-english.json"
+    print(f"  {'rules/':12} {'installed' if hook_preset.is_file() else 'not installed'}   {hook_preset}")
+    print()
+
+    print("Harness registration")
+    settings = Path.home() / ".claude" / "settings.json"
+    if settings.is_file():
+        try:
+            text = settings.read_text(encoding="utf-8")
+            registered = "copydesk" in text
+            print(f"  Claude Code  {'registered' if registered else 'settings.json found, no CopyDesk hook'}")
+        except OSError as error:
+            print(f"  Claude Code  settings.json unreadable ({error.strerror})")
+    else:
+        print("  Claude Code  no settings.json found")
+
+    return 0
+
+
+def _handle_check(args: list[str]) -> int:
+    if not args:
+        print("error: check needs at least one path, or - for standard input", file=sys.stderr)
+        return 64
 
     failed = False
     for source in args:
+        if source.startswith("-") and source != "-":
+            print(f"error: unknown check option '{source}'", file=sys.stderr)
+            return 64
         if source == "-":
             label, text = "<stdin>", sys.stdin.read()
             abs_path = "<stdin>"
@@ -161,6 +240,38 @@ def main(argv: list[str] | None = None) -> int:
             failed = failed or is_blocked
 
     return 1 if failed else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not args:
+        print(USAGE, file=sys.stderr)
+        return 64
+
+    command = args[0]
+
+    if command in ("--version", "-V"):
+        print(_version())
+        return 0
+    if command in ("--help", "-h", "help"):
+        print(USAGE)
+        return 0
+
+    if command in RESERVED_SUBCOMMANDS:
+        print(f"error: '{command}' is reserved for a later release and does nothing yet", file=sys.stderr)
+        return 64
+
+    if command == "stats":
+        return _handle_stats(args[1:])
+    if command == "report":
+        return _handle_report(args[1:])
+    if command == "doctor":
+        return _handle_doctor(args[1:])
+    if command == "check":
+        return _handle_check(args[1:])
+
+    # A bare path list still lints, which is what every existing caller does.
+    return _handle_check(args)
 
 
 if __name__ == "__main__":

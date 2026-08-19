@@ -12,9 +12,9 @@ The `copydesk` CLI must already be on `PATH`. A checkout owner can expose it onc
 Run the CLI against the named file:
 
 ```bash
-copydesk path/to/document.md
+copydesk check path/to/document.md
 ```
 
-If the command is unavailable, say that the CLI needs installing and stop. Report the command output with its line numbers. If an AI-tell error appears in a human-facing document, suggest `/humanizer`.
+If the command is unavailable, say that the CLI needs installing and stop. Report the command output with its line numbers. Exit 0 means clean or warnings only; exit 1 means findings that would block a write. If an AI-tell error appears in a human-facing document, suggest `/humanizer`.
 
 Do not edit the file. Do not install this skill or enable the hook as part of a check.
