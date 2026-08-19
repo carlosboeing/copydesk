@@ -1,0 +1,200 @@
+name: release
+
+# Publishes to npm when a version tag is pushed.
+#
+# Authentication, in order of preference:
+#
+#   1. Trusted publishing (OIDC). No secret at all. npm mints a short-lived,
+#      workflow-specific credential that cannot be exfiltrated or reused.
+#      Configure it at npmjs.com under the package's Settings, Trusted Publisher.
+#
+#   2. An NPM_TOKEN repository secret. Needed for the FIRST publish only,
+#      because npm requires a package to exist before a trusted publisher can
+#      be added to it. See https://github.com/npm/cli/issues/8544.
+#
+# After the first release, delete the NPM_TOKEN secret and this workflow keeps
+# working through OIDC.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pack and verify without publishing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify the release is coherent
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: The suite must pass on the exact commit being released
+        run: python3 -m unittest discover tests/
+
+      - name: The carriers must match the preset
+        run: python3 scripts/generate-carriers.py --check
+
+      - name: VERSION, package.json and the tag must agree
+        id: version
+        run: |
+          set -euo pipefail
+          file_version="$(cat VERSION)"
+          json_version="$(node -p "require('./package.json').version")"
+          cli_version="$(python3 bin/copydesk --version)"
+
+          echo "VERSION      $file_version"
+          echo "package.json $json_version"
+          echo "--version    $cli_version"
+
+          if [ "$file_version" != "$json_version" ] || [ "$file_version" != "$cli_version" ]; then
+            echo "::error::VERSION, package.json and bin/copydesk --version disagree"
+            exit 1
+          fi
+
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            echo "tag          $tag_version"
+            if [ "$tag_version" != "$file_version" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match version $file_version"
+              exit 1
+            fi
+          fi
+
+          echo "version=$file_version" >> "$GITHUB_OUTPUT"
+
+      - name: The tarball must carry the shipped surface and nothing else
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > pack.json
+          node -e '
+            const [pack] = require("./pack.json");
+            const files = pack.files.map(f => f.path).sort();
+            console.log(files.join("\n"));
+
+            const required = [
+              "LICENSE", "README.md", "VERSION", "package.json",
+              "bin/copydesk", "lib/linter.py", "lib/config.py",
+              "rules/plain-english.json", "hooks/gate.sh", "hooks/reminder.sh",
+            ];
+            const missing = required.filter(f => !files.includes(f));
+            if (missing.length) {
+              console.error("::error::missing from the tarball: " + missing.join(", "));
+              process.exit(1);
+            }
+
+            // Working memory, tests and evaluation data must never publish.
+            const forbidden = files.filter(f =>
+              f.startsWith("eval/") || f.startsWith("tests/") ||
+              f.startsWith("docs/") || f.startsWith(".workbench/") ||
+              f.includes("__pycache__") || f.endsWith(".pyc"));
+            if (forbidden.length) {
+              console.error("::error::must not publish: " + forbidden.join(", "));
+              process.exit(1);
+            }
+
+            const kb = pack.size / 1024;
+            console.log(`tarball ${kb.toFixed(1)} kB across ${files.length} files`);
+            if (kb > 200) {
+              console.error("::error::tarball exceeds the 200 kB budget");
+              process.exit(1);
+            }
+          '
+
+  publish:
+    name: Publish to npm
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'push' || inputs.dry_run == false
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/copydesk
+    permissions:
+      contents: write   # to create the GitHub Release
+      id-token: write   # to mint the OIDC credential for trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Trusted publishing needs npm 11.5.1 or later
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Publish
+        # NODE_AUTH_TOKEN is consumed only when the NPM_TOKEN secret exists.
+        # With trusted publishing configured, it is empty and npm uses OIDC.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ needs.verify.outputs.version }}"
+          # Lift this version's section out of the changelog for the release body.
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > body.md
+          if [ ! -s body.md ]; then
+            echo "See CHANGELOG.md." > body.md
+          fi
+          gh release create "v$version" --title "v$version" --notes-file body.md --verify-tag
+
+  smoke:
+    name: Install from the registry and run it
+    needs: [verify, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      # A publish nobody installed is a publish nobody verified. This runs the
+      # published artifact from a clean directory, on the oldest supported
+      # interpreter, rather than trusting the local checkout.
+      - name: npx the published version
+        run: |
+          set -euo pipefail
+          version="${{ needs.verify.outputs.version }}"
+          for attempt in 1 2 3 4 5; do
+            if npx --yes "copydesk@$version" --version; then break; fi
+            echo "not on the registry yet, retrying in 15s"
+            sleep 15
+          done
+          test "$(npx --yes copydesk@$version --version)" = "$version"
+          printf 'A short sentence has enough words for this check.\n' \
+            | npx --yes "copydesk@$version" check -
+          set +e
+          printf 'This approach is robust and comprehensive.\n' \
+            | npx --yes "copydesk@$version" check -
+          status=$?
+          set -e
+          test "$status" -eq 1
+          echo "published artifact verified"

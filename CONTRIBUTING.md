@@ -39,3 +39,7 @@ If a rule fires on prose you believe is fine, open an issue with the sentence. A
 ## Commits
 
 Conventional Commits: `<type>(<scope>): <description>`, imperative mood, subject at most 72 characters. The body explains why.
+
+## Releasing
+
+A release is a tag push. See [docs/releasing.md](docs/releasing.md).
