@@ -20,8 +20,13 @@ import sys
 from pathlib import Path
 
 BUNDLE_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BUNDLE_ROOT / "lib"))
+
+import config as config_mod
+import instructions
+
 PRESET_PATH = BUNDLE_ROOT / "rules" / "plain.json"
-OUTPUT_STYLE = BUNDLE_ROOT / "output-styles" / "plain-english.md"
+OUTPUT_STYLES_DIR = BUNDLE_ROOT / "output-styles"
 REMINDER = BUNDLE_ROOT / "hooks" / "reminder.sh"
 
 RULES_START = "<!-- plain-english-rules:start -->"
@@ -30,21 +35,18 @@ REMINDER_START = "cat << 'EOF'\n"
 REMINDER_END = "\nEOF\n"
 
 
-def render_output_style(preset: dict) -> str:
+def render_output_style(preset: dict, resolved: dict, level: str) -> str:
     style = preset["instructions"]["output_style"]
+    body = instructions.render_output_style_body(resolved, level)
     return (
         "---\n"
-        f"name: {style['name']}\n"
+        f"name: CopyDesk {level}\n"
         f"description: {style['description']}\n"
         f"keep-coding-instructions: {str(style['keep_coding_instructions']).lower()}\n"
-        "---\n"
-        "\n"
-        f"<!-- Generated from rules/{preset['id']}.json by scripts/generate-instructions.py. Do not edit by hand.\n"
-        f"     CopyDesk owns the canonical rules; this file is one instruction set of the {preset['id']} preset. -->\n"
-        "\n"
-        f"{RULES_START}\n"
-        f"{preset['instructions']['rules_block']}\n"
-        f"{RULES_END}\n"
+        "---\n\n"
+        f"<!-- Generated from rules/{preset['id']}.json by scripts/generate-instructions.py."
+        " Do not edit by hand. -->\n\n"
+        f"{RULES_START}\n{body}\n{RULES_END}\n"
     )
 
 
@@ -61,6 +63,7 @@ def main() -> int:
     args = parser.parse_args()
 
     preset = json.loads(PRESET_PATH.read_text(encoding="utf-8"))
+    resolved = config_mod.resolve(BUNDLE_ROOT / "rules")
 
     words = len(preset["instructions"]["reminder"].split())
     declared = preset["instructions"]["reminder_word_count"]
@@ -68,12 +71,16 @@ def main() -> int:
         print(f"error  the reminder is {words} words; the preset declares {declared}", file=sys.stderr)
         return 1
 
+    OUTPUT_STYLES_DIR.mkdir(parents=True, exist_ok=True)
+
     targets = {
-        OUTPUT_STYLE: render_output_style(preset),
+        OUTPUT_STYLES_DIR / "copydesk-low.md": render_output_style(preset, resolved, "low"),
+        OUTPUT_STYLES_DIR / "copydesk-medium.md": render_output_style(preset, resolved, "medium"),
+        OUTPUT_STYLES_DIR / "copydesk-high.md": render_output_style(preset, resolved, "high"),
         REMINDER: render_reminder(preset, REMINDER.read_text(encoding="utf-8")),
     }
 
-    stale = [path for path, rendered in targets.items() if path.read_text(encoding="utf-8") != rendered]
+    stale = [path for path, rendered in targets.items() if not path.is_file() or path.read_text(encoding="utf-8") != rendered]
     if args.check:
         for path in stale:
             print(f"error  {path.relative_to(BUNDLE_ROOT)} differs from the preset", file=sys.stderr)

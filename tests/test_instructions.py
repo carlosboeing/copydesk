@@ -1,9 +1,9 @@
-"""Instructions are generated, budgeted, and free of token lists."""
-
-from __future__ import annotations
-
 import json
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,6 +13,15 @@ sys.path.insert(0, str(ROOT / "lib"))
 import instructions  # noqa: E402
 
 PRESET = json.loads((ROOT / "rules" / "plain.json").read_text(encoding="utf-8"))
+
+
+def run_cli(args: list, env: dict) -> int:
+    merged = dict(os.environ)
+    merged.update(env)
+    return subprocess.run(
+        [sys.executable, str(ROOT / "bin" / "copydesk"), *args],
+        capture_output=True, env=merged, text=True,
+    ).returncode
 
 
 def resolved(**overrides) -> dict:
@@ -87,3 +96,112 @@ class ChatBudgetTests(unittest.TestCase):
             instructions.word_count(instructions.render_chat(off)),
             instructions.word_count(instructions.render_chat(resolved())),
         )
+
+
+class VerbosityTests(unittest.TestCase):
+    def test_the_environment_variable_wins(self) -> None:
+        self.assertEqual(
+            instructions.resolve_verbosity(resolved(), {"COPYDESK_VERBOSITY": "high"}), "high"
+        )
+
+    def test_the_config_is_the_resting_default(self) -> None:
+        self.assertEqual(instructions.resolve_verbosity(resolved(), {}), "low")
+
+    def test_an_invalid_environment_value_falls_back_to_the_config(self) -> None:
+        self.assertEqual(
+            instructions.resolve_verbosity(resolved(), {"COPYDESK_VERBOSITY": "loud"}), "low"
+        )
+
+    def test_three_output_styles_are_named(self) -> None:
+        self.assertEqual(
+            instructions.OUTPUT_STYLE_NAMES, ("CopyDesk low", "CopyDesk medium", "CopyDesk high")
+        )
+
+    def test_each_output_style_renders_its_own_verbosity_line(self) -> None:
+        for level in ("low", "medium", "high"):
+            config = resolved()
+            config["channels"]["chat"]["verbosity"] = level
+            self.assertIn(
+                instructions._VERBOSITY_LINES[level], instructions.render_chat(config)
+            )
+
+
+class SetCommandTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+
+    def test_set_writes_the_user_config(self) -> None:
+        env = {"XDG_CONFIG_HOME": str(self.home)}
+        code = run_cli(["set", "channels.chat.verbosity=medium"], env=env)
+        self.assertEqual(code, 0)
+        body = json.loads((self.home / "copydesk" / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual(body["channels"]["chat"]["verbosity"], "medium")
+
+    def test_set_refuses_a_key_it_does_not_own(self) -> None:
+        env = {"XDG_CONFIG_HOME": str(self.home)}
+        self.assertEqual(run_cli(["set", "gate.retries=5"], env=env), 64)
+
+    def test_set_refuses_an_invalid_value(self) -> None:
+        env = {"XDG_CONFIG_HOME": str(self.home)}
+        self.assertEqual(run_cli(["set", "channels.chat.verbosity=loud"], env=env), 64)
+
+    def test_set_keeps_the_comments_the_wizard_wrote(self) -> None:
+        path = self.home / "copydesk" / "config.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            '{\n  "version": 1,\n  "channels": {\n'
+            '    "chat": { "verbosity": "low" },   // how much chat says\n'
+            '    "documents": { "verbosity": "high" }\n  }\n}\n',
+            encoding="utf-8",
+        )
+        run_cli(["set", "channels.chat.verbosity=medium"], env={"XDG_CONFIG_HOME": str(self.home)})
+        body = path.read_text(encoding="utf-8")
+        self.assertIn("// how much chat says", body)
+        self.assertIn('"verbosity": "medium"', body)
+        self.assertIn('"documents": { "verbosity": "high" }', body)
+
+    def test_a_reordered_config_changes_the_right_channel(self) -> None:
+        path = self.home / "copydesk" / "config.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            '{\n  "version": 1,\n  "channels": {\n'
+            '    "documents": { "verbosity": "high" },\n'
+            '    "commits": { "verbosity": "low" },\n'
+            '    "reviews": { "verbosity": "medium" },\n'
+            '    "chat": { "verbosity": "low" }\n  }\n}\n',
+            encoding="utf-8",
+        )
+        run_cli(["set", "channels.chat.verbosity=high"], env={"XDG_CONFIG_HOME": str(self.home)})
+        body = json.loads(path.read_text(encoding="utf-8"))["channels"]
+        self.assertEqual(body["chat"]["verbosity"], "high")
+        self.assertEqual(body["documents"]["verbosity"], "high")
+        self.assertEqual(body["commits"]["verbosity"], "low")
+        self.assertEqual(body["reviews"]["verbosity"], "medium")
+
+    def test_a_nested_key_of_the_same_name_is_not_the_target(self) -> None:
+        path = self.home / "copydesk" / "config.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            '{"version": 1, "channels": {"chat": '
+            '{"guidance": {"verbosity": true}, "verbosity": "low"}}}',
+            encoding="utf-8",
+        )
+        run_cli(["set", "channels.chat.verbosity=high"], env={"XDG_CONFIG_HOME": str(self.home)})
+        chat = json.loads(path.read_text(encoding="utf-8"))["channels"]["chat"]
+        self.assertEqual(chat["verbosity"], "high")
+        self.assertIs(chat["guidance"]["verbosity"], True)
+
+    def test_a_failed_write_leaves_the_old_file_intact(self) -> None:
+        path = self.home / "copydesk" / "config.json"
+        path.parent.mkdir(parents=True)
+        original = '{"version": 1, "channels": {"chat": {"verbosity": "low"}}}'
+        path.write_text(original, encoding="utf-8")
+        os.chmod(path.parent, 0o500)
+        self.addCleanup(os.chmod, path.parent, 0o700)
+        run_cli(["set", "channels.chat.verbosity=medium"], env={"XDG_CONFIG_HOME": str(self.home)})
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+
+if __name__ == "__main__":
+    unittest.main()

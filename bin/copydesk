@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 
@@ -14,7 +15,42 @@ BUNDLE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BUNDLE_ROOT / "lib"))
 
 import channels  # noqa: E402
+import config_writer  # noqa: E402
 import linter  # noqa: E402
+
+
+SETTABLE_KEYS = {"channels.chat.verbosity": ("low", "medium", "high")}
+
+
+def _rebuild_static_instructions() -> int:
+    """Re-render the static files after a config change. Never fails the set."""
+    generator = BUNDLE_ROOT / "scripts" / "generate-instructions.py"
+    if not generator.is_file():
+        print("note: run `copydesk setup --repair` to rebuild the installed instructions")
+        return 0
+    result = subprocess.run([sys.executable, str(generator)], capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"note: rebuild failed ({result.stderr.strip()[:80]}); "
+              "run `copydesk setup --repair`")
+    return 0
+
+
+def _handle_set(args: list[str]) -> int:
+    if len(args) != 1 or "=" not in args[0]:
+        print("usage: copydesk set channels.chat.verbosity=<low|medium|high>", file=sys.stderr)
+        return 64
+    key, _, value = args[0].partition("=")
+    allowed = SETTABLE_KEYS.get(key)
+    if allowed is None:
+        print(f"error: '{key}' is not settable. Settable: {', '.join(sorted(SETTABLE_KEYS))}", file=sys.stderr)
+        return 64
+    if value not in allowed:
+        print(f"error: '{value}' is not one of {', '.join(allowed)}", file=sys.stderr)
+        return 64
+
+    target = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    target = target / "copydesk" / "config.json"
+    return config_writer.set_value(target, key, value) or _rebuild_static_instructions()
 
 
 def _handle_stats(args: list[str]) -> int:
@@ -98,9 +134,10 @@ def _handle_report(args: list[str]) -> int:
 # file that does not exist.
 RESERVED_SUBCOMMANDS = ("init", "install", "learn", "fix", "import")
 
-SUBCOMMANDS = ("check", "doctor", "stats", "report")
+SUBCOMMANDS = ("check", "doctor", "stats", "report", "set")
 
 USAGE = """usage: copydesk check <file.md> [...] | -
+       copydesk set <key>=<value>
        copydesk doctor
        copydesk stats [--since <window>] [--json]
        copydesk report [--since <window>] [--out <path>]
@@ -274,6 +311,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_report(args[1:])
     if command == "doctor":
         return _handle_doctor(args[1:])
+    if command == "set":
+        return _handle_set(args[1:])
     if command == "check":
         return _handle_check(args[1:])
 

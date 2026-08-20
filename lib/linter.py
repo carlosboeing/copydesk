@@ -1859,6 +1859,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments == ["--hook"]:
         return run_hook(sys.stdin.read())
+    if arguments == ["--reminder"]:
+        try:
+            resolved, _ = effective_preset(Path.cwd())
+            preset_dict = resolved.get("preset") or {}
+            reminder_text = (preset_dict.get("instructions") or {}).get("reminder", "")
+            if not reminder_text:
+                return 1
+            print(reminder_text)
+            return 0
+        except Exception:
+            return 1
     if arguments == ["--turn"]:
         session_id = None
         try:
@@ -1873,7 +1884,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             pass
         record_turn_event(session_id)
         return 0
-    print("usage: linter.py --hook | --turn", file=sys.stderr)
+    print("usage: linter.py --hook | --turn | --reminder", file=sys.stderr)
     return 64
 
 

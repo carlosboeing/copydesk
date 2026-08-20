@@ -9,8 +9,13 @@ enumerate.
 
 from __future__ import annotations
 
+import json
+
 import guidance
 import styles
+
+VERBOSITY_LEVELS = ("low", "medium", "high")
+OUTPUT_STYLE_NAMES = ("CopyDesk low", "CopyDesk medium", "CopyDesk high")
 
 # Measured, not guessed. A 1,256-word block did not hold across a long
 # session; a 200-word one did. The budget is tested, not documented.
@@ -62,6 +67,38 @@ def style_line(channel: str, style: str) -> str:
     return STYLE_LINES.get((channel, styles.preset_for(style)), "")
 
 
+def resolve_verbosity(resolved: dict, environ: dict) -> str:
+    """Environment, then the harness style picker, then the config.
+
+    The style picker's choice reaches this function as the config value,
+    because `copydesk set` writes it there. So two sources are read here and
+    the third is a write that happened earlier.
+    """
+    declared = environ.get("COPYDESK_VERBOSITY")
+    if declared in VERBOSITY_LEVELS:
+        return declared
+    settings = (resolved.get("channels") or {}).get("chat") or {}
+    value = settings.get("verbosity", "low")
+    return value if value in VERBOSITY_LEVELS else "low"
+
+
+def render_output_style_body(resolved: dict, level: str) -> str:
+    """The marked rules block of one output style, and nothing around it.
+
+    The generator wraps this in frontmatter; the reminder re-renders it to
+    compare against an installed file's fingerprint. Both must produce the
+    same bytes from the same inputs, so there is one function.
+    """
+    return render_chat(with_verbosity(resolved, level))
+
+
+def with_verbosity(resolved: dict, level: str) -> dict:
+    """A copy of the resolved config with chat's verbosity replaced."""
+    copied = json.loads(json.dumps(resolved))
+    copied.setdefault("channels", {}).setdefault("chat", {})["verbosity"] = level
+    return copied
+
+
 def word_count(text: str) -> int:
     return len(text.split())
 
@@ -81,3 +118,4 @@ def render_chat(resolved: dict) -> str:
     ]
     parts.extend(guidance.render(settings.get("guidance") or {}))
     return "\n\n".join(part for part in parts if part)
+
