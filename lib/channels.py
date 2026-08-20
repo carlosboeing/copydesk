@@ -143,7 +143,9 @@ def _channel_for(path: str, channel_settings: dict) -> Optional[str]:
     return None
 
 
-def decide(path: str, resolved: dict) -> Decision:
+def decide(path: Optional[str], resolved: dict) -> Decision:
+    if not path or path == "<stdin>":
+        return Decision("block", "documents")
     rules = resolved.get("pathRules") or ()
     action = _action_for(path, rules)
     if action == "ignore":

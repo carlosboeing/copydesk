@@ -39,6 +39,8 @@ Six items are frozen from the first public release. A language rewrite must not 
 
 The telemetry event schema is versioned separately and joins this list unchanged.
 
+At `1.0.0`, the compatibility contract gains channel names (`chat`, `documents`, `commits`, `reviews`), style names (`plain`, `engineer`, `editorial`, `general`), guidance identifiers, canonical camelCase configuration parameters, and the three-location discovery order (`user`, `project`, `local`). Until `1.0.0`, these prevention items remain free to move as usage feedback warrants.
+
 **Deliberately free:** which rules are compiled and which are data, the implementation language, the internal rule representation, how presets are stored on disk, and whether more rule extension points arrive later.
 
 `bin/copydesk` is the permanent entrypoint. Every installer, hook and document goes through it, so a later implementation replaces what sits behind it with no consumer seeing a difference.

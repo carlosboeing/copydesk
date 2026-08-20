@@ -6,6 +6,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.0]
+
+### Added
+
+- **Channel-aware prevention system.** Four distinct channels (`chat`, `documents`, `commits`, `reviews`) configure styles, verbosity levels, and guidance deliverables per medium.
+- **Style shelf and behavioral floor.** Four base styles (`plain`, `engineer`, `editorial`, `general`) with a shared non-negotiable floor (answer first, closing block reserved, say once).
+- **Guidance deliverables.** Ten configurable structural elements: `recommendations`, `direction`, `progress`, `pushback`, `alternatives`, `assumptions`, `estimates`, `sources`, `summary`, and `verification`.
+- **Interactive setup wizard.** `copydesk setup` (alias `copydesk init`) provides guided setup across styles, channels, and harnesses with `--defaults`, `--yes`, `--dry-run`, and `--repair` flags.
+- **Uninstaller.** `copydesk uninstall` cleanly removes CopyDesk-owned hooks and styles, with an optional `--purge` flag to remove user configuration.
+- **Commit-message gate.** `git-hooks/commit-msg` and `copydesk check --commit-msg` enforce subject length, imperative mood, and prose rules at commit time.
+- **JSON Schema.** `copydesk.schema.json` provides editor auto-completion and validation for configuration files.
+- **Path routing engine.** The `paths` configuration block (`ignore`, `warn`, `block`) controls file matching and action overrides.
+- **Three-location discovery.** Configuration merges across user (`~/.config/copydesk/config.json`), project (`copydesk.config.json`), and local (`copydesk.local.json`) with JSONC comment support.
+- **Expanded doctor.** `copydesk doctor <file>` explains effective rules and provenance; `copydesk doctor --rules` lists rules and guidance deliverables; bare `copydesk doctor` performs drift checks.
+
+### Changed
+
+- **Preset identifier.** `plain-english` is renamed to `plain`, with `plain-english` retained indefinitely as an alias.
+- **Configuration parameter names.** Threshold parameters standardized to canonical camelCase (`hardMax`, `maxSentences`, `maxRate`, `minStdev`, `exemptionRatio`), with snake_case aliases preserved.
+- **Instruction generation.** Replaced `generate-carriers.py` with `generate-instructions.py` compiling output styles and prompt reminders.
+
+### Fixed
+
+- **Threshold propagation defect.** Configured `sentence-length.max` threshold reaches linter evaluation instead of being lost during resolution.
+
 ## [0.1.0]
 
 First public release. CopyDesk was extracted from a personal resources repository, where it enforced one person's writing rules, and became a rule engine that ships those rules as one preset among several.

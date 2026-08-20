@@ -410,6 +410,8 @@ def _handle_check(args: list[str]) -> int:
         if source == "-":
             label, text = "<stdin>", sys.stdin.read()
             abs_path = "<stdin>"
+            resolved, _ = linter.effective_preset(None)
+            decision = channels.decide(None, resolved)
         else:
             label = source
             try:
@@ -435,7 +437,7 @@ def _handle_check(args: list[str]) -> int:
         doc_bytes = len(text.encode("utf-8"))
         doc_words = len(text.split())
         body_sentences = len(linter._sentence_records(linter.exclude_markdown(text)))
-        is_blocked = linter.has_blocking_findings(findings)
+        is_blocked = linter.has_blocking_findings(findings) if decision.action == "block" else False
 
         # A CLI run lints a whole document with no edit region, so it carries no
         # origin rollup. The summariser reads origins from gate events only.
