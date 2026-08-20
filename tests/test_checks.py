@@ -440,7 +440,7 @@ class CommandSurfaceTests(unittest.TestCase):
 
     def test_every_reserved_subcommand_refuses_clearly(self) -> None:
         """Reserving them stops a 0.1.0 flag claiming a word a subcommand needs."""
-        for name in ("init", "install", "learn", "fix", "import"):
+        for name in ("install", "learn", "fix", "import"):
             with self.subTest(subcommand=name):
                 result = self.run_cli(name)
                 self.assertEqual(result.returncode, 64)
@@ -454,7 +454,7 @@ class CommandSurfaceTests(unittest.TestCase):
     def test_the_usage_text_names_every_subcommand(self) -> None:
         result = self.run_cli("--help")
         self.assertEqual(result.returncode, 0)
-        for name in ("check", "doctor", "stats", "report", "--version"):
+        for name in ("check", "doctor", "stats", "report", "setup", "uninstall", "--version"):
             self.assertIn(name, result.stdout)
 
     def test_stats_and_report_are_unchanged(self) -> None:

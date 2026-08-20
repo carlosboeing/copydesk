@@ -1,13 +1,12 @@
-#!/usr/bin/env python3
-"""Atomic, reversible application of configuration and instructions."""
-
-from __future__ import annotations
-
+import json
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import NamedTuple, Optional, Sequence, Union
+
+import jsonc
 
 MARKER_START = "<!-- copydesk:start -->"
 MARKER_END = "<!-- copydesk:end -->"
@@ -19,8 +18,9 @@ _REGION = re.compile(
 
 class Target(NamedTuple):
     real: Path  # the file that is actually written
-    aliases: list[Path]  # symlinks resolving to it, named in the review panel
-    block: str  # the marked region to write
+    aliases: list[Path] = []  # symlinks resolving to it, named in the review panel
+    block: str = ""  # the marked region to write
+    kind: str = "marked-block"  # "marked-block", "hook-keys", "created"
 
 
 class Write(NamedTuple):
@@ -175,3 +175,63 @@ def render_review(plan: Plan) -> str:
     for write in plan.writes:
         lines.append(f"  write {write.path}")
     return "\n".join(lines)
+
+
+def _write_atomic(path: Path, content: str) -> None:
+    temp = path.parent / f"{path.name}.tmp.{os.getpid()}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp.write_text(content, encoding="utf-8")
+    temp.replace(path)
+
+
+def _remove_copydesk_hooks(settings_path: Path) -> None:
+    """Drop CopyDesk's hook entries. Every other key survives untouched."""
+    if not settings_path.is_file():
+        return
+    try:
+        raw = settings_path.read_text(encoding="utf-8")
+        document = json.loads(jsonc.strip_comments(raw))
+    except (OSError, json.JSONDecodeError):
+        return
+    hooks = document.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+    for event, entries in list(hooks.items()):
+        kept = [
+            entry for entry in entries
+            if not any("copydesk" in str(h.get("command", "")) for h in entry.get("hooks", []))
+        ]
+        if kept:
+            hooks[event] = kept
+        else:
+            hooks.pop(event)
+    if not hooks:
+        document.pop("hooks", None)
+    _write_atomic(settings_path, json.dumps(document, indent=2) + "\n")
+
+
+def remove_owned(targets: list[Target]) -> Result:
+    """Remove only what CopyDesk put there. Never restores a backup.
+
+    A backup is a snapshot from setup time. Restoring it during uninstall
+    would discard every edit made since, so backups serve one purpose:
+    rolling back a failed apply, inside the same command.
+    """
+    removed, failed = [], None
+    for target in targets:
+        try:
+            if target.kind == "marked-block":
+                remove_marked_block(target.real)
+            elif target.kind == "hook-keys":
+                _remove_copydesk_hooks(target.real)
+            elif target.kind == "created":
+                if target.real.is_dir():
+                    shutil.rmtree(target.real, ignore_errors=True)
+                else:
+                    target.real.unlink(missing_ok=True)
+            removed.append(target.real)
+        except OSError as error:
+            failed = target.real
+            return Result(False, failed, f"{target.real}: {error.strerror}")
+    return Result(True, None, f"removed {len(removed)} items")
+

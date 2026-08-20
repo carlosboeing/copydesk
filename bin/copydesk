@@ -17,6 +17,7 @@ sys.path.insert(0, str(BUNDLE_ROOT / "lib"))
 import channels  # noqa: E402
 import config_writer  # noqa: E402
 import linter  # noqa: E402
+import wizard  # noqa: E402
 
 
 SETTABLE_KEYS = {"channels.chat.verbosity": ("low", "medium", "high")}
@@ -132,11 +133,13 @@ def _handle_report(args: list[str]) -> int:
 # Reserved for later releases. Naming them now stops a 0.1.0 flag from claiming
 # a word a subcommand will need, and gives a clear message instead of linting a
 # file that does not exist.
-RESERVED_SUBCOMMANDS = ("init", "install", "learn", "fix", "import")
+RESERVED_SUBCOMMANDS = ("install", "learn", "fix", "import")
 
-SUBCOMMANDS = ("check", "doctor", "stats", "report", "set")
+SUBCOMMANDS = ("check", "doctor", "stats", "report", "set", "setup", "uninstall")
 
-USAGE = """usage: copydesk check <file.md> [...] | -
+USAGE = """usage: copydesk setup [--defaults] [--yes] [--dry-run] [--repair]
+       copydesk uninstall [--yes] [--dry-run] [--purge]
+       copydesk check <file.md> [...] | -
        copydesk set <key>=<value>
        copydesk doctor
        copydesk stats [--since <window>] [--json]
@@ -305,6 +308,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: '{command}' is reserved for a later release and does nothing yet", file=sys.stderr)
         return 64
 
+    if command in ("setup", "init"):
+        return wizard.run_setup(args[1:])
+    if command == "uninstall":
+        return wizard.run_uninstall(args[1:])
     if command == "stats":
         return _handle_stats(args[1:])
     if command == "report":
