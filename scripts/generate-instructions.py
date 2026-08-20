@@ -38,6 +38,7 @@ REMINDER_END = "\nEOF\n"
 def render_output_style(preset: dict, resolved: dict, level: str) -> str:
     style = preset["instructions"]["output_style"]
     body = instructions.render_output_style_body(resolved, level)
+    marker_hash = instructions.fingerprint(body)
     return (
         "---\n"
         f"name: CopyDesk {level}\n"
@@ -45,7 +46,8 @@ def render_output_style(preset: dict, resolved: dict, level: str) -> str:
         f"keep-coding-instructions: {str(style['keep_coding_instructions']).lower()}\n"
         "---\n\n"
         f"<!-- Generated from rules/{preset['id']}.json by scripts/generate-instructions.py."
-        " Do not edit by hand. -->\n\n"
+        " Do not edit by hand. -->\n"
+        f"<!-- {instructions.FINGERPRINT_MARKER}{marker_hash} -->\n\n"
         f"{RULES_START}\n{body}\n{RULES_END}\n"
     )
 

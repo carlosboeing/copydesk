@@ -9,13 +9,16 @@ enumerate.
 
 from __future__ import annotations
 
+import hashlib
 import json
+from typing import Optional
 
 import guidance
 import styles
 
 VERBOSITY_LEVELS = ("low", "medium", "high")
 OUTPUT_STYLE_NAMES = ("CopyDesk low", "CopyDesk medium", "CopyDesk high")
+FINGERPRINT_MARKER = "copydesk-build:"
 
 # Measured, not guessed. A 1,256-word block did not hold across a long
 # session; a 200-word one did. The budget is tested, not documented.
@@ -118,4 +121,50 @@ def render_chat(resolved: dict) -> str:
     ]
     parts.extend(guidance.render(settings.get("guidance") or {}))
     return "\n\n".join(part for part in parts if part)
+
+
+def fingerprint(rendered: str) -> str:
+    """A hash of the rendered file itself, minus the marker line.
+
+    Hashing the inputs would mean listing them: the preset, the user config,
+    every style file, the guidance registry, the merge table, and this
+    module's own text. Any input left off the list produces a file that is
+    stale and says it is fresh. Hashing the output covers every input by
+    construction, including a change to the renderer.
+    """
+    body = "\n".join(
+        line for line in rendered.splitlines() if FINGERPRINT_MARKER not in line
+    )
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+
+
+def delta(static: dict, effective: dict) -> Optional[str]:
+    """One line naming where the live settings differ from the static file.
+
+    Every setting that changes an instruction is compared, not just style and
+    verbosity. A project turning a channel off, or turning `sources` on,
+    changes what the model is told and must reach the reminder.
+    """
+    differences = []
+    for name in ("chat", "documents", "commits", "reviews"):
+        left = (static.get("channels") or {}).get(name) or {}
+        right = (effective.get("channels") or {}).get(name) or {}
+        if left.get("enabled", True) != right.get("enabled", True):
+            differences.append(f"{name} is {'on' if right.get('enabled', True) else 'off'}")
+            continue
+        if not right.get("enabled", True):
+            continue
+        for key in ("style", "verbosity"):
+            if left.get(key) != right.get(key):
+                differences.append(f"{name} {key} is {right.get(key)}")
+        left_guidance = left.get("guidance") or {}
+        right_guidance = right.get("guidance") or {}
+        for guidance_id in guidance.IDS:
+            if bool(left_guidance.get(guidance_id)) != bool(right_guidance.get(guidance_id)):
+                state = "on" if right_guidance.get(guidance_id) else "off"
+                differences.append(f"{name} {guidance_id} is {state}")
+    if not differences:
+        return None
+    return "Here: " + "; ".join(differences) + "."
+
 

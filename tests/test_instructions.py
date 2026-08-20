@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 
 import instructions  # noqa: E402
+import linter  # noqa: E402
 
 PRESET = json.loads((ROOT / "rules" / "plain.json").read_text(encoding="utf-8"))
 
@@ -201,6 +202,135 @@ class SetCommandTests(unittest.TestCase):
         self.addCleanup(os.chmod, path.parent, 0o700)
         run_cli(["set", "channels.chat.verbosity=medium"], env={"XDG_CONFIG_HOME": str(self.home)})
         self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+
+class FingerprintTests(unittest.TestCase):
+    def test_a_fingerprint_is_twelve_hex_characters(self) -> None:
+        value = instructions.fingerprint("rendered text")
+        self.assertEqual(len(value), 12)
+        int(value, 16)
+
+    def test_a_changed_rendering_changes_the_fingerprint(self) -> None:
+        self.assertNotEqual(
+            instructions.fingerprint("rendered text"), instructions.fingerprint("rendered text 2")
+        )
+
+    def test_the_marker_line_itself_is_not_hashed(self) -> None:
+        # Otherwise stamping the file would change what the stamp describes.
+        body = "line one\nline two\n"
+        stamped = f"line one\n<!-- {instructions.FINGERPRINT_MARKER}abc123abc123 -->\nline two\n"
+        self.assertEqual(instructions.fingerprint(body), instructions.fingerprint(stamped))
+
+    def test_a_changed_guidance_snippet_changes_the_fingerprint(self) -> None:
+        first = instructions.render_chat(resolved())
+        config = resolved()
+        config["channels"]["chat"]["guidance"] = {"sources": True}
+        self.assertNotEqual(
+            instructions.fingerprint(first), instructions.fingerprint(instructions.render_chat(config))
+        )
+
+    def test_every_generated_style_embeds_its_fingerprint(self) -> None:
+        for level in ("low", "medium", "high"):
+            text = (ROOT / "output-styles" / f"copydesk-{level}.md").read_text(encoding="utf-8")
+            self.assertIn(instructions.FINGERPRINT_MARKER, text)
+
+
+class DeltaTests(unittest.TestCase):
+    def test_no_difference_produces_no_line(self) -> None:
+        self.assertIsNone(instructions.delta(resolved(), resolved()))
+
+    def test_a_different_documents_style_is_named(self) -> None:
+        effective = resolved()
+        effective["channels"]["documents"] = {"style": "engineer", "verbosity": "high"}
+        static = resolved()
+        static["channels"]["documents"] = {"style": "plain", "verbosity": "high"}
+        line = instructions.delta(static, effective)
+        self.assertIsNotNone(line)
+        assert line is not None
+        self.assertIn("documents", line)
+        self.assertIn("engineer", line)
+
+    def test_the_delta_is_one_line(self) -> None:
+        effective = resolved()
+        effective["channels"]["chat"] = {"style": "editorial", "verbosity": "high", "guidance": {}}
+        d = instructions.delta(resolved(), effective)
+        self.assertIsNotNone(d)
+        assert d is not None
+        self.assertNotIn("\n", d)
+
+    def test_a_disabled_channel_is_named(self) -> None:
+        effective = resolved()
+        effective["channels"]["documents"] = {"enabled": False}
+        d = instructions.delta(resolved(), effective)
+        self.assertIsNotNone(d)
+        assert d is not None
+        self.assertIn("documents is off", d)
+
+    def test_a_guidance_change_is_named(self) -> None:
+        effective = resolved()
+        effective["channels"]["chat"] = dict(resolved()["channels"]["chat"])
+        effective["channels"]["chat"]["guidance"] = dict(
+            resolved()["channels"]["chat"]["guidance"], sources=True
+        )
+        d = instructions.delta(resolved(), effective)
+        self.assertIsNotNone(d)
+        assert d is not None
+        self.assertIn("chat sources is on", d)
+
+
+class StalenessNoticeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+
+    def _write_user_config(self, text: str) -> None:
+        path = self.home / ".config" / "copydesk" / "config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def _install_style_matching_current_config(self) -> None:
+        env_prev = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = str(self.home / ".config")
+        try:
+            cfg = linter.user_layer()
+        finally:
+            if env_prev is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = env_prev
+        fresh = instructions.render_output_style_body(cfg, "low")
+        marker = instructions.fingerprint(fresh)
+        style_path = self.home / ".claude" / "output-styles" / "copydesk-low.md"
+        style_path.parent.mkdir(parents=True, exist_ok=True)
+        style_path.write_text(
+            f"---\nname: CopyDesk low\n---\n<!-- copydesk-build:{marker} -->\n{fresh}\n",
+            encoding="utf-8",
+        )
+
+    def test_a_changed_user_config_makes_the_installed_style_stale(self) -> None:
+        self._install_style_matching_current_config()
+        self._write_user_config('{"version": 1, "channels": {"chat": {"style": "editorial"}}}')
+        env_prev = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = str(self.home / ".config")
+        try:
+            self.assertIn("out of date", linter._fingerprint_notice(self.home) or "")
+        finally:
+            if env_prev is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = env_prev
+
+    def test_an_unchanged_config_reports_nothing(self) -> None:
+        self._install_style_matching_current_config()
+        env_prev = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = str(self.home / ".config")
+        try:
+            self.assertIsNone(linter._fingerprint_notice(self.home))
+        finally:
+            if env_prev is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = env_prev
 
 
 if __name__ == "__main__":

@@ -120,6 +120,11 @@ try:
 except ImportError:  # pragma: no cover - the linter still lints without a cascade
     config = None
 
+try:
+    import instructions
+except ImportError:
+    instructions = None
+
 
 def _preset_path() -> Path:
     """Find the preset document.
@@ -1855,6 +1860,46 @@ def format_report_markdown(summary: dict[str, object], source: Optional[Path] = 
     return "\n".join(lines)
 
 
+def user_layer() -> dict:
+    """Built-ins, then styles, then the user file. No project or local layer.
+
+    Static files render from these three only. Project and local settings
+    ride the reminder's delta line instead, so two repositories never fight
+    over one global file.
+    """
+    if config is None:
+        return {}
+    return config.resolve(_rules_dir(), None, user_path=config.user_config_path(),
+                          project_path=None, local_path=None, channel="chat")
+
+
+def _fingerprint_notice(home: Path) -> Optional[str]:
+    """One line when the installed static file no longer matches its inputs.
+
+    The marker holds the fingerprint of the file as rendered at build time.
+    Re-rendering now and hashing that says whether the inputs have moved
+    since. Hashing the installed bytes instead would compare the file with
+    itself, and a changed config would never show up.
+    """
+    installed = home / ".claude" / "output-styles" / "copydesk-low.md"
+    try:
+        rendered = installed.read_text(encoding="utf-8")
+    except OSError:
+        return None       # not installed, or unreadable: say nothing
+    if instructions is None:
+        return None
+    marker = re.search(re.escape(instructions.FINGERPRINT_MARKER) + r"([0-9a-f]{12})", rendered)
+    if marker is None:
+        return None
+    try:
+        fresh = instructions.render_output_style_body(user_layer(), "low")
+    except Exception:
+        return None       # cannot re-render: fail open, say nothing
+    if marker.group(1) == instructions.fingerprint(fresh):
+        return None
+    return f"{installed.name} is out of date. Run: copydesk setup --repair"
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments == ["--hook"]:
@@ -1866,7 +1911,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             reminder_text = (preset_dict.get("instructions") or {}).get("reminder", "")
             if not reminder_text:
                 return 1
-            print(reminder_text)
+            lines = [reminder_text]
+            if instructions is not None:
+                delta_line = instructions.delta(user_layer(), resolved)
+                if delta_line:
+                    lines.append(delta_line)
+            notice = _fingerprint_notice(Path(os.environ.get("HOME", str(Path.home()))))
+            if notice:
+                lines.append(notice)
+            print("\n".join(lines))
             return 0
         except Exception:
             return 1

@@ -5,6 +5,7 @@ keep-coding-instructions: true
 ---
 
 <!-- Generated from rules/plain.json by scripts/generate-instructions.py. Do not edit by hand. -->
+<!-- copydesk-build:c96b4708f9ca -->
 
 <!-- plain-english-rules:start -->
 If the first line answers it, stop. Cut any sentence that does not change what the reader knows or does. Assume the reader will ask for more.
