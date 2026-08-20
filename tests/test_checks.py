@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -468,3 +469,57 @@ class CommandSurfaceTests(unittest.TestCase):
         doctor = self.run_cli("doctor").stdout
         self.assertIn("CopyDesk", doctor)
         self.assertIn("copydesk", doctor)
+
+
+class ThresholdTests(unittest.TestCase):
+    """A configured threshold must change findings, not just the resolved dict."""
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root)
+        linter._PRESET_CACHE.clear()
+
+    def _config(self, body: str) -> Path:
+        (self.root / "copydesk.config.json").write_text(body, encoding="utf-8")
+        doc = self.root / "doc.md"
+        doc.write_text("placeholder\n", encoding="utf-8")
+        return doc
+
+    def test_a_lowered_sentence_max_flags_a_short_sentence(self) -> None:
+        doc = self._config(
+            '{"version": 1, "rules": {"sentence-length": {"severity": "error", "max": 5, "hardMax": 6}}}'
+        )
+        findings = linter.lint("This particular sentence has exactly nine words in it.\n", path=doc)
+        self.assertIn("sentence-length", [f.check for f in findings])
+
+    def test_the_snake_case_alias_still_works(self) -> None:
+        doc = self._config(
+            '{"version": 1, "rules": {"sentence-length": {"severity": "error", "max": 5, "hard_max": 6}}}'
+        )
+        findings = linter.lint("This particular sentence has exactly nine words in it.\n", path=doc)
+        self.assertIn("sentence-length", [f.check for f in findings])
+
+    def test_a_raised_paragraph_max_stops_flagging(self) -> None:
+        doc = self._config('{"version": 1, "rules": {"paragraph-length": {"maxSentences": 9}}}')
+        body = " ".join(f"Sentence number {n} sits here." for n in range(6)) + "\n"
+        self.assertNotIn("paragraph-length", [f.check for f in linter.lint(body, path=doc)])
+
+    def test_the_configured_exemption_ratio_changes_the_exemption(self) -> None:
+        doc = self._config('{"version": 1, "rules": {"list-dominated": {"exemptionRatio": 0.9}}}')
+        body = "- one\n- two\n- three\n\n" + " ".join(
+            f"Sentence {n} sits in this paragraph." for n in range(6)
+        ) + "\n"
+        # At 0.5 the document is list-dominated and paragraph-length is skipped.
+        # At 0.9 it is not, so the paragraph rule runs again.
+        self.assertIn("paragraph-length", [f.check for f in linter.lint(body, path=doc)])
+
+    def test_list_dominated_reports_when_switched_on(self) -> None:
+        doc = self._config('{"version": 1, "rules": {"list-dominated": {"severity": "error"}}}')
+        body = "Intro line.\n\n- one\n- two\n- three\n- four\n"
+        self.assertIn("list-dominated", [f.check for f in linter.lint(body, path=doc)])
+
+    def test_list_dominated_stays_silent_at_its_default(self) -> None:
+        doc = self._config('{"version": 1}')
+        body = "Intro line.\n\n- one\n- two\n- three\n- four\n"
+        self.assertNotIn("list-dominated", [f.check for f in linter.lint(body, path=doc)])
+

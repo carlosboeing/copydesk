@@ -164,6 +164,35 @@ def _merge_list(base: Iterable[str], layer: dict) -> list[str]:
     return merged
 
 
+# Renames from 0.1.x. The old spelling keeps working; the new one is what the
+# schema, the docs and the wizard write.
+THRESHOLD_ALIASES = {
+    "hard_max": "hardMax",
+    "max_sentences": "maxSentences",
+    "min_stdev": "minStdev",
+    "max_rate": "maxRate",
+    "exemption_ratio": "exemptionRatio",
+}
+
+
+def _normalise_rule_keys(layer: dict) -> dict:
+    """One spelling reaches the engine. Both spellings reach this function."""
+    normalised = dict(layer)
+    for old, new in THRESHOLD_ALIASES.items():
+        if old in normalised and new not in normalised:
+            normalised[new] = normalised.pop(old)
+    if "vocabulary" in normalised and isinstance(normalised["vocabulary"], dict):
+        # unglossed-term.vocabulary.add is the 0.1.0 shape; add is the new one.
+        nested = normalised.pop("vocabulary")
+        merged = list(normalised.get("add", ()) or ())
+        for entry in nested.get("add", ()) or ():
+            if entry not in merged:
+                merged.append(entry)
+        if merged:
+            normalised["add"] = merged
+    return normalised
+
+
 def _token_phrase(token: Union[str, dict]) -> str:
     return token if isinstance(token, str) else token["phrase"]
 
@@ -172,6 +201,8 @@ def _apply_rule_layer(preset: dict, rule_id: str, layer: dict) -> None:
     """Apply one config entry onto the effective preset, in place."""
     if not isinstance(layer, dict):
         raise ConfigError(f"rules.{rule_id}: must be an object")
+
+    layer = _normalise_rule_keys(layer)
 
     if "severity" in layer:
         severity = layer["severity"]
@@ -186,21 +217,29 @@ def _apply_rule_layer(preset: dict, rule_id: str, layer: dict) -> None:
 
     if "add" in layer or "remove" in layer:
         blocks = [b for b in preset["patterns"] if b["id"] == rule_id]
-        if not blocks:
+        if not blocks and rule_id == "unglossed-term":
+            target = preset["rules"].setdefault(rule_id, {})
+            vocab = target.setdefault("vocabulary", {})
+            current = list(vocab.get("add", []) or target.get("add", []))
+            updated = _merge_list(current, layer)
+            vocab["add"] = updated
+            target["add"] = updated
+        elif not blocks:
             raise ConfigError(
                 f"rules.{rule_id}: add and remove apply to pattern rules only. "
                 f"{rule_id} is a metric or structural rule."
             )
-        # `add` goes to the first block for the rule; `remove` sweeps them all,
-        # so removing a token does not depend on knowing which block holds it.
-        removals = set(layer.get("remove", ()) or ())
-        for block in blocks:
-            block["tokens"] = [t for t in block["tokens"] if _token_phrase(t) not in removals]
-        existing = {_token_phrase(t) for b in blocks for t in b["tokens"]}
-        for entry in layer.get("add", ()) or ():
-            if entry not in existing:
-                blocks[0]["tokens"].append(entry)
-                existing.add(entry)
+        else:
+            # `add` goes to the first block for the rule; `remove` sweeps them all,
+            # so removing a token does not depend on knowing which block holds it.
+            removals = set(layer.get("remove", ()) or ())
+            for block in blocks:
+                block["tokens"] = [t for t in block["tokens"] if _token_phrase(t) not in removals]
+            existing = {_token_phrase(t) for b in blocks for t in b["tokens"]}
+            for entry in layer.get("add", ()) or ():
+                if entry not in existing:
+                    blocks[0]["tokens"].append(entry)
+                    existing.add(entry)
 
     for key, value in layer.items():
         if key in ("severity", "add", "remove"):

@@ -53,6 +53,8 @@ LONG_SENTENCE_RATE = 0.10
 AVG_SENTENCE_MIN_WORDS = 12
 AVG_SENTENCE_MAX_WORDS = 20
 MIN_SENTENCE_VARIATION = 4.0
+PARAGRAPH_MAX_SENTENCES = 4
+LIST_EXEMPTION_RATIO = 0.5
 RETRY_LIMIT = 3
 STATE_TTL_SECONDS = 24 * 60 * 60
 ROTATION_SIZE_BYTES = 8 * 1024 * 1024  # 8 MB
@@ -265,6 +267,16 @@ def _rule_severity(preset: dict, rule_id: str, default: str) -> str:
         return default
     return config.SEVERITY_TO_INTERNAL.get(declared, default) if config else default
 
+
+def _rule_number(preset: dict, rule_id: str, key: str, default: float) -> float:
+    """A configured threshold, or the built-in default. Never raises."""
+    entry = (preset.get("rules") or {}).get(rule_id) or {}
+    value = entry.get(key, default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
 # The rules block also quotes advisory instructions and worked examples that a
 # regex must not enforce. Their exact text stays in the same inventory, so a
 # rules-block edit cannot silently escape the sync test. RULE_PATTERNS remains
@@ -365,19 +377,21 @@ def _line_number(text: str, position: int) -> int:
     return text.count("\n", 0, position) + 1
 
 
-def _document_is_exempt(path: Optional[Union[str, Path]], text: str) -> bool:
+def _list_ratio(text: str) -> float:
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return 0.0
+    return sum(1 for line in lines if _LIST_LINE.match(line)) / len(lines)
+
+
+def _document_is_exempt(path: Optional[Union[str, Path]], text: str, ratio: float = LIST_EXEMPTION_RATIO) -> bool:
     name = Path(path).name.lower() if path else ""
     if any(token in name for token in ("checklist", "changelog", "roadmap", "status", "toc", "table-of-contents")):
         return True
-
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
-        return False
-    list_lines = sum(1 for line in lines if _LIST_LINE.match(line))
-    return list_lines * 2 > len(lines)
+    return _list_ratio(text) > ratio
 
 
-def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error") -> Iterable[Finding]:
+def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error", max_sentences: int = PARAGRAPH_MAX_SENTENCES) -> Iterable[Finding]:
     if exempt:
         return ()
     findings: list[Finding] = []
@@ -388,7 +402,7 @@ def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error") -> 
         if not paragraph.strip() or all(_LIST_LINE.match(line) for line in paragraph.splitlines() if line.strip()):
             continue
         paragraph_sentences = _sentence_records(paragraph)
-        if len(paragraph_sentences) > 4:
+        if len(paragraph_sentences) > max_sentences:
             line = _line_number(text, max(0, position))
             findings.append(Finding(line, "paragraph-length", _excerpt(paragraph), severity))
     return findings
@@ -473,7 +487,8 @@ def _term_is_glossed(term: str, sentence: str) -> bool:
 
 def _vocabulary(preset: dict) -> frozenset:
     entry = (preset.get("rules") or {}).get("unglossed-term") or {}
-    return frozenset((entry.get("vocabulary") or {}).get("add", ()))
+    tokens = (entry.get("vocabulary") or {}).get("add", ()) or entry.get("add", ())
+    return frozenset(tokens)
 
 
 def _unglossed_findings(text: str, preset: dict, severity: str):
@@ -548,7 +563,17 @@ def lint(text: str, path: Optional[Union[str, Path]] = None) -> list[Finding]:
     preset, patterns = effective_preset(path)
     body = exclude_markdown(text)
     records = _sentence_records(body)
-    exempt = _document_is_exempt(path, body)
+
+    warn_words = _rule_number(preset, "sentence-length", "max", LONG_SENTENCE_WARNING_WORDS)
+    error_words = _rule_number(preset, "sentence-length", "hardMax", LONG_SENTENCE_ERROR_WORDS)
+    max_sentences = int(_rule_number(preset, "paragraph-length", "maxSentences", PARAGRAPH_MAX_SENTENCES))
+    avg_min = _rule_number(preset, "avg-sentence-length", "min", AVG_SENTENCE_MIN_WORDS)
+    avg_max = _rule_number(preset, "avg-sentence-length", "max", AVG_SENTENCE_MAX_WORDS)
+    max_rate = _rule_number(preset, "long-sentence-rate", "maxRate", LONG_SENTENCE_RATE)
+    min_stdev = _rule_number(preset, "sentence-variation", "minStdev", MIN_SENTENCE_VARIATION)
+    exemption_ratio = _rule_number(preset, "list-dominated", "exemptionRatio", LIST_EXEMPTION_RATIO)
+
+    exempt = _document_is_exempt(path, body, exemption_ratio)
     findings: list[Finding] = []
 
     sentence_severity = _rule_severity(preset, "sentence-length", "warning")
@@ -557,36 +582,43 @@ def lint(text: str, path: Optional[Union[str, Path]] = None) -> list[Finding]:
     average_severity = _rule_severity(preset, "avg-sentence-length", "warning")
     variation_severity = _rule_severity(preset, "sentence-variation", "warning")
 
+    list_severity = _rule_severity(preset, "list-dominated", "off")
+    if list_severity != "off" and _list_ratio(body) > exemption_ratio:
+        findings.append(
+            Finding(1, "list-dominated", f"{_list_ratio(body):.0%} of lines are list items", list_severity)
+        )
+
     if sentence_severity != "off":
         for sentence in records:
-            if sentence.words > LONG_SENTENCE_ERROR_WORDS:
+            if sentence.words > error_words:
                 findings.append(Finding(sentence.line, "sentence-length", _excerpt(sentence.text), "error"))
-            elif sentence.words > LONG_SENTENCE_WARNING_WORDS:
+            elif sentence.words > warn_words:
                 findings.append(Finding(sentence.line, "sentence-length", _excerpt(sentence.text), sentence_severity))
 
     if paragraph_severity != "off":
-        findings.extend(_paragraph_findings(body, exempt=exempt, severity=paragraph_severity))
+        findings.extend(_paragraph_findings(body, exempt=exempt, severity=paragraph_severity, max_sentences=max_sentences))
 
     if not exempt and len(records) >= FILE_STATISTICS_MIN_SENTENCES:
-        long_sentences = [sentence for sentence in records if sentence.words > LONG_SENTENCE_WARNING_WORDS]
-        if rate_severity != "off" and len(long_sentences) * 10 > len(records):
+        long_sentences = [sentence for sentence in records if sentence.words > warn_words]
+        if rate_severity != "off" and len(long_sentences) > len(records) * max_rate:
+            thresh_str = int(warn_words) if warn_words.is_integer() else warn_words
             findings.append(
                 Finding(
                     1,
                     "long-sentence-rate",
-                    f"{len(long_sentences)}/{len(records)} qualifying sentences exceed {LONG_SENTENCE_WARNING_WORDS} words",
+                    f"{len(long_sentences)}/{len(records)} qualifying sentences exceed {thresh_str} words",
                     rate_severity,
                 )
             )
 
         average = sum(sentence.words for sentence in records) / len(records)
-        if average_severity != "off" and (average < AVG_SENTENCE_MIN_WORDS or average > AVG_SENTENCE_MAX_WORDS):
+        if average_severity != "off" and (average < avg_min or average > avg_max):
             findings.append(
                 Finding(1, "avg-sentence-length", f"average sentence length is {average:.1f} words", average_severity)
             )
 
         variation = sqrt(sum((sentence.words - average) ** 2 for sentence in records) / len(records))
-        if variation < MIN_SENTENCE_VARIATION:
+        if variation < min_stdev:
             if variation_severity != "off":
                 findings.append(
                     Finding(1, "sentence-variation", f"sentence length variation is {variation:.1f} words", variation_severity)

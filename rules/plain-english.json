@@ -246,11 +246,11 @@
     "sentence-length": {
       "severity": "warn",
       "max": 25,
-      "hard_max": 40
+      "hardMax": 40
     },
     "paragraph-length": {
       "severity": "error",
-      "max_sentences": 4
+      "maxSentences": 4
     },
     "avg-sentence-length": {
       "severity": "warn",
@@ -259,15 +259,15 @@
     },
     "long-sentence-rate": {
       "severity": "error",
-      "max_rate": 0.1
+      "maxRate": 0.1
     },
     "sentence-variation": {
       "severity": "warn",
-      "min_stdev": 4.0
+      "minStdev": 4.0
     },
     "list-dominated": {
       "severity": "off",
-      "exemption_ratio": 0.5
+      "exemptionRatio": 0.5
     },
     "nested-table": {
       "severity": "error"
