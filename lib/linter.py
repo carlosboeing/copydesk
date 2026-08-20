@@ -1900,15 +1900,132 @@ def _fingerprint_notice(home: Path) -> Optional[str]:
     return f"{installed.name} is out of date. Run: copydesk setup --repair"
 
 
+_LIST_ITEM = re.compile(r"^\s*(?:\d+[.)]|[-*+])\s+\S")
+
+
+def _closing_block(text: str) -> Optional[str]:
+    """The final contiguous run of list items, or None.
+
+    Trailing blank lines are skipped, and an indented continuation stays with
+    the item it wraps. Anything else ends the run, so body bullets and closing
+    prose stay out of the hash.
+    """
+    lines = text.rstrip().splitlines()
+    end = len(lines)
+    while end and not lines[end - 1].strip():
+        end -= 1
+    start = end
+    while start and (_LIST_ITEM.match(lines[start - 1]) or
+                     (lines[start - 1].startswith((" ", "\t")) and lines[start - 1].strip())):
+        start -= 1
+    if start == end or not _LIST_ITEM.match(lines[start]):
+        return None
+    return "\n".join(line.strip() for line in lines[start:end])
+
+
+def _closer_hash(text: str) -> Optional[str]:
+    """Hash the reply's closing list, or None when it has none.
+
+    A restated decisions list is the most reported chat failure, and the
+    reminder hook is the one place a chat-side check can run, because chat
+    never reaches the gate.
+    """
+    block = _closing_block(text)
+    if block is None:
+        return None
+    return hashlib.sha256(block.encode("utf-8")).hexdigest()[:16]
+
+
+def _last_assistant_reply(path: Path) -> Optional[str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        role = record.get("role") or record.get("type")
+        msg = record.get("message")
+        if isinstance(msg, dict):
+            role = role or msg.get("role")
+            content = msg.get("content")
+        else:
+            content = record.get("content") or record.get("text")
+        if role in ("assistant", "model", "assistant_response"):
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                texts = [
+                    block.get("text", "")
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") in ("text", None) and "text" in block
+                ]
+                if texts:
+                    return "\n".join(texts)
+    return None
+
+
+def _check_repeat_closer(payload: dict) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    session_id = payload.get("session_id")
+    transcript_path = payload.get("transcript_path")
+    if not session_id or not transcript_path:
+        return None
+    t_file = Path(transcript_path)
+    if not t_file.is_file():
+        return None
+    reply = _last_assistant_reply(t_file)
+    if not reply:
+        return None
+    current_hash = _closer_hash(reply)
+    if not current_hash:
+        return None
+    state_dir = _state_directory() / "sessions"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    hash_file = state_dir / f"{session_id}.closer"
+    prev_hash = None
+    if hash_file.is_file():
+        try:
+            prev_hash = hash_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    try:
+        hash_file.write_text(current_hash, encoding="utf-8")
+    except OSError:
+        pass
+    if prev_hash and prev_hash == current_hash:
+        return "Your last two replies ended on the same list. Do not restate it."
+    return None
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments == ["--hook"]:
         return run_hook(sys.stdin.read())
     if arguments == ["--reminder"]:
         try:
+            payload = {}
+            import select
+            if select.select([sys.stdin], [], [], 0.0)[0]:
+                raw = sys.stdin.read()
+                if raw:
+                    try:
+                        parsed = json.loads(raw)
+                        if isinstance(parsed, dict):
+                            payload = parsed
+                    except Exception:
+                        pass
             resolved, _ = effective_preset(Path.cwd())
-            preset_dict = resolved.get("preset") or {}
-            reminder_text = (preset_dict.get("instructions") or {}).get("reminder", "")
+            inst = resolved.get("instructions") or (resolved.get("preset") or {}).get("instructions") or {}
+            reminder_text = inst.get("reminder", "")
             if not reminder_text:
                 return 1
             lines = [reminder_text]
@@ -1916,6 +2033,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 delta_line = instructions.delta(user_layer(), resolved)
                 if delta_line:
                     lines.append(delta_line)
+            closer_notice = _check_repeat_closer(payload)
+            if closer_notice:
+                lines.append(closer_notice)
             notice = _fingerprint_notice(Path(os.environ.get("HOME", str(Path.home()))))
             if notice:
                 lines.append(notice)

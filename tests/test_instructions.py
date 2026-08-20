@@ -33,7 +33,25 @@ def resolved(**overrides) -> dict:
                 "style": "plain",
                 "verbosity": "low",
                 "guidance": {"recommendations": True, "direction": True, "progress": True},
-            }
+            },
+            "documents": {
+                "enabled": True,
+                "style": "plain",
+                "verbosity": "high",
+                "guidance": {"recommendations": True},
+            },
+            "commits": {
+                "enabled": True,
+                "style": "engineer",
+                "verbosity": "low",
+                "guidance": {},
+            },
+            "reviews": {
+                "enabled": False,
+                "style": "plain",
+                "verbosity": "medium",
+                "guidance": {"pushback": True},
+            },
         },
         "preset": PRESET,
     }
@@ -331,6 +349,76 @@ class StalenessNoticeTests(unittest.TestCase):
                 os.environ.pop("XDG_CONFIG_HOME", None)
             else:
                 os.environ["XDG_CONFIG_HOME"] = env_prev
+
+
+class ChannelBlockTests(unittest.TestCase):
+    def test_documents_carries_the_craft_block(self) -> None:
+        rendered = instructions.render_documents(resolved()).lower()
+        self.assertIn("problem before the solution", rendered)
+        self.assertIn("heading carries a claim", rendered)
+
+    def test_the_craft_block_fits_forty_words(self) -> None:
+        self.assertLessEqual(instructions.word_count(instructions.CRAFT), 40)
+
+    def test_commits_and_reviews_together_fit_thirty_five_words(self) -> None:
+        total = instructions.word_count(
+            instructions.render_commits(resolved()) + " " + instructions.render_reviews(resolved())
+        )
+        self.assertLessEqual(total, 35)
+
+    def test_the_commits_floor_is_stated(self) -> None:
+        rendered = instructions.render_commits(resolved()).lower()
+        self.assertIn("72", rendered)
+        self.assertIn("why", rendered)
+
+    def test_the_agents_block_is_marked(self) -> None:
+        rendered = instructions.render_agents_block(resolved())
+        self.assertTrue(rendered.startswith("<!-- copydesk:start -->"))
+        self.assertTrue(rendered.rstrip().endswith("<!-- copydesk:end -->"))
+
+    def test_a_disabled_channel_contributes_nothing(self) -> None:
+        config = resolved()
+        config["channels"]["commits"] = {"enabled": False}
+        self.assertNotIn("commit", instructions.render_agents_block(config).lower())
+
+
+class RepeatCloserTests(unittest.TestCase):
+    def test_the_same_closer_twice_is_detected(self) -> None:
+        first = linter._closer_hash("Answer.\n\n1. Ship it?\n2. Wait?\n")
+        second = linter._closer_hash("Different body.\n\n1. Ship it?\n2. Wait?\n")
+        self.assertEqual(first, second)
+
+    def test_a_changed_closer_is_not_detected(self) -> None:
+        self.assertNotEqual(
+            linter._closer_hash("Answer.\n\n1. Ship it?\n"),
+            linter._closer_hash("Answer.\n\n1. Roll back?\n"),
+        )
+
+    def test_a_reply_with_no_closing_block_hashes_to_none(self) -> None:
+        self.assertIsNone(linter._closer_hash("Just an answer with no list.\n"))
+
+    def test_an_earlier_body_list_is_not_part_of_the_hash(self) -> None:
+        with_body_list = "Answer.\n\n- a body bullet\n\nProse.\n\n1. Ship it?\n"
+        without = "Answer.\n\nProse.\n\n1. Ship it?\n"
+        self.assertEqual(linter._closer_hash(with_body_list), linter._closer_hash(without))
+
+    def test_trailing_prose_after_a_list_means_no_closing_block(self) -> None:
+        self.assertIsNone(linter._closer_hash("Answer.\n\n1. Ship it?\n\nOne more thought.\n"))
+
+    def test_only_the_final_contiguous_list_is_hashed(self) -> None:
+        two_lists = "- first list\n\nProse between.\n\n1. Ship it?\n2. Wait?\n"
+        only_last = "1. Ship it?\n2. Wait?\n"
+        self.assertEqual(linter._closer_hash(two_lists), linter._closer_hash(only_last))
+
+    def test_a_wrapped_list_item_stays_with_its_item(self) -> None:
+        wrapped = "Answer.\n\n1. Ship it,\n   once the tests pass?\n"
+        self.assertIsNotNone(linter._closer_hash(wrapped))
+
+    def test_trailing_blank_lines_do_not_change_the_hash(self) -> None:
+        self.assertEqual(
+            linter._closer_hash("Answer.\n\n1. Ship it?\n"),
+            linter._closer_hash("Answer.\n\n1. Ship it?\n\n\n"),
+        )
 
 
 if __name__ == "__main__":

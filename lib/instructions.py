@@ -41,6 +41,30 @@ _VERBOSITY_LINES = {
     "high": "Show the full reasoning.",
 }
 
+# Generic craft ships under every style. Specific templates are the
+# repository's: frontmatter fields and required sections are project
+# conventions, and CopyDesk points at them rather than owning them.
+CRAFT = (
+    "State the problem before the solution. A heading carries a claim, not a "
+    "topic word. One idea per section. Order sections for a reader going from "
+    "top to bottom. Follow the repository's own template where it has one."
+)
+
+_COMMITS = (
+    "In a commit message: an imperative subject at most 72 characters, then a "
+    "body saying why, not what the diff shows."
+)
+
+_REVIEWS = (
+    "In a review comment: name the file and line, then say the fix."
+)
+
+_COMMITS_VERBOSITY = {
+    "low": "",
+    "medium": "One paragraph saying why, not what the diff shows.",
+    "high": "Why in body, then a short bullet list of what changed.",
+}
+
 # The design's Part 4 table, one line per style per channel. Without these the
 # style shelf changes only the gate's thresholds, and the model is never told
 # how the user wants to be written to.
@@ -121,6 +145,58 @@ def render_chat(resolved: dict) -> str:
     ]
     parts.extend(guidance.render(settings.get("guidance") or {}))
     return "\n\n".join(part for part in parts if part)
+
+
+def render_documents(resolved: dict) -> str:
+    settings = (resolved.get("channels") or {}).get("documents") or {}
+    if not settings.get("enabled", True):
+        return ""
+    parts = [
+        style_line("documents", settings.get("style", "plain")),
+        _VERBOSITY_LINES.get(settings.get("verbosity", "high"), ""),
+        CRAFT,
+    ]
+    parts.extend(guidance.render(settings.get("guidance") or {}))
+    return "\n\n".join(part for part in parts if part)
+
+
+def render_commits(resolved: dict) -> str:
+    settings = (resolved.get("channels") or {}).get("commits") or {}
+    if not settings.get("enabled", True):
+        return ""
+    parts = [
+        _COMMITS,
+        style_line("commits", settings.get("style", "engineer")),
+        _COMMITS_VERBOSITY.get(settings.get("verbosity", "low"), ""),
+    ]
+    parts.extend(guidance.render(settings.get("guidance") or {}))
+    return "\n\n".join(part for part in parts if part)
+
+
+def render_reviews(resolved: dict) -> str:
+    settings = (resolved.get("channels") or {}).get("reviews") or {}
+    if not settings.get("enabled", False):
+        return ""
+    parts = [
+        _REVIEWS,
+        style_line("reviews", settings.get("style", "plain")),
+        _VERBOSITY_LINES.get(settings.get("verbosity", "medium"), ""),
+    ]
+    parts.extend(guidance.render(settings.get("guidance") or {}))
+    return "\n\n".join(part for part in parts if part)
+
+
+def render_agents_block(resolved: dict) -> str:
+    parts = [
+        render_documents(resolved),
+        render_commits(resolved),
+        render_reviews(resolved),
+    ]
+    non_empty = [part for part in parts if part]
+    if not non_empty:
+        return ""
+    body = "\n\n".join(non_empty)
+    return f"<!-- copydesk:start -->\n{body}\n<!-- copydesk:end -->"
 
 
 def fingerprint(rendered: str) -> str:
