@@ -143,10 +143,17 @@ def _channel_for(path: str, channel_settings: dict) -> Optional[str]:
     return None
 
 
+DEFAULT_PATH_RULES = (PathRule(0, "block", "**/*.md", ""),)
+
+
 def decide(path: Optional[str], resolved: dict) -> Decision:
     if not path or path == "<stdin>":
         return Decision("block", "documents")
-    rules = resolved.get("pathRules") or ()
+    path_rules = resolved.get("pathRules")
+    if path_rules is None:
+        rules = DEFAULT_PATH_RULES
+    else:
+        rules = path_rules
     action = _action_for(path, rules)
     if action == "ignore":
         return Decision("ignore", None)

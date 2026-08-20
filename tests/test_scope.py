@@ -259,5 +259,61 @@ class RoutingTests(unittest.TestCase):
         self.assertNotIn("banned-word", result.stdout)
 
 
+class ConfigFailOpenTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.doc = self.root / "doc.md"
+        self.doc.write_text("This approach is robust and comprehensive.\n", encoding="utf-8")
+        self.state = self.root / "state"
+        linter._PRESET_CACHE.clear()
+
+    def _check(self) -> subprocess.CompletedProcess:
+        env = dict(os.environ, COPYDESK_STATE_DIR=str(self.state))
+        return subprocess.run(
+            [sys.executable, str(REPOSITORY_ROOT / "bin" / "copydesk"), "check", "doc.md"],
+            cwd=self.root, capture_output=True, text=True, env=env,
+        )
+
+    def _hook(self) -> int:
+        payload = json.dumps({
+            "session_id": "fail-open",
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(self.doc),
+                "content": "This approach is robust and comprehensive.\n",
+            },
+        })
+        env = dict(os.environ, COPYDESK_STATE_DIR=str(self.state))
+        return subprocess.run(
+            ["bash", str(GATE)], input=payload, text=True, capture_output=True, env=env, cwd=self.root
+        ).returncode
+
+    def test_control_document_without_config_reports_findings_and_exits_one(self) -> None:
+        result = self._check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("banned-word", result.stdout)
+
+    def test_malformed_config_reports_error_and_lints_with_exit_one(self) -> None:
+        (self.root / "copydesk.config.json").write_text("{ not json", encoding="utf-8")
+        result = self._check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("is not valid JSON", result.stderr)
+        self.assertIn("banned-word", result.stdout)
+
+    def test_invalid_severity_reports_error_and_lints_with_exit_one(self) -> None:
+        (self.root / "copydesk.config.json").write_text(
+            '{"version": 1, "rules": {"banned-word": {"severity": "invalid"}}}', encoding="utf-8"
+        )
+        result = self._check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("rules.banned-word.severity", result.stderr)
+        self.assertIn("banned-word", result.stdout)
+
+    def test_gate_hook_with_malformed_config_still_evaluates_and_blocks(self) -> None:
+        (self.root / "copydesk.config.json").write_text("{ not json", encoding="utf-8")
+        self.assertEqual(self._hook(), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

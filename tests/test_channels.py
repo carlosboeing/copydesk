@@ -115,3 +115,12 @@ class DecisionTests(unittest.TestCase):
         config = resolved()
         config["channels"]["documents"]["enabled"] = False
         self.assertEqual(channels.decide("/repo/notes.md", config).action, "ignore")
+
+    def test_decide_without_path_rules_defaults_to_blocking_markdown(self) -> None:
+        decision = channels.decide("/repo/doc.md", {})
+        self.assertEqual(decision.action, "block")
+        self.assertEqual(decision.channel, "documents")
+
+    def test_decide_with_explicitly_empty_path_rules_returns_ignore(self) -> None:
+        decision = channels.decide("/repo/doc.md", {"pathRules": []})
+        self.assertEqual(decision.action, "ignore")
