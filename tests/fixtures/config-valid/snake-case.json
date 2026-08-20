@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "rules": {
+    "sentence-length": {
+      "hard_max": 30
+    },
+    "paragraph-length": {
+      "max_sentences": 4
+    },
+    "long-sentence-rate": {
+      "max_rate": 0.2
+    },
+    "sentence-variation": {
+      "min_stdev": 4.5
+    },
+    "list-dominated": {
+      "exemption_ratio": 0.6
+    }
+  },
+  "telemetry": {
+    "save_text": true
+  }
+}

@@ -476,5 +476,40 @@ class RetryLimitTests(unittest.TestCase):
         self.assertEqual(linter._retry_limit({"gate": {"retries": 0}}), linter.RETRY_LIMIT)
 
 
+class RuleValidationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def _write(self, content: str) -> Path:
+        p = self.tmp / "copydesk.config.json"
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def test_an_unknown_threshold_is_refused(self) -> None:
+        with self.assertRaises(config.ConfigError) as caught:
+            config.resolve(RULES_DIR, None, user_path=self._write('{"version": 1, "rules": {"sentence-length": {"maxx": 5}}}'))
+        self.assertIn("maxx", str(caught.exception))
+        self.assertIn("hardMax", str(caught.exception))
+
+    def test_a_threshold_from_another_rule_is_refused(self) -> None:
+        with self.assertRaises(config.ConfigError):
+            config.resolve(RULES_DIR, None, user_path=self._write('{"version": 1, "rules": {"sentence-length": {"minStdev": 4}}}'))
+
+    def test_an_unknown_rule_is_refused(self) -> None:
+        with self.assertRaises(config.ConfigError) as caught:
+            config.resolve(RULES_DIR, None, user_path=self._write('{"version": 1, "rules": {"nonexistent": {"severity": "error"}}}'))
+        self.assertIn("nonexistent", str(caught.exception))
+
+    def test_wrong_type_threshold_is_refused(self) -> None:
+        with self.assertRaises(config.ConfigError):
+            config.resolve(RULES_DIR, None, user_path=self._write('{"version": 1, "rules": {"sentence-length": {"max": "five"}}}'))
+
+    def test_boolean_for_integer_threshold_is_refused(self) -> None:
+        with self.assertRaises(config.ConfigError):
+            config.resolve(RULES_DIR, None, user_path=self._write('{"version": 1, "rules": {"sentence-length": {"max": true}}}'))
+
+
 if __name__ == "__main__":
     unittest.main()
+

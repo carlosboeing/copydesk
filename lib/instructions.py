@@ -20,6 +20,21 @@ VERBOSITY_LEVELS = ("low", "medium", "high")
 OUTPUT_STYLE_NAMES = ("CopyDesk low", "CopyDesk medium", "CopyDesk high")
 FINGERPRINT_MARKER = "copydesk-build:"
 
+# The $id the schema declares, and where SchemaStore will serve it.
+SCHEMA_ID = "https://json.schemastore.org/copydesk.config.json"
+
+# Flip to True in the release that follows the catalog entry merging.
+SCHEMASTORE_MERGED = False
+
+# What the wizard writes into every config it generates. The raw tag URL
+# resolves the moment v0 exists; the catalog URL does not resolve until
+# SchemaStore merges, and a 404 gives the user no autocomplete at all.
+SCHEMA_URL = (
+    SCHEMA_ID
+    if SCHEMASTORE_MERGED
+    else "https://raw.githubusercontent.com/carlosboeing/copydesk/v0/copydesk.schema.json"
+)
+
 # Measured, not guessed. A 1,256-word block did not hold across a long
 # session; a 200-word one did. The budget is tested, not documented.
 BUDGETS = {"chat": 220, "documents": 260, "commits": 25, "reviews": 25}

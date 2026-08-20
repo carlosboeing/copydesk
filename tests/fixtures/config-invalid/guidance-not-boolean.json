@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "channels": {
+    "chat": {
+      "guidance": {
+        "sources": "yes"
+      }
+    }
+  }
+}

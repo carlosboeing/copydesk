@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "rules": {
+    "sentence-length": {
+      "severity": "panic"
+    }
+  }
+}

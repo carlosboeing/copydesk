@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "channels": {
+    "chat": {
+      "foo": "bar"
+    }
+  }
+}

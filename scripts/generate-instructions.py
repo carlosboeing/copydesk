@@ -22,17 +22,151 @@ from pathlib import Path
 BUNDLE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BUNDLE_ROOT / "lib"))
 
+import adapters
+import channels
 import config as config_mod
+import guidance
 import instructions
+import styles
 
 PRESET_PATH = BUNDLE_ROOT / "rules" / "plain.json"
 OUTPUT_STYLES_DIR = BUNDLE_ROOT / "output-styles"
 REMINDER = BUNDLE_ROOT / "hooks" / "reminder.sh"
+SCHEMA_PATH = BUNDLE_ROOT / "copydesk.schema.json"
 
 RULES_START = "<!-- plain-english-rules:start -->"
 RULES_END = "<!-- plain-english-rules:end -->"
 REMINDER_START = "cat << 'EOF'\n"
 REMINDER_END = "\nEOF\n"
+
+
+def _rule_schema(rule_id: str, preset: dict) -> dict:
+    """One rule's settings: severity, word lists where they apply, thresholds."""
+    properties = {
+        "severity": {
+            "type": "string",
+            "enum": sorted(config_mod.SEVERITY_TO_INTERNAL),
+            "description": "error blocks, warn reports, off disables.",
+        }
+    }
+    if rule_id in config_mod.pattern_rule_ids(preset) or rule_id == "unglossed-term":
+        properties["add"] = {"type": "array", "items": {"type": "string"},
+                             "description": f"Entries added to {rule_id}'s word list."}
+        properties["remove"] = {"type": "array", "items": {"type": "string"},
+                                "description": f"Entries removed from {rule_id}'s word list."}
+    for name, kind in config_mod.RULE_PARAMETERS.get(rule_id, {}).items():
+        properties[name] = {"type": kind, "description": f"{rule_id} threshold: {name}."}
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "description": f"Settings for the {rule_id} rule.",
+        "properties": properties,
+    }
+
+
+def _channel_schema(name: str) -> dict:
+    return {
+        "type": "object",
+        "description": f"Settings for the {name} channel.",
+        "additionalProperties": False,
+        "properties": {
+            "enabled": {"type": "boolean", "description": "Whether this channel's instructions and gate coverage apply.", "default": True},
+            "style": {"type": "string", "enum": list(styles.STYLE_NAMES), "description": "How writing in this channel reads.", "default": "plain"},
+            "verbosity": {"type": "string", "enum": list(instructions.VERBOSITY_LEVELS), "description": "How much this channel says."},
+            "guidance": {
+                "type": "object",
+                "additionalProperties": False,
+                "description": "Deliverables a reply in this channel must contain.",
+                "properties": {
+                    guidance_id: {"type": "boolean", "description": guidance.SNIPPETS[guidance_id]}
+                    for guidance_id in guidance.IDS
+                },
+            },
+            "match": {"type": "array", "items": {"type": "string"}, "description": "Globs assigning files to this channel."},
+        },
+    }
+
+
+def _path_list_schema(action: str) -> dict:
+    return {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": f"Gitignore-style globs to {action}. A leading ! re-includes.",
+    }
+
+
+def render_schema(preset: dict) -> str:
+    """Build the schema from the registries the engine already reads.
+
+    A hand-written copy would drift exactly the way the instructions once did.
+    The preset is a parameter because the rule list comes from its pattern
+    blocks, so a new pattern rule reaches the schema with no second edit.
+    """
+    document = {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "$id": "https://json.schemastore.org/copydesk.config.json",
+        "title": "CopyDesk configuration",
+        "type": "object",
+        "required": ["version"],
+        # A tolerant root, so $schema and future keys never break an older
+        # install. Nested objects are strict, so a typo squiggles.
+        "properties": {
+            "version": {"type": "integer", "enum": [1], "description": "The config schema version. Required."},
+            "channels": {
+                "type": "object",
+                "additionalProperties": False,
+                "description": "How each kind of writing reads.",
+                "properties": {name: _channel_schema(name) for name in config_mod.CHANNEL_DEFAULTS},
+            },
+            "agents": {
+                "type": "array",
+                "description": "Which AI tools CopyDesk sets up.",
+                "items": {"type": "string", "enum": sorted(adapters.REGISTRY)},
+            },
+            "paths": {
+                "type": "object",
+                "additionalProperties": False,
+                "description": "Which files the gate judges.",
+                "properties": {action: _path_list_schema(action) for action in channels.ACTIONS},
+            },
+            "gate": {
+                "type": "object",
+                "additionalProperties": False,
+                "description": "Gate behaviour.",
+                "properties": {
+                    "retries": {
+                        "type": "integer", "minimum": 1, "maximum": 5, "default": 3,
+                        "description": "How many refusals before the gate lets the write through.",
+                    }
+                },
+            },
+            "rules": {
+                "type": "object",
+                "additionalProperties": False,
+                "description": "Per-rule severity, word lists and thresholds.",
+                # One schema per rule id, so a threshold typo squiggles and
+                # autocomplete offers the parameters that rule actually takes.
+                "properties": {
+                    rule_id: _rule_schema(rule_id, preset)
+                    for rule_id in config_mod.rule_ids(preset)
+                },
+            },
+            "telemetry": {
+                "type": "object",
+                "additionalProperties": False,
+                "description": "What CopyDesk records locally.",
+                "properties": {
+                    "events": {"type": "boolean", "default": True, "description": "Record one event per check."},
+                    "saveText": {"type": "boolean", "default": False, "description": "Store the flagged text beside the event."},
+                },
+            },
+            "extends": {
+                "description": "Advanced: a custom preset chain.",
+                "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+            },
+        },
+    }
+    return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
 
 
 def render_output_style(preset: dict, resolved: dict, level: str) -> str:
@@ -80,6 +214,7 @@ def main() -> int:
         OUTPUT_STYLES_DIR / "copydesk-medium.md": render_output_style(preset, resolved, "medium"),
         OUTPUT_STYLES_DIR / "copydesk-high.md": render_output_style(preset, resolved, "high"),
         REMINDER: render_reminder(preset, REMINDER.read_text(encoding="utf-8")),
+        SCHEMA_PATH: render_schema(preset),
     }
 
     stale = [path for path, rendered in targets.items() if not path.is_file() or path.read_text(encoding="utf-8") != rendered]

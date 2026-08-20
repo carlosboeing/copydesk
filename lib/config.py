@@ -24,6 +24,8 @@ from typing import Iterable, Optional, Union
 import jsonc
 
 import channels
+import guidance
+import instructions
 import styles
 
 SCHEMA_VERSION = 1
@@ -179,6 +181,107 @@ THRESHOLD_ALIASES = {
     "exemption_ratio": "exemptionRatio",
 }
 
+# Rule id to the parameters it accepts, with each parameter's JSON type. The
+# schema, doctor and the loader all read this, so a new threshold is
+# declared once.
+RULE_PARAMETERS = {
+    "sentence-length": {"max": "integer", "hardMax": "integer"},
+    "paragraph-length": {"maxSentences": "integer"},
+    "avg-sentence-length": {"min": "integer", "max": "integer"},
+    "long-sentence-rate": {"maxRate": "number"},
+    "sentence-variation": {"minStdev": "number"},
+    "list-dominated": {"exemptionRatio": "number"},
+    "nested-table": {},
+    "unglossed-term": {},
+}
+
+
+# Pattern rules take word lists; metric and structural rules do not. The
+# preset is the source, so a new pattern block needs no second declaration.
+def pattern_rule_ids(preset: dict) -> tuple:
+    return tuple(sorted({block["id"] for block in preset.get("patterns", ())}))
+
+
+def rule_ids(preset: dict) -> tuple:
+    return tuple(sorted(set(pattern_rule_ids(preset)) | set(RULE_PARAMETERS)))
+
+
+_TYPE_CHECKS = {"integer": int, "number": (int, float), "boolean": bool, "string": str}
+
+_SHAPES = {
+    "enabled": bool,
+    "style": str,
+    "verbosity": str,
+    "match": list,
+    "add": list,
+    "remove": list,
+}
+
+
+def _check_shape(source: Path, dotted: str, key: str, value) -> None:
+    expected = _SHAPES.get(key)
+    if expected is None:
+        return
+    # bool is a subclass of int, so an explicit bool test comes first.
+    if expected is bool and not isinstance(value, bool):
+        raise ConfigError(f"{source}: {dotted} must be true or false, not {type(value).__name__}.")
+    if expected is not bool and (isinstance(value, bool) or not isinstance(value, expected)):
+        raise ConfigError(f"{source}: {dotted} must be a {expected.__name__}, "
+                          f"not {type(value).__name__}.")
+    if expected is list and not all(isinstance(item, str) for item in value):
+        raise ConfigError(f"{source}: {dotted} must hold strings only.")
+
+
+def _check_rule_layer(source: Path, preset: dict, rule_id: str, layer: dict) -> None:
+    if rule_id not in rule_ids(preset):
+        raise ConfigError(
+            f"{source}: rules.{rule_id} is not a rule. "
+            "Run `copydesk doctor --rules` for the list."
+        )
+    known = set(RULE_PARAMETERS.get(rule_id, {})) | {"severity", "add", "remove", "vocabulary"}
+    for key, value in layer.items():
+        norm_key = THRESHOLD_ALIASES.get(key, key)
+        if norm_key not in known and key not in known:
+            raise ConfigError(
+                f"{source}: rules.{rule_id}.{key} is not a parameter of {rule_id}. "
+                f"Allowed: {', '.join(sorted(known))}."
+            )
+        _check_shape(source, f"rules.{rule_id}.{key}", norm_key, value)
+        declared = RULE_PARAMETERS.get(rule_id, {}).get(norm_key)
+        if declared:
+            # bool is a subclass of int, so True would pass an integer check.
+            # The exclusion applies to the numeric types only, or a declared
+            # boolean parameter would reject the one value it accepts.
+            wrong_type = not isinstance(value, _TYPE_CHECKS[declared])
+            if declared in ("integer", "number") and isinstance(value, bool):
+                wrong_type = True
+            if wrong_type:
+                raise ConfigError(
+                    f"{source}: rules.{rule_id}.{key} expected {declared}, "
+                    f"got {type(value).__name__}."
+                )
+
+
+def _check_channel(source: Path, name: str, settings: dict) -> None:
+    allowed = set(CHANNEL_DEFAULTS[name])
+    for key, value in settings.items():
+        if key not in allowed:
+            raise ConfigError(f"{source}: channels.{name}.{key} is not a setting. "
+                              f"Allowed: {', '.join(sorted(allowed))}.")
+        _check_shape(source, f"channels.{name}.{key}", key, value)
+        if key == "style" and value not in styles.STYLE_NAMES + tuple(styles.STYLE_ALIASES):
+            raise ConfigError(f"{source}: channels.{name}.style: {value!r} is not a style.")
+        if key == "verbosity" and value not in instructions.VERBOSITY_LEVELS:
+            raise ConfigError(f"{source}: channels.{name}.verbosity: {value!r} is not a level.")
+        if key == "guidance":
+            for guidance_id, state in (value or {}).items():
+                if guidance_id not in guidance.IDS:
+                    raise ConfigError(f"{source}: channels.{name}.guidance.{guidance_id} "
+                                      "is not a guidance id.")
+                if not isinstance(state, bool):
+                    raise ConfigError(f"{source}: channels.{name}.guidance.{guidance_id} "
+                                      "must be true or false.")
+
 
 def _normalise_rule_keys(layer: dict) -> dict:
     """One spelling reaches the engine. Both spellings reach this function."""
@@ -202,23 +305,25 @@ def _token_phrase(token: Union[str, dict]) -> str:
     return token if isinstance(token, str) else token["phrase"]
 
 
-def _apply_rule_layer(preset: dict, rule_id: str, layer: dict) -> None:
+def _apply_rule_layer(source: Union[Path, str], preset: dict, rule_id: str, layer: dict, provenance: dict) -> None:
     """Apply one config entry onto the effective preset, in place."""
     if not isinstance(layer, dict):
-        raise ConfigError(f"rules.{rule_id}: must be an object")
+        raise ConfigError(f"{source}: rules.{rule_id} must be an object")
 
+    _check_rule_layer(Path(source), preset, rule_id, layer)
     layer = _normalise_rule_keys(layer)
 
     if "severity" in layer:
         severity = layer["severity"]
         if severity not in SEVERITY_TO_INTERNAL:
             allowed = ", ".join(sorted(SEVERITY_TO_INTERNAL))
-            raise ConfigError(f"rules.{rule_id}.severity: {severity!r} is not one of {allowed}")
+            raise ConfigError(f"{source}: rules.{rule_id}.severity: {severity!r} is not one of {allowed}")
         internal = SEVERITY_TO_INTERNAL[severity]
         for block in preset["patterns"]:
             if block["id"] == rule_id:
                 block["severity"] = internal
         preset["rules"].setdefault(rule_id, {})["severity"] = severity
+        provenance[f"rules.{rule_id}.severity"] = str(source)
 
     if "add" in layer or "remove" in layer:
         blocks = [b for b in preset["patterns"] if b["id"] == rule_id]
@@ -229,9 +334,10 @@ def _apply_rule_layer(preset: dict, rule_id: str, layer: dict) -> None:
             updated = _merge_list(current, layer)
             vocab["add"] = updated
             target["add"] = updated
+            provenance[f"rules.{rule_id}.add"] = str(source)
         elif not blocks:
             raise ConfigError(
-                f"rules.{rule_id}: add and remove apply to pattern rules only. "
+                f"{source}: rules.{rule_id}: add and remove apply to pattern rules only. "
                 f"{rule_id} is a metric or structural rule."
             )
         else:
@@ -245,6 +351,10 @@ def _apply_rule_layer(preset: dict, rule_id: str, layer: dict) -> None:
                 if entry not in existing:
                     blocks[0]["tokens"].append(entry)
                     existing.add(entry)
+            if "add" in layer:
+                provenance[f"rules.{rule_id}.add"] = str(source)
+            if "remove" in layer:
+                provenance[f"rules.{rule_id}.remove"] = str(source)
 
     for key, value in layer.items():
         if key in ("severity", "add", "remove"):
@@ -253,8 +363,10 @@ def _apply_rule_layer(preset: dict, rule_id: str, layer: dict) -> None:
         if key == "vocabulary" and isinstance(value, dict):
             current = target.get("vocabulary", {}).get("add", [])
             target.setdefault("vocabulary", {})["add"] = _merge_list(current, value)
+            provenance[f"rules.{rule_id}.add"] = str(source)
         else:
             target[key] = value
+            provenance[f"rules.{rule_id}.{key}"] = str(source)
 
 
 def load_preset_document(rules_dir: Path, preset_id: str) -> dict:
@@ -332,6 +444,7 @@ def _merge_channels(base: dict, layer: dict, source: Path, warnings: list, prove
             continue
         if not isinstance(settings, dict):
             raise ConfigError(f"{source}: channels.{name} must be an object")
+        _check_channel(source, name, settings)
         target = merged[name]
         for key, value in settings.items():
             if key == "guidance" and isinstance(value, dict):
@@ -428,14 +541,15 @@ def resolve(
     effective = load_preset_document(rules_dir, named[0])
     effective.setdefault("rules", {})
     for preset_id in named[1:]:
+        extra_path = rules_dir / f"{preset_id}{JSON_SUFFIX}"
         extra = load_preset_document(rules_dir, preset_id)
         effective["patterns"].extend(extra.get("patterns", []))
         for rule_id, layer in (extra.get("rules") or {}).items():
-            _apply_rule_layer(effective, rule_id, layer)
+            _apply_rule_layer(extra_path, effective, rule_id, layer, provenance)
 
     for path, document in layers:
         for rule_id, layer in (document.get("rules") or {}).items():
-            _apply_rule_layer(effective, rule_id, layer)
+            _apply_rule_layer(path, effective, rule_id, layer, provenance)
 
     base_root = None
     if project_path is not None:

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json.schemastore.org/copydesk.config.json",
+  "version": 1,
+  "channels": {
+    "chat": {
+      "enabled": true,
+      "style": "plain",
+      "verbosity": "low",
+      "guidance": {
+        "recommendations": true,
+        "direction": true,
+        "progress": true
+      }
+    },
+    "documents": {
+      "enabled": true,
+      "style": "plain",
+      "verbosity": "high",
+      "guidance": {
+        "recommendations": true
+      },
+      "match": ["docs/**/*.md", "*.md"]
+    },
+    "commits": {
+      "enabled": true,
+      "style": "engineer",
+      "verbosity": "low"
+    },
+    "reviews": {
+      "enabled": false,
+      "style": "plain",
+      "verbosity": "medium",
+      "guidance": {
+        "pushback": true
+      }
+    }
+  },
+  "agents": ["claude-code", "codex", "cursor", "kimi"],
+  "paths": {
+    "check": ["**/*.md"],
+    "ignore": ["node_modules/**", "vendor/**"]
+  },
+  "gate": {
+    "retries": 3
+  },
+  "rules": {
+    "sentence-length": {
+      "severity": "error",
+      "max": 25,
+      "hardMax": 35
+    },
+    "banned-word": {
+      "severity": "error",
+      "add": ["custom-banned"],
+      "remove": ["allowed-word"]
+    }
+  },
+  "telemetry": {
+    "events": true,
+    "saveText": false
+  }
+}

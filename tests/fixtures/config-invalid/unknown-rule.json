@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "rules": {
+    "nonexistent-rule": {
+      "severity": "error"
+    }
+  }
+}
