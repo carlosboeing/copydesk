@@ -185,17 +185,20 @@ def _clean_git_env() -> dict[str, str]:
 
 def hooks_directory(cwd: Path) -> Optional[Path]:
     """Git's own answer, which honours worktrees and core.hooksPath."""
-    result = subprocess.run(
-        ["git", "rev-parse", "--path-format=absolute", "--git-path", "hooks"],
-        cwd=str(cwd), capture_output=True, text=True, env=_clean_git_env(),
-    )
-    if result.returncode != 0:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-path", "hooks"],
+            cwd=str(cwd), capture_output=True, text=True, env=_clean_git_env(),
+        )
+        if result.returncode != 0:
+            return None
+        out = result.stdout.strip()
+        if not out:
+            return None
+        p = Path(out)
+        return p.resolve() if p.is_absolute() else (cwd / p).resolve()
+    except OSError:
         return None
-    out = result.stdout.strip()
-    if not out:
-        return None
-    p = Path(out)
-    return p.resolve() if p.is_absolute() else (cwd / p).resolve()
 
 
 def install_commit_hook(cwd: Path) -> HookResult:

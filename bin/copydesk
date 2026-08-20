@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -15,8 +16,12 @@ BUNDLE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BUNDLE_ROOT / "lib"))
 
 import channels  # noqa: E402
+import config  # noqa: E402
 import config_writer  # noqa: E402
+import guidance  # noqa: E402
+import instructions  # noqa: E402
 import linter  # noqa: E402
+import styles  # noqa: E402
 import wizard  # noqa: E402
 
 
@@ -140,8 +145,9 @@ SUBCOMMANDS = ("check", "doctor", "stats", "report", "set", "setup", "uninstall"
 USAGE = """usage: copydesk setup [--defaults] [--yes] [--dry-run] [--repair]
        copydesk uninstall [--yes] [--dry-run] [--purge]
        copydesk check <file.md> [...] | -
+       copydesk check --commit-msg <path>
        copydesk set <key>=<value>
-       copydesk doctor
+       copydesk doctor [<file>] [--rules]
        copydesk stats [--since <window>] [--json]
        copydesk report [--since <window>] [--out <path>]
        copydesk --version
@@ -157,18 +163,89 @@ def _version() -> str:
         return "unknown"
 
 
-def _handle_doctor(args: list[str]) -> int:
-    """Report what CopyDesk resolves. Never mutates anything."""
-    if args:
-        print(f"error: doctor takes no options, got '{args[0]}'", file=sys.stderr)
+def _home_path() -> Path:
+    return Path(os.environ.get("COPYDESK_HOME", os.environ.get("HOME", str(Path.home()))))
+
+
+def _doctor_rules() -> int:
+    preset_path = linter._preset_path()
+    preset = linter.load_preset(preset_path) if preset_path.is_file() else {}
+
+    print("Rules (metric, structural, and pattern):")
+    for rule_id in config.rule_ids(preset):
+        params = config.RULE_PARAMETERS.get(rule_id, {})
+        param_desc = ", ".join(f"{k}: {v}" for k, v in params.items()) if params else "no parameters"
+        print(f"  {rule_id:25} {param_desc}")
+    print()
+
+    print("Guidance Deliverables:")
+    for gid in guidance.IDS:
+        body = guidance.SNIPPETS.get(gid, "")
+        summary = body.splitlines()[0] if body else ""
+        print(f"  {gid:25} {summary}")
+    return 0
+
+
+def _doctor_file(file_path: str) -> int:
+    target = Path(file_path).resolve()
+    target_str = str(target)
+    if not target.exists():
+        print(f"error: {file_path} does not exist", file=sys.stderr)
         return 64
 
+    try:
+        user_cfg = config.user_config_path()
+        proj_cfg = config.project_config_path(target)
+        loc_cfg = config.local_config_path(target)
+        resolved = config.resolve(
+            linter._rules_dir(), target, user_path=user_cfg, project_path=proj_cfg, local_path=loc_cfg
+        )
+    except config.ConfigError as error:
+        print(f"copydesk: config error: {error}", file=sys.stderr)
+        return 1
+
+    decision = channels.decide(target_str, resolved)
+    channel_name = decision.channel
+    channel_cfg = (resolved.get("channels") or {}).get(channel_name) or {}
+    style_name = channel_cfg.get("style", "plain")
+
+    print(f"File: {file_path}")
+    print(f"Channel: {channel_name} (action: {decision.action})")
+    print(f"Style: {style_name}")
+    print()
+
+    warnings = resolved.get("warnings") or []
+    if warnings:
+        print("Warnings:")
+        for w in warnings:
+            print(f"  {w}")
+        print()
+
+    print("Effective rules and provenance:")
+    provenance = resolved.get("provenance") or {}
+    for key in sorted(provenance.keys()):
+        source = provenance[key]
+        val = resolved
+        parts = key.split(".")
+        for p in parts:
+            if isinstance(val, dict):
+                val = val.get(p)
+            else:
+                val = None
+                break
+        print(f"  {key:35} {str(val):15} ({source})")
+    return 0
+
+
+def _doctor_bare() -> int:
+    home = _home_path()
     print(f"CopyDesk {_version()}")
     print()
 
     print("Preset")
     preset_path = linter._preset_path()
     print(f"  path      {preset_path}{'' if preset_path.is_file() else '   MISSING'}")
+    preset = {}
     if preset_path.is_file():
         preset = linter.load_preset(preset_path)
         tokens = sum(len(b["tokens"]) for b in preset["patterns"])
@@ -178,11 +255,64 @@ def _handle_doctor(args: list[str]) -> int:
     print()
 
     print("Config")
-    discovery = linter.config.describe_discovery(Path.cwd()) if linter.config else {"user": None, "project": None, "errors": []}
-    print(f"  user      {discovery['user'] or 'none'}")
-    print(f"  project   {discovery['project'] or 'none'}")
-    for error in discovery["errors"]:
+    cwd = Path.cwd()
+    discovery = config.describe_discovery(cwd) if config else {"user": None, "project": None, "local": None, "errors": []}
+    print(f"  user      {discovery.get('user') or 'none'}")
+    print(f"  project   {discovery.get('project') or 'none'}")
+    for error in discovery.get("errors", []):
         print(f"  error     {error}")
+    print()
+
+    # Read config back as sentences
+    try:
+        user_cfg = config.user_config_path()
+        proj_cfg = config.project_config_path(cwd)
+        loc_cfg = config.local_config_path(cwd)
+        resolved = config.resolve(linter._rules_dir(), cwd, user_path=user_cfg, project_path=proj_cfg, local_path=loc_cfg)
+    except Exception:
+        resolved = {}
+
+    channels_cfg = resolved.get("channels") or {}
+    paths_cfg = resolved.get("paths") or {}
+
+    print("Active Configuration:")
+    # Chat sentences
+    chat_cfg = channels_cfg.get("chat") or {}
+    verbosity = chat_cfg.get("verbosity", "low")
+    if verbosity == "low":
+        print("  Chat replies are short.")
+    elif verbosity == "medium":
+        print("  Chat replies include trade-offs.")
+    else:
+        print("  Chat replies show full reasoning.")
+
+    # Paths sentences
+    for pattern in paths_cfg.get("ignore", []):
+        print(f"  Drafts under {pattern} are not checked.")
+    for pattern in paths_cfg.get("warn", []):
+        print(f"  {pattern} warns, never blocks.")
+
+    # Channels and Prevention-only status
+    for ch_name in ("chat", "documents", "commits", "reviews"):
+        if ch_name == "chat":
+            print("  chat is prevention-only (chat never reaches a gate).")
+        elif ch_name == "reviews":
+            rev_match = (channels_cfg.get("reviews") or {}).get("match") or []
+            if not rev_match:
+                print("  reviews is prevention-only (no match globs configured).")
+            else:
+                print(f"  reviews checks files matching {', '.join(rev_match)}.")
+        elif ch_name == "commits":
+            hooks_dir = wizard.hooks_directory(cwd)
+            has_commit_hook = False
+            if hooks_dir:
+                hook_file = hooks_dir / "commit-msg"
+                if hook_file.is_file() and "# CopyDesk commits gate" in hook_file.read_text(encoding="utf-8", errors="ignore"):
+                    has_commit_hook = True
+            if not has_commit_hook:
+                print("  commits is prevention-only (no commit-msg hook installed in this repository).")
+            else:
+                print("  commits gate is installed via commit-msg hook.")
     print()
 
     print("State")
@@ -194,7 +324,7 @@ def _handle_doctor(args: list[str]) -> int:
     print()
 
     print("Hooks")
-    hook_dir = Path.home() / ".claude" / "hooks" / "copydesk"
+    hook_dir = home / ".claude" / "hooks" / "copydesk"
     for name in ("gate.sh", "reminder.sh", "linter.py"):
         installed = hook_dir / name
         print(f"  {name:12} {'installed' if installed.is_file() else 'not installed'}   {installed}")
@@ -203,7 +333,7 @@ def _handle_doctor(args: list[str]) -> int:
     print()
 
     print("Harness registration")
-    settings = Path.home() / ".claude" / "settings.json"
+    settings = home / ".claude" / "settings.json"
     if settings.is_file():
         try:
             text = settings.read_text(encoding="utf-8")
@@ -213,8 +343,52 @@ def _handle_doctor(args: list[str]) -> int:
             print(f"  Claude Code  settings.json unreadable ({error.strerror})")
     else:
         print("  Claude Code  no settings.json found")
+    print()
+
+    # Drift checks
+    drift_items = []
+    # 1. Output styles fingerprint check
+    styles_dir = home / ".claude" / "output-styles"
+    if styles_dir.is_dir():
+        for style_file in sorted(styles_dir.glob("copydesk-*.md")):
+            try:
+                rendered = style_file.read_text(encoding="utf-8")
+                marker = re.search(re.escape(instructions.FINGERPRINT_MARKER) + r"([0-9a-f]{12})", rendered)
+                if marker:
+                    if marker.group(1) != instructions.fingerprint(rendered):
+                        drift_items.append(f"{style_file.name} is out of date. Run `copydesk setup --repair` to update.")
+            except Exception:
+                pass
+
+    # 2. Warnings from project config (e.g. personal keys)
+    for w in resolved.get("warnings", []):
+        drift_items.append(f"Warning: {w}")
+
+    if drift_items:
+        print("Drift and Diagnostics:")
+        for item in drift_items:
+            print(f"  {item}")
+        print()
 
     return 0
+
+
+def _handle_doctor(args: list[str]) -> int:
+    """Report what CopyDesk resolves. Never mutates anything."""
+    if args and args[0] == "--rules":
+        if len(args) > 1:
+            print("error: --rules takes no additional arguments", file=sys.stderr)
+            return 64
+        return _doctor_rules()
+
+    if args:
+        if args[0].startswith("-"):
+            print(f"error: unknown doctor option '{args[0]}'", file=sys.stderr)
+            return 64
+        return _doctor_file(args[0])
+
+    return _doctor_bare()
+
 
 
 def _handle_check(args: list[str]) -> int:
