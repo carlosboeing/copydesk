@@ -171,7 +171,10 @@ def word_count(text: str) -> int:
 
 def render_chat(resolved: dict) -> str:
     settings = (resolved.get("channels") or {}).get("chat") or {}
-    preset = resolved.get("preset") or {}
+    # `config.resolve()` grafts its extra keys onto the preset document, so the
+    # instructions sit at the top level. The nested `preset` form is what a
+    # hand-built fixture produces, which is how reading only it went unnoticed.
+    inst = resolved.get("instructions") or (resolved.get("preset") or {}).get("instructions") or {}
     parts = [
         _STOPPING_RULES,
         styles.FLOOR["answer-first"],
@@ -179,7 +182,7 @@ def render_chat(resolved: dict) -> str:
         styles.FLOOR["say-once"],
         style_line("chat", settings.get("style", "plain")),
         _VERBOSITY_LINES.get(settings.get("verbosity", "low"), _VERBOSITY_LINES["low"]),
-        (preset.get("instructions") or {}).get("categories", ""),
+        inst.get("categories", ""),
         _CHAT_STRUCTURE,
     ]
     parts.extend(guidance.render(settings.get("guidance") or {}))

@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 
+import config  # noqa: E402
 import instructions  # noqa: E402
 import linter  # noqa: E402
 
@@ -419,6 +420,50 @@ class RepeatCloserTests(unittest.TestCase):
             linter._closer_hash("Answer.\n\n1. Ship it?\n"),
             linter._closer_hash("Answer.\n\n1. Ship it?\n\n\n"),
         )
+
+
+class ProductionShapeTests(unittest.TestCase):
+    """The fixture above hand-builds a `preset` key. `config.resolve()` never
+    produces one, so a renderer reading it got an empty dict in production and
+    silently dropped whatever it held. These tests use the real resolved shape.
+    """
+
+    def resolve_production(self) -> dict:
+        home = tempfile.mkdtemp()
+        try:
+            return config.resolve(
+                ROOT / "rules",
+                user_path=Path(home) / "absent.json",
+            )
+        except config.ConfigError:
+            return config.resolve(ROOT / "rules")
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_resolve_puts_the_instructions_at_the_top_level(self) -> None:
+        resolved_config = self.resolve_production()
+        self.assertIn("instructions", resolved_config)
+        self.assertNotIn("preset", resolved_config)
+
+    def test_the_categories_reach_the_rendered_chat_block(self) -> None:
+        resolved_config = self.resolve_production()
+        categories = resolved_config["instructions"]["categories"]
+        self.assertTrue(categories, "the preset carries no categories text to check")
+        self.assertIn(categories, instructions.render_chat(resolved_config))
+
+    def test_every_shipped_output_style_carries_the_categories(self) -> None:
+        categories = PRESET["instructions"]["categories"]
+        for level in instructions.VERBOSITY_LEVELS:
+            path = ROOT / "output-styles" / f"copydesk-{level}.md"
+            self.assertIn(
+                categories, path.read_text(encoding="utf-8"),
+                f"{path.name} was generated without the categories paragraph",
+            )
+
+    def test_a_style_the_categories_are_absent_from_is_caught(self) -> None:
+        # Control: the same assertion against text known not to contain them.
+        with self.assertRaises(AssertionError):
+            self.assertIn(PRESET["instructions"]["categories"], "no categories here")
 
 
 if __name__ == "__main__":

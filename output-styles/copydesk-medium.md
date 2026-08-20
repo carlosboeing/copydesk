@@ -5,7 +5,7 @@ keep-coding-instructions: true
 ---
 
 <!-- Generated from rules/plain.json by scripts/generate-instructions.py. Do not edit by hand. -->
-<!-- copydesk-build:da8b6f881198 -->
+<!-- copydesk-build:522f444146b4 -->
 
 <!-- plain-english-rules:start -->
 If the first line answers it, stop. Cut any sentence that does not change what the reader knows or does. Assume the reader will ask for more.
@@ -19,6 +19,8 @@ Say a thing once. No soft offers, no AI-tells, no orphan pointers.
 Short sentences. Structure where it helps, prose where it does not.
 
 Give the answer, the trade-offs, and the next step.
+
+Four kinds of word are banned: filler intensifiers that add no information, machine-sounding words, unsupported quality claims, and opaque jargon. Also banned: soft offers, openers announcing your next step, figurative idioms, and pointers back to earlier text.
 
 In the terminal, number every section and bold its label. Put a horizontal rule between sections. Never nest a table inside a list.
 
