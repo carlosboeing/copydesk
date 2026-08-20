@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -94,3 +95,96 @@ class RollbackTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UninstallResidueTests(unittest.TestCase):
+    """Uninstall leaves no trace of a file CopyDesk created, and every trace
+    of one it only edited."""
+
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+
+    def test_a_file_copydesk_created_is_removed_when_its_region_goes(self) -> None:
+        target = self.home / "AGENTS.md"
+        apply.write_marked_block(target, "BLOCK")
+        self.assertTrue(target.is_file())
+        apply.remove_marked_block(target)
+        self.assertFalse(target.exists(), "an empty file CopyDesk created is litter")
+
+    def test_a_file_that_had_content_survives(self) -> None:
+        # The control. Without it the test above could pass by deleting
+        # everything, which is the failure that actually matters.
+        target = self.home / "AGENTS.md"
+        original = "# My own instructions\n\nKeep these.\n"
+        target.write_text(original, encoding="utf-8")
+        apply.write_marked_block(target, "BLOCK")
+        apply.remove_marked_block(target)
+        self.assertTrue(target.is_file())
+        self.assertEqual(target.read_text(encoding="utf-8"), original)
+
+    def test_a_file_of_only_whitespace_counts_as_empty(self) -> None:
+        target = self.home / "AGENTS.md"
+        target.write_text("\n\n", encoding="utf-8")
+        apply.write_marked_block(target, "BLOCK")
+        apply.remove_marked_block(target)
+        self.assertFalse(target.exists())
+
+    def test_settings_reduced_to_an_empty_object_is_removed(self) -> None:
+        settings = self.home / "settings.json"
+        settings.write_text(
+            '{"hooks": {"PreToolUse": [{"matcher": "Write",'
+            ' "hooks": [{"type": "command", "command": "~/.claude/hooks/copydesk/gate.sh"}]}]}}',
+            encoding="utf-8",
+        )
+        apply._remove_copydesk_hooks(settings)
+        self.assertFalse(settings.exists(), "a settings.json holding only {} carries no config")
+
+    def test_settings_with_other_keys_survives(self) -> None:
+        settings = self.home / "settings.json"
+        settings.write_text(
+            '{"model": "opus", "hooks": {"PreToolUse": [{"matcher": "Write",'
+            ' "hooks": [{"type": "command", "command": "~/.claude/hooks/copydesk/gate.sh"}]}]}}',
+            encoding="utf-8",
+        )
+        apply._remove_copydesk_hooks(settings)
+        self.assertTrue(settings.is_file())
+        self.assertEqual(json.loads(settings.read_text(encoding="utf-8")), {"model": "opus"})
+
+    def test_settings_keeping_a_foreign_hook_survives(self) -> None:
+        settings = self.home / "settings.json"
+        settings.write_text(
+            '{"hooks": {"PreToolUse": [{"matcher": "Bash",'
+            ' "hooks": [{"type": "command", "command": "~/my-own-hook.sh"}]}]}}',
+            encoding="utf-8",
+        )
+        apply._remove_copydesk_hooks(settings)
+        self.assertTrue(settings.is_file())
+        self.assertIn("my-own-hook.sh", settings.read_text(encoding="utf-8"))
+
+    def test_empty_directories_are_pruned_up_to_the_harness_home(self) -> None:
+        hooks = self.home / ".claude" / "hooks" / "copydesk"
+        hooks.mkdir(parents=True)
+        (hooks / "gate.sh").write_text("x", encoding="utf-8")
+        styles = self.home / ".claude" / "output-styles"
+        styles.mkdir(parents=True)
+        (styles / "copydesk-low.md").write_text("x", encoding="utf-8")
+        result = apply.remove_owned([
+            apply.Target(real=hooks, kind="created"),
+            apply.Target(real=styles / "copydesk-low.md", kind="created"),
+        ], homes=[self.home / ".claude"])
+        self.assertTrue(result.ok, result.message)
+        self.assertFalse((self.home / ".claude" / "hooks").exists())
+        self.assertFalse(styles.exists())
+        self.assertTrue((self.home / ".claude").is_dir(), "the harness home is never removed")
+
+    def test_a_directory_with_other_content_is_kept(self) -> None:
+        # The control for pruning: only empty directories go.
+        styles = self.home / ".claude" / "output-styles"
+        styles.mkdir(parents=True)
+        (styles / "copydesk-low.md").write_text("x", encoding="utf-8")
+        (styles / "mine.md").write_text("keep", encoding="utf-8")
+        apply.remove_owned([apply.Target(real=styles / "copydesk-low.md", kind="created")],
+                           homes=[self.home / ".claude"])
+        self.assertTrue(styles.is_dir())
+        self.assertEqual([p.name for p in styles.iterdir()], ["mine.md"])

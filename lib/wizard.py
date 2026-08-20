@@ -648,7 +648,15 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
             out_stream.write("Uninstall cancelled.\n")
             return 0
 
-    res = apply.remove_owned(targets)
+    # Every harness home the prune must stop below, plus the config root.
+    # A directory CopyDesk created and emptied goes; ~/.claude never does.
+    homes = [
+        copydesk_home / adapter.home.replace("~/", "")
+        for adapter in adapters.REGISTRY.values()
+        if adapter.home != "."
+    ]
+    homes.append(config_file.parent.parent)
+    res = apply.remove_owned(targets, homes=homes)
     if not res.ok:
         out_stream.write(f"error  {res.message}\n")
         return 1

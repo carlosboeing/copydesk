@@ -82,9 +82,15 @@ def remove_marked_block(path: Path) -> None:
     except OSError:
         return
     updated = _REGION.sub("", existing, count=1)
-    if updated != existing:
-        # The separator write_marked_block added goes with it.
-        path.write_text(updated.rstrip("\n") + "\n" if updated.strip() else "", encoding="utf-8")
+    if updated == existing:
+        return
+    if not updated.strip():
+        # Nothing but our region was in it, so CopyDesk created it. Leaving a
+        # zero-byte file behind is litter an uninstall should not produce.
+        path.unlink(missing_ok=True)
+        return
+    # The separator write_marked_block added goes with it.
+    path.write_text(updated.rstrip("\n") + "\n", encoding="utf-8")
 
 
 def execute(plan: Plan) -> Result:
@@ -207,15 +213,49 @@ def _remove_copydesk_hooks(settings_path: Path) -> None:
             hooks.pop(event)
     if not hooks:
         document.pop("hooks", None)
+    if not document:
+        # An empty object carries no configuration, so there is nothing to
+        # preserve. Any other key keeps the file, which the tests assert.
+        settings_path.unlink(missing_ok=True)
+        return
     _write_atomic(settings_path, json.dumps(document, indent=2) + "\n")
 
 
-def remove_owned(targets: list[Target]) -> Result:
+def _prune_empty(start: Path, homes: "list[Path]") -> None:
+    """Remove empty directories upward from `start`, stopping at a home.
+
+    A harness home such as ~/.claude belongs to the harness, never to
+    CopyDesk, so the walk stops below it. A directory holding anything at
+    all is left alone, which is what makes this safe rather than tidy.
+    """
+    stops = {Path(h).resolve() for h in homes}
+    current = start if start.is_dir() else start.parent
+    while current.is_dir() and current.resolve() not in stops:
+        try:
+            next(current.iterdir())
+            return                      # not empty: stop here
+        except StopIteration:
+            pass
+        except OSError:
+            return
+        parent = current.parent
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        if parent == current:
+            return
+        current = parent
+
+
+def remove_owned(targets: list[Target], homes: "list[Path]" = ()) -> Result:
     """Remove only what CopyDesk put there. Never restores a backup.
 
     A backup is a snapshot from setup time. Restoring it during uninstall
     would discard every edit made since, so backups serve one purpose:
     rolling back a failed apply, inside the same command.
+
+    `homes` names the harness directories the prune must not climb past.
     """
     removed, failed = [], None
     for target in targets:
@@ -233,5 +273,7 @@ def remove_owned(targets: list[Target]) -> Result:
         except OSError as error:
             failed = target.real
             return Result(False, failed, f"{target.real}: {error.strerror}")
+    for target in targets:
+        _prune_empty(target.real, homes)
     return Result(True, None, f"removed {len(removed)} items")
 
