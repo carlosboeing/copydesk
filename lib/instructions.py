@@ -19,6 +19,8 @@ import styles
 VERBOSITY_LEVELS = ("low", "medium", "high")
 OUTPUT_STYLE_NAMES = ("CopyDesk low", "CopyDesk medium", "CopyDesk high")
 FINGERPRINT_MARKER = "copydesk-build:"
+RULES_START = "<!-- plain-english-rules:start -->"
+RULES_END = "<!-- plain-english-rules:end -->"
 
 # The $id the schema declares, and where SchemaStore will serve it.
 SCHEMA_ID = "https://json.schemastore.org/copydesk.config.json"
@@ -132,6 +134,28 @@ def render_output_style_body(resolved: dict, level: str) -> str:
     same bytes from the same inputs, so there is one function.
     """
     return render_chat(with_verbosity(resolved, level))
+
+
+def render_output_style(resolved: dict, level: str) -> str:
+    """One whole output style file: frontmatter, fingerprint marker, rules.
+
+    The generator writes the shipped copies and the wizard writes the
+    installed ones, so both call this. Two wrappers is how an installed file
+    came to be compared against a body nothing had produced.
+    """
+    style = (resolved.get("instructions") or {})["output_style"]
+    body = render_output_style_body(resolved, level)
+    return (
+        "---\n"
+        f"name: CopyDesk {level}\n"
+        f"description: {style['description']}\n"
+        f"keep-coding-instructions: {str(style['keep_coding_instructions']).lower()}\n"
+        "---\n\n"
+        f"<!-- Generated from rules/{resolved.get('id', 'plain')}.json"
+        " by scripts/generate-instructions.py. Do not edit by hand. -->\n"
+        f"<!-- {FINGERPRINT_MARKER}{fingerprint(body)} -->\n\n"
+        f"{RULES_START}\n{body}\n{RULES_END}\n"
+    )
 
 
 def with_verbosity(resolved: dict, level: str) -> dict:

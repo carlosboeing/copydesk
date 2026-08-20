@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 
 import adapters  # noqa: E402
+import instructions  # noqa: E402
 import wizard  # noqa: E402
 
 # A suite run from inside a worktree inherits GIT_DIR and its siblings, which
@@ -403,6 +404,73 @@ class CommitHookSetupTests(unittest.TestCase):
         self._cli("setup", "--defaults", "--yes")
         self._cli("uninstall", "--yes")
         self.assertEqual(self.hook.read_text(encoding="utf-8"), theirs)
+
+
+class InstalledStyleTests(unittest.TestCase):
+    """The installed output styles carry the user's settings, not the
+    repository's defaults, and doctor agrees the moment setup finishes."""
+
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+        (self.home / ".claude").mkdir()
+        self.installed = self.home / ".claude" / "output-styles" / "copydesk-low.md"
+
+    def _cli(self, *args) -> subprocess.CompletedProcess:
+        env = dict(
+            os.environ,
+            COPYDESK_HOME=str(self.home),
+            XDG_CONFIG_HOME=str(self.home / "config"),
+            PATH=str(self.home / "nothing"),
+        )
+        return subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "copydesk"), *args],
+            cwd=self.home, capture_output=True, text=True, env=env, input="",
+        )
+
+    def _write_config(self, style: str) -> None:
+        path = self.home / "config" / "copydesk" / "config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            '{"version": 1, "channels": {"chat": '
+            f'{{"enabled": true, "style": "{style}", "verbosity": "low"}}}}}}',
+            encoding="utf-8",
+        )
+
+    def test_a_chosen_chat_style_reaches_the_installed_output_style(self) -> None:
+        self._write_config("editorial")
+        result = self._cli("setup", "--repair", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = self.installed.read_text(encoding="utf-8")
+        self.assertIn(instructions.style_line("chat", "editorial"), body)
+        self.assertNotIn(instructions.style_line("chat", "plain"), body)
+
+    def test_the_default_install_carries_the_default_style(self) -> None:
+        # The control. Without it the test above could pass on a wizard that
+        # writes editorial into every install whatever the config says.
+        result = self._cli("setup", "--defaults", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = self.installed.read_text(encoding="utf-8")
+        self.assertIn(instructions.style_line("chat", "plain"), body)
+        self.assertNotIn(instructions.style_line("chat", "editorial"), body)
+
+    def test_a_chosen_style_install_reports_no_drift(self) -> None:
+        self._write_config("editorial")
+        self._cli("setup", "--repair", "--yes")
+        self.assertNotIn("out of date", self._cli("doctor").stdout.lower())
+
+    def test_a_default_install_reports_no_drift(self) -> None:
+        self._cli("setup", "--defaults", "--yes")
+        self.assertNotIn("out of date", self._cli("doctor").stdout.lower())
+
+    def test_every_verbosity_level_is_installed(self) -> None:
+        self._cli("setup", "--defaults", "--yes")
+        for level in instructions.VERBOSITY_LEVELS:
+            style = self.home / ".claude" / "output-styles" / f"copydesk-{level}.md"
+            self.assertTrue(style.is_file(), level)
+            self.assertIn(
+                instructions._VERBOSITY_LINES[level], style.read_text(encoding="utf-8")
+            )
 
 
 if __name__ == "__main__":

@@ -34,8 +34,6 @@ OUTPUT_STYLES_DIR = BUNDLE_ROOT / "output-styles"
 REMINDER = BUNDLE_ROOT / "hooks" / "reminder.sh"
 SCHEMA_PATH = BUNDLE_ROOT / "copydesk.schema.json"
 
-RULES_START = "<!-- plain-english-rules:start -->"
-RULES_END = "<!-- plain-english-rules:end -->"
 REMINDER_START = "cat << 'EOF'\n"
 REMINDER_END = "\nEOF\n"
 
@@ -169,23 +167,6 @@ def render_schema(preset: dict) -> str:
     return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
 
 
-def render_output_style(preset: dict, resolved: dict, level: str) -> str:
-    style = preset["instructions"]["output_style"]
-    body = instructions.render_output_style_body(resolved, level)
-    marker_hash = instructions.fingerprint(body)
-    return (
-        "---\n"
-        f"name: CopyDesk {level}\n"
-        f"description: {style['description']}\n"
-        f"keep-coding-instructions: {str(style['keep_coding_instructions']).lower()}\n"
-        "---\n\n"
-        f"<!-- Generated from rules/{preset['id']}.json by scripts/generate-instructions.py."
-        " Do not edit by hand. -->\n"
-        f"<!-- {instructions.FINGERPRINT_MARKER}{marker_hash} -->\n\n"
-        f"{RULES_START}\n{body}\n{RULES_END}\n"
-    )
-
-
 def render_reminder(preset: dict, existing: str) -> str:
     """Replace only the here-document. The surrounding script is not generated."""
     head, rest = existing.split(REMINDER_START, 1)
@@ -210,9 +191,10 @@ def main() -> int:
     OUTPUT_STYLES_DIR.mkdir(parents=True, exist_ok=True)
 
     targets = {
-        OUTPUT_STYLES_DIR / "copydesk-low.md": render_output_style(preset, resolved, "low"),
-        OUTPUT_STYLES_DIR / "copydesk-medium.md": render_output_style(preset, resolved, "medium"),
-        OUTPUT_STYLES_DIR / "copydesk-high.md": render_output_style(preset, resolved, "high"),
+        **{
+            OUTPUT_STYLES_DIR / f"copydesk-{level}.md": instructions.render_output_style(resolved, level)
+            for level in instructions.VERBOSITY_LEVELS
+        },
         REMINDER: render_reminder(preset, REMINDER.read_text(encoding="utf-8")),
         SCHEMA_PATH: render_schema(preset),
     }

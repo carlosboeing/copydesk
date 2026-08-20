@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import NamedTuple, Optional, Sequence, TextIO
 
@@ -270,11 +271,35 @@ def _default_channels() -> dict:
             settings[name] = {"enabled": False}
             continue
         default_preset = PRESETS[name][0]
-        entry: dict = {"style": default_preset.style, "verbosity": default_preset.verbosity}
+        entry: dict = {
+            "enabled": True,
+            "style": default_preset.style,
+            "verbosity": default_preset.verbosity,
+        }
         if default_preset.guidance:
             entry["guidance"] = {g: True for g in default_preset.guidance}
         settings[name] = entry
     return settings
+
+
+def _resolved_from(config_body: str) -> dict:
+    """Resolve exactly the config this run is about to write.
+
+    Reading it back through `config.resolve` is what makes an installed
+    output style match what doctor re-renders. A hand-built dict skips the
+    layer merge, and guidance merges key by key there, so the two would
+    differ by a key nobody chose and every install would read as drift.
+
+    The arguments match `linter.user_layer()` deliberately: that is the
+    function doctor compares against.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        staged = Path(directory) / "config.json"
+        staged.write_text(config_body, encoding="utf-8")
+        return config_mod.resolve(
+            BUNDLE_ROOT / "rules", None,
+            user_path=staged, project_path=None, local_path=None, channel="chat",
+        )
 
 
 def _read_config(path: Path) -> dict:
@@ -318,12 +343,16 @@ def _build_plan(
             for json_file in rules_dir.glob("*.json"):
                 writes.append(apply.Write(hooks_dir / "rules" / json_file.name, json_file.read_text(encoding="utf-8")))
 
+        # Rendered from the settings this run is about to write, never copied
+        # from the repository. A copy carries the default style whatever the
+        # user picked, and doctor re-renders from their config, so a fresh
+        # install would read as drift the moment it finished.
         out_styles_dir = home / ".claude" / "output-styles"
-        src_styles_dir = BUNDLE_ROOT / "output-styles"
-        for level in ("low", "medium", "high"):
-            style_file = src_styles_dir / f"copydesk-{level}.md"
-            if style_file.is_file():
-                writes.append(apply.Write(out_styles_dir / f"copydesk-{level}.md", style_file.read_text(encoding="utf-8")))
+        for level in instructions.VERBOSITY_LEVELS:
+            writes.append(apply.Write(
+                out_styles_dir / f"copydesk-{level}.md",
+                instructions.render_output_style(resolved_config, level),
+            ))
 
         settings_path = home / ".claude" / "settings.json"
         settings_doc = {}
@@ -558,7 +587,11 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
                     "guidance": guid_dict,
                 }
             else:
+                # `enabled` is written out rather than implied. Reviews ship
+                # off, so a channel the user ticked would come back off when
+                # the config is read against the defaults.
                 ch_dict: dict = {
+                    "enabled": True,
                     "style": chosen_preset.style,
                     "verbosity": chosen_preset.verbosity,
                 }
@@ -570,10 +603,11 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
 
     config_body = _format_config(channels_settings, selected_tools)
 
-    resolved_config = {
-        "channels": channels_settings,
-        "agents": selected_tools,
-    }
+    try:
+        resolved_config = _resolved_from(config_body)
+    except config_mod.ConfigError as error:
+        out_stream.write(f"error  {error}\n")
+        return 1
     plan = _build_plan(
         copydesk_home, config_file, config_body, selected_tools, resolved_config,
         write_config=not repairing_settings,
