@@ -16,6 +16,10 @@ sys.path.insert(0, str(ROOT / "lib"))
 import adapters  # noqa: E402
 import wizard  # noqa: E402
 
+# A suite run from inside a worktree inherits GIT_DIR and its siblings, which
+# would point a temporary repository back at the real one.
+CLEAN_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
 
 def every_string() -> list:
     strings = list(wizard.COPY.values())
@@ -145,7 +149,7 @@ class FlagTests(unittest.TestCase):
         )
         return subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", *args],
-            capture_output=True, text=True, env=env, input="",
+            cwd=self.home, capture_output=True, text=True, env=env, input="",
         )
 
     def test_a_seeded_harness_is_detected(self) -> None:
@@ -195,7 +199,7 @@ class FlagTests(unittest.TestCase):
         )
         result = subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", "--defaults", "--yes"],
-            capture_output=True, text=True, env=env, input="",
+            cwd=empty, capture_output=True, text=True, env=env, input="",
         )
         self.assertIn("install one", result.stdout.lower())
         self.assertFalse((empty / "config").exists())
@@ -206,6 +210,39 @@ class FlagTests(unittest.TestCase):
         self.assertIn("Change settings", result.stdout)
         self.assertIn("Repair the install", result.stdout)
         self.assertIn("Start over", result.stdout)
+
+    def test_repair_keeps_the_settings_it_finds(self) -> None:
+        """Repair rebuilds hooks and styles. The config is the user's own."""
+        config_path = self.home / "config" / "copydesk" / "config.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(
+            '{\n  "version": 1,\n  // mine\n'
+            '  "channels": {"chat": {"style": "editorial", "verbosity": "high"}},\n'
+            '  "agents": ["claude-code"]\n}\n',
+            encoding="utf-8",
+        )
+        before = config_path.read_text(encoding="utf-8")
+        result = self._run("--repair", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(config_path.read_text(encoding="utf-8"), before)
+        # No other planned write ends in config.json, so its absence from the
+        # panel says the repair plan left the config out.
+        self.assertNotIn("config.json", result.stdout)
+
+    def test_repair_still_rewrites_the_generated_files(self) -> None:
+        config_path = self.home / "config" / "copydesk" / "config.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text('{"version": 1, "channels": {"chat": {"style": "editorial"}}}',
+                               encoding="utf-8")
+        self._run("--repair", "--yes")
+        self.assertTrue((self.home / ".claude" / "hooks" / "copydesk" / "gate.sh").is_file())
+
+    def test_repair_with_no_config_writes_one(self) -> None:
+        # The control. Repair has nothing to preserve on a fresh machine, so
+        # there it behaves as a first install rather than skipping the config.
+        result = self._run("--repair", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.home / "config" / "copydesk" / "config.json").is_file())
 
 
 class UninstallTests(unittest.TestCase):
@@ -229,9 +266,12 @@ class UninstallTests(unittest.TestCase):
             COPYDESK_HOME=str(self.home),
             XDG_CONFIG_HOME=str(self.home / "config"),
         )
+        # A temporary directory rather than the caller's, so a run of the
+        # suite never installs a commit-msg hook into the repository it is
+        # testing.
         return subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), *args],
-            capture_output=True, text=True, env=env, input="",
+            cwd=self.home, capture_output=True, text=True, env=env, input="",
         )
 
     def test_uninstall_removes_the_marked_block_and_leaves_the_rest(self) -> None:
@@ -286,6 +326,83 @@ class UninstallTests(unittest.TestCase):
         self._cli("setup", "--defaults", "--yes")
         self._cli("uninstall", "--yes", "--purge")
         self.assertFalse((self.home / "config" / "copydesk" / "config.json").is_file())
+
+
+class CommitHookSetupTests(unittest.TestCase):
+    """Setup installs the commits gate where git will run it, and uninstall
+    takes back only what setup put there."""
+
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+        (self.home / ".claude").mkdir()
+        self.repo = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.repo)
+        subprocess.run(["git", "init", "-q"], cwd=self.repo, check=True, env=CLEAN_ENV)
+        self.hook = self.repo / ".git" / "hooks" / "commit-msg"
+
+    def _cli(self, *args) -> subprocess.CompletedProcess:
+        env = dict(
+            CLEAN_ENV,
+            COPYDESK_HOME=str(self.home),
+            XDG_CONFIG_HOME=str(self.home / "config"),
+        )
+        return subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "copydesk"), *args],
+            cwd=self.repo, capture_output=True, text=True, env=env, input="",
+        )
+
+    def test_setup_installs_the_commit_msg_hook(self) -> None:
+        result = self._cli("setup", "--defaults", "--yes")
+        self.assertTrue(self.hook.is_file(), result.stdout + result.stderr)
+        self.assertIn("# CopyDesk commits gate", self.hook.read_text(encoding="utf-8"))
+
+    def test_the_review_panel_names_the_hook(self) -> None:
+        self.assertIn("commit-msg", self._cli("setup", "--dry-run").stdout)
+
+    def test_dry_run_installs_no_hook(self) -> None:
+        self._cli("setup", "--dry-run")
+        self.assertFalse(self.hook.exists())
+
+    def test_outside_a_repository_no_hook_is_installed(self) -> None:
+        # The control. Without it the tests above could pass on a wizard that
+        # writes a commit-msg hook into any directory it is run from.
+        outside = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, outside)
+        env = dict(
+            CLEAN_ENV,
+            COPYDESK_HOME=str(self.home),
+            XDG_CONFIG_HOME=str(self.home / "config"),
+        )
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", "--defaults", "--yes"],
+            cwd=outside, capture_output=True, text=True, env=env, input="",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(list(outside.rglob("commit-msg")), [])
+
+    def test_a_hook_someone_else_wrote_is_reported_and_kept(self) -> None:
+        theirs = "#!/bin/sh\necho theirs\n"
+        self.hook.parent.mkdir(parents=True, exist_ok=True)
+        self.hook.write_text(theirs, encoding="utf-8")
+        result = self._cli("setup", "--defaults", "--yes")
+        self.assertIn("already exists", result.stdout)
+        self.assertEqual(self.hook.read_text(encoding="utf-8"), theirs)
+
+    def test_uninstall_removes_the_hook_setup_installed(self) -> None:
+        self._cli("setup", "--defaults", "--yes")
+        self.assertTrue(self.hook.is_file())
+        self._cli("uninstall", "--yes")
+        self.assertFalse(self.hook.exists())
+        self.assertTrue(self.hook.parent.is_dir(), "git owns its hooks directory")
+
+    def test_uninstall_keeps_a_hook_someone_else_wrote(self) -> None:
+        theirs = "#!/bin/sh\necho theirs\n"
+        self.hook.parent.mkdir(parents=True, exist_ok=True)
+        self.hook.write_text(theirs, encoding="utf-8")
+        self._cli("setup", "--defaults", "--yes")
+        self._cli("uninstall", "--yes")
+        self.assertEqual(self.hook.read_text(encoding="utf-8"), theirs)
 
 
 if __name__ == "__main__":

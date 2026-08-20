@@ -12,6 +12,17 @@ STYLE_NAMES = ("plain", "general", "engineer", "editorial")
 # 0.1.0 shipped one preset under this name. The alias is kept indefinitely.
 STYLE_ALIASES = {"plain-english": "plain"}
 
+# One line per style, shown beside its name wherever a reader picks one. The
+# text is the preset's own `description` field, copied rather than read, so
+# the gate's import path opens no JSON. tests/test_styles.py fails if a
+# preset's description moves and this does not.
+DESCRIPTIONS = {
+    "plain": "Structured but plain writing — full technical content, simpler sentences, no AI-isms",
+    "general": "Plain writing with nothing assumed. Every term is glossed.",
+    "engineer": "Terse. One instruction per sentence, tables over prose.",
+    "editorial": "Flowing short paragraphs. Structure is rare and deliberate.",
+}
+
 # Behavioural clauses. They have no config key, which is what immune means.
 # Where a clause overlaps a pattern rule, the gate stays adjustable through
 # `rules`, and doctor names the loosening.

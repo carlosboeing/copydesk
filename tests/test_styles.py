@@ -29,6 +29,16 @@ class ShelfTests(unittest.TestCase):
             styles.preset_for("casual")
         self.assertIn("editorial", str(caught.exception))
 
+    def test_every_style_has_a_description(self) -> None:
+        """The wizard reads one per style, so a missing key crashes Customize."""
+        self.assertEqual(sorted(styles.DESCRIPTIONS), sorted(styles.STYLE_NAMES))
+
+    def test_each_description_matches_its_preset(self) -> None:
+        """The copy is deliberate; drifting from the preset is not."""
+        for name in styles.STYLE_NAMES:
+            preset = json.loads((ROOT / "rules" / f"{name}.json").read_text(encoding="utf-8"))
+            self.assertEqual(styles.DESCRIPTIONS[name], preset["description"], name)
+
 
 class FloorTests(unittest.TestCase):
     def test_the_floor_rules_are_error_under_every_style(self) -> None:

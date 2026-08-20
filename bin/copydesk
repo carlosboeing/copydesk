@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import time
@@ -19,7 +18,6 @@ import channels  # noqa: E402
 import config  # noqa: E402
 import config_writer  # noqa: E402
 import guidance  # noqa: E402
-import instructions  # noqa: E402
 import linter  # noqa: E402
 import styles  # noqa: E402
 import wizard  # noqa: E402
@@ -347,18 +345,10 @@ def _doctor_bare() -> int:
 
     # Drift checks
     drift_items = []
-    # 1. Output styles fingerprint check
-    styles_dir = home / ".claude" / "output-styles"
-    if styles_dir.is_dir():
-        for style_file in sorted(styles_dir.glob("copydesk-*.md")):
-            try:
-                rendered = style_file.read_text(encoding="utf-8")
-                marker = re.search(re.escape(instructions.FINGERPRINT_MARKER) + r"([0-9a-f]{12})", rendered)
-                if marker:
-                    if marker.group(1) != instructions.fingerprint(rendered):
-                        drift_items.append(f"{style_file.name} is out of date. Run `copydesk setup --repair` to update.")
-            except Exception:
-                pass
+    # 1. Output styles fingerprint check. The comparison lives in the linter,
+    # so doctor and the reminder hash the same payload the generator stamped.
+    for style_name in linter.stale_output_styles(home):
+        drift_items.append(f"{style_name} is out of date. Run `copydesk setup --repair` to update.")
 
     # 2. Warnings from project config (e.g. personal keys)
     for w in resolved.get("warnings", []):

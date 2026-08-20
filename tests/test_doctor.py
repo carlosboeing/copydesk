@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 
 import instructions
+import linter
 
 
 class DoctorTests(unittest.TestCase):
@@ -87,14 +88,39 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("out of date", out.lower())
         self.assertIn("copydesk setup --repair", out)
 
+    def _fresh_body(self, level: str) -> str:
+        """The body the generator would stamp, under this test's config home."""
+        previous = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = str(self.home / "config")
+        try:
+            return instructions.render_output_style_body(linter.user_layer(), level)
+        finally:
+            if previous is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = previous
+
     def test_a_current_fingerprint_reports_no_drift(self) -> None:
         # The control. Without it the assertion above cannot tell a working
-        # check from one that always warns.
+        # check from one that always warns. The marker holds the fingerprint
+        # of a freshly rendered body, which is what the generator stamps and
+        # what doctor must compare against.
         styles_dir = self.home / ".claude" / "output-styles"
         styles_dir.mkdir(parents=True)
-        body = "---\nname: CopyDesk low\n---\n\nbody\n"
-        stamped = body.replace(
-            "---\n\n", f"---\n\n<!-- copydesk-build:{instructions.fingerprint(body)} -->\n", 1
+        fresh = self._fresh_body("low")
+        (styles_dir / "copydesk-low.md").write_text(
+            "---\nname: CopyDesk low\n---\n\n"
+            f"<!-- copydesk-build:{instructions.fingerprint(fresh)} -->\n\n{fresh}\n",
+            encoding="utf-8",
         )
-        (styles_dir / "copydesk-low.md").write_text(stamped, encoding="utf-8")
+        self.assertNotIn("out of date", self._doctor().stdout.lower())
+
+    def test_a_generated_output_style_is_not_reported_as_stale(self) -> None:
+        """The shipped file carries the generator's own stamp, so a fresh
+        install must read as current rather than as drift."""
+        styles_dir = self.home / ".claude" / "output-styles"
+        styles_dir.mkdir(parents=True)
+        for level in ("low", "medium", "high"):
+            shutil.copy(ROOT / "output-styles" / f"copydesk-{level}.md",
+                        styles_dir / f"copydesk-{level}.md")
         self.assertNotIn("out of date", self._doctor().stdout.lower())

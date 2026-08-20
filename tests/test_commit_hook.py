@@ -66,6 +66,32 @@ class CommitMessageTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("announcing-opener", result.stderr + result.stdout)
 
+    def test_a_third_person_subject_is_refused(self) -> None:
+        result = self._commit("Adds an expiry to reset tokens")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("imperative-subject", result.stderr + result.stdout)
+
+    def test_a_past_tense_subject_is_refused(self) -> None:
+        result = self._commit("Updated the reset token expiry")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("imperative-subject", result.stderr + result.stdout)
+
+    def test_a_gerund_subject_is_refused(self) -> None:
+        result = self._commit("Removing the unused token column")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("imperative-subject", result.stderr + result.stdout)
+
+    def test_a_conventional_prefix_does_not_hide_the_mood(self) -> None:
+        result = self._commit("fix(auth): adds an expiry to reset tokens")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("imperative-subject", result.stderr + result.stdout)
+
+    def test_a_conventional_imperative_subject_commits(self) -> None:
+        # The control. Without it the four tests above could pass by refusing
+        # every subject that carries a prefix.
+        result = self._commit("fix(auth): expire reset tokens after first use")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_a_subject_over_72_characters_is_refused(self) -> None:
         long_subject = "Expire the password reset tokens after their very first successful use here"
         result = self._commit(long_subject)

@@ -131,11 +131,16 @@ COPY = {
 }
 
 
+def _missing(name: str) -> str:
+    """Why a tool cannot be picked. Git has no executable to look for."""
+    return "not a git repository" if name == "git" else "not found on this machine"
+
+
 def tool_line(name: str, available: bool) -> str:
     adapter = adapters.REGISTRY[name]
     if available:
         return f"{adapter.label} - {adapter.installs}"
-    return f"{adapter.label} - not found on this machine"
+    return f"{adapter.label} - {_missing(name)}"
 
 
 _SAMPLE = "Great question - let me walk you through this robust and comprehensive change.\n"
@@ -257,14 +262,44 @@ def _format_config(channels_config: dict, selected_agents: list[str]) -> str:
     return "\n".join(out) + "\n"
 
 
+def _default_channels() -> dict:
+    """The settings `--defaults` picks: each channel's first preset, or off."""
+    settings: dict = {}
+    for name, preselected in CHANNEL_PRESELECTED.items():
+        if not preselected:
+            settings[name] = {"enabled": False}
+            continue
+        default_preset = PRESETS[name][0]
+        entry: dict = {"style": default_preset.style, "verbosity": default_preset.verbosity}
+        if default_preset.guidance:
+            entry["guidance"] = {g: True for g in default_preset.guidance}
+        settings[name] = entry
+    return settings
+
+
+def _read_config(path: Path) -> dict:
+    """The user's own config, or an empty object when there is none to read."""
+    if not path.is_file():
+        return {}
+    try:
+        document = json.loads(jsonc.strip_comments(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return {}
+    return document if isinstance(document, dict) else {}
+
+
 def _build_plan(
     home: Path,
     config_path: Path,
     config_body: str,
     selected_tools: list[str],
     resolved_config: dict,
+    write_config: bool = True,
 ) -> apply.Plan:
-    writes = [apply.Write(config_path, config_body)]
+    # Repair rebuilds what CopyDesk generates. The config is the user's own
+    # writing, so repairing leaves it alone rather than restoring defaults
+    # over it.
+    writes = [apply.Write(config_path, config_body)] if write_config else []
 
     if "claude-code" in selected_tools:
         hooks_dir = home / ".claude" / "hooks" / "copydesk"
@@ -371,12 +406,25 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
     xdg_config = Path(os.environ.get("XDG_CONFIG_HOME", copydesk_home / ".config")).expanduser().resolve()
     config_file = xdg_config / "copydesk" / "config.json"
 
-    # Detect available tools
-    available_tools = [name for name in adapters.REGISTRY if name != "git" and adapters.detect(name, copydesk_home)]
-    if not available_tools:
+    # Detect available tools. Git is not a harness and has no executable to
+    # find, so its test is whether this directory is a repository to install
+    # a commit-msg hook into. It is also not a harness for the question below:
+    # a machine with a repository and no assistant still has nothing to set up.
+    repository = Path.cwd()
+    repository_hooks = hooks_directory(repository)
+    in_repository = repository_hooks is not None
+    harness_tools = [
+        name for name in adapters.REGISTRY
+        if name != "git" and adapters.detect(name, copydesk_home)
+    ]
+    if not harness_tools:
         out_stream.write(COPY["outro_no_tools"] + "\n")
         out_stream.flush()
         return 0
+    available_tools = [
+        name for name in adapters.REGISTRY
+        if name in harness_tools or (name == "git" and in_repository)
+    ]
 
     interactive = prompt.is_interactive(in_stream) and not args.defaults
 
@@ -397,20 +445,34 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
     channels_settings: dict = {}
     selected_tools = available_tools
 
-    if not args.defaults and not args.repair and interactive:
+    existing_config = _read_config(config_file) if args.repair else {}
+    # Repairing an install that has settings preserves them. Repairing one
+    # with no readable config has nothing to preserve, so it falls through to
+    # the defaults below and writes a fresh config.
+    repairing_settings = bool(existing_config.get("channels"))
+
+    if repairing_settings:
+        channels_settings = existing_config["channels"]
+        recorded = existing_config.get("agents")
+        if isinstance(recorded, list):
+            kept = [name for name in recorded if name in adapters.REGISTRY]
+            if kept:
+                selected_tools = kept
+    elif not args.defaults and not args.repair and interactive:
         out_stream.write(COPY["intro"] + "\n\n")
         out_stream.flush()
 
-        # Tools multiselect
+        # Tools multiselect. Git is on the list whenever this directory is a
+        # repository, because that is where its hook goes.
         tool_options = [
             prompt.Option(
                 adapters.REGISTRY[name].label,
-                adapters.REGISTRY[name].installs if name in available_tools else "not found on this machine",
+                adapters.REGISTRY[name].installs if name in available_tools else _missing(name),
                 name in available_tools,
             )
-            for name in adapters.REGISTRY if name != "git"
+            for name in adapters.REGISTRY
         ]
-        tool_names = [name for name in adapters.REGISTRY if name != "git"]
+        tool_names = list(adapters.REGISTRY)
         preselected_tools = [i for i, name in enumerate(tool_names) if name in available_tools]
         try:
             chosen_tool_indices = prompt.multiselect(
@@ -504,18 +566,7 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
                     ch_dict["guidance"] = {g: True for g in chosen_preset.guidance}
                 channels_settings[ch] = ch_dict
     else:
-        for ch, pre in CHANNEL_PRESELECTED.items():
-            if pre:
-                default_p = PRESETS[ch][0]
-                ch_dict = {
-                    "style": default_p.style,
-                    "verbosity": default_p.verbosity,
-                }
-                if default_p.guidance:
-                    ch_dict["guidance"] = {g: True for g in default_p.guidance}
-                channels_settings[ch] = ch_dict
-            else:
-                channels_settings[ch] = {"enabled": False}
+        channels_settings = _default_channels()
 
     config_body = _format_config(channels_settings, selected_tools)
 
@@ -523,7 +574,18 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
         "channels": channels_settings,
         "agents": selected_tools,
     }
-    plan = _build_plan(copydesk_home, config_file, config_body, selected_tools, resolved_config)
+    plan = _build_plan(
+        copydesk_home, config_file, config_body, selected_tools, resolved_config,
+        write_config=not repairing_settings,
+    )
+
+    # The commit-msg hook lives in the repository, not under the home
+    # directory, so it sits outside the plan and is named separately.
+    commit_hook = (
+        repository_hooks / "commit-msg"
+        if repository_hooks is not None and "git" in selected_tools
+        else None
+    )
 
     # Review panel
     out_stream.write("Configured tools:\n")
@@ -534,6 +596,8 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
     out_stream.write(COPY["review"] + "\n")
     for write in plan.writes:
         out_stream.write(f"  {write.path}\n")
+    if commit_hook is not None:
+        out_stream.write(f"  {commit_hook}\n")
     out_stream.flush()
 
     if args.dry_run:
@@ -556,6 +620,12 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
     if not res.ok:
         out_stream.write(f"error  {res.message}\n")
         return 1
+
+    if commit_hook is not None:
+        # A hook someone else wrote is reported and left alone, so the commits
+        # gate never silently replaces a repository's own check.
+        hook_result = install_commit_hook(repository)
+        out_stream.write(hook_result.message + "\n")
 
     if "claude-code" in selected_tools:
         gate_path = copydesk_home / ".claude" / "hooks" / "copydesk" / "gate.sh"
@@ -623,7 +693,22 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
     if settings_path.is_file():
         targets.append(apply.Target(real=settings_path, kind="hook-keys"))
 
-    # 5. Purge user config
+    # 5. This repository's commit-msg hook, when CopyDesk is what wrote it.
+    # The marker is the test, so a hook someone else wrote survives.
+    repository_hooks = hooks_directory(Path.cwd())
+    commit_hook = repository_hooks / "commit-msg" if repository_hooks else None
+    if commit_hook is not None and commit_hook.is_file():
+        try:
+            if "# CopyDesk commits gate" in commit_hook.read_text(encoding="utf-8"):
+                targets.append(apply.Target(real=commit_hook, kind="created"))
+            else:
+                commit_hook = None
+        except OSError:
+            commit_hook = None
+    else:
+        commit_hook = None
+
+    # 6. Purge user config
     if args.purge and config_file.is_file():
         targets.append(apply.Target(real=config_file, kind="created"))
 
@@ -656,6 +741,10 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
         if adapter.home != "."
     ]
     homes.append(config_file.parent.parent)
+    if repository_hooks is not None:
+        # git owns its hooks directory. Removing the last hook in it must not
+        # take the directory with it.
+        homes.append(repository_hooks)
     res = apply.remove_owned(targets, homes=homes)
     if not res.ok:
         out_stream.write(f"error  {res.message}\n")

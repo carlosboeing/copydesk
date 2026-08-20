@@ -1873,31 +1873,51 @@ def user_layer() -> dict:
                           project_path=None, local_path=None, channel="chat")
 
 
-def _fingerprint_notice(home: Path) -> Optional[str]:
-    """One line when the installed static file no longer matches its inputs.
+def stale_output_styles(home: Path) -> list[str]:
+    """The installed output styles that no longer match their inputs.
 
-    The marker holds the fingerprint of the file as rendered at build time.
-    Re-rendering now and hashing that says whether the inputs have moved
-    since. Hashing the installed bytes instead would compare the file with
-    itself, and a changed config would never show up.
+    The marker holds the fingerprint of the body as rendered at build time, so
+    the comparison re-renders that body now. Hashing the installed bytes
+    instead would compare the file with itself, and a changed config would
+    never show up. The reminder and doctor both call this, so neither can
+    hash a different payload from the generator.
     """
-    installed = home / ".claude" / "output-styles" / "copydesk-low.md"
+    directory = home / ".claude" / "output-styles"
+    if instructions is None or not directory.is_dir():
+        return []
     try:
-        rendered = installed.read_text(encoding="utf-8")
-    except OSError:
-        return None       # not installed, or unreadable: say nothing
-    if instructions is None:
-        return None
-    marker = re.search(re.escape(instructions.FINGERPRINT_MARKER) + r"([0-9a-f]{12})", rendered)
-    if marker is None:
-        return None
-    try:
-        fresh = instructions.render_output_style_body(user_layer(), "low")
+        layer = user_layer()
     except Exception:
-        return None       # cannot re-render: fail open, say nothing
-    if marker.group(1) == instructions.fingerprint(fresh):
+        return []         # cannot re-render: fail open, say nothing
+    pattern = re.compile(re.escape(instructions.FINGERPRINT_MARKER) + r"([0-9a-f]{12})")
+    stale: list[str] = []
+    for installed in sorted(directory.glob("copydesk-*.md")):
+        # The level is the file's own, because each renders a different body.
+        level = installed.stem[len("copydesk-"):]
+        if level not in instructions.VERBOSITY_LEVELS:
+            continue
+        try:
+            rendered = installed.read_text(encoding="utf-8")
+        except OSError:
+            continue      # unreadable: say nothing about it
+        marker = pattern.search(rendered)
+        if marker is None:
+            continue
+        try:
+            fresh = instructions.render_output_style_body(layer, level)
+        except Exception:
+            continue
+        if marker.group(1) != instructions.fingerprint(fresh):
+            stale.append(installed.name)
+    return stale
+
+
+def _fingerprint_notice(home: Path) -> Optional[str]:
+    """One line when an installed static file no longer matches its inputs."""
+    stale = stale_output_styles(home)
+    if not stale:
         return None
-    return f"{installed.name} is out of date. Run: copydesk setup --repair"
+    return f"{stale[0]} is out of date. Run: copydesk setup --repair"
 
 
 _LIST_ITEM = re.compile(r"^\s*(?:\d+[.)]|[-*+])\s+\S")
@@ -2064,6 +2084,40 @@ def main(argv: Optional[list[str]] = None) -> int:
 SUBJECT_MAX = 72
 _ANNOUNCING = re.compile(r"^\s*this commit\b", re.IGNORECASE)
 
+# `type(scope): ` in front of the description, per Conventional Commits. The
+# mood test reads the description, because the type is never a verb form.
+_CONVENTIONAL_PREFIX = re.compile(r"^[a-z]+(?:\([^)]*\))?!?:\s+")
+_FIRST_WORD = re.compile(r"[A-Za-z']+")
+
+# The third-person, past and gerund forms of the verbs that open commit
+# subjects in practice. A closed list rather than a general mood detector:
+# reading mood needs a parser, and a false positive on a gate that refuses
+# commits costs more than the extra cases a guess would catch. A subject such
+# as "Reset tokens are expired" therefore passes, and the instructions rather
+# than the gate are what keep it from being written.
+NON_IMPERATIVE_OPENERS = frozenset("""
+    added adding adds allowed allowing allows avoided avoiding avoids
+    bumped bumping bumps changed changes changing created creates creating
+    deleted deletes deleting dropped dropping drops ensured ensures ensuring
+    fixed fixes fixing handled handles handling
+    implemented implementing implements improved improves improving
+    introduced introduces introducing kept keeping keeps letting lets
+    made makes making moved moves moving prevented preventing prevents
+    refactored refactoring refactors removed removes removing
+    renamed renames renaming returned returning returns
+    reverted reverting reverts supported supporting supports
+    updated updates updating used uses using
+""".split())
+
+
+def _non_imperative_opener(subject: str) -> Optional[str]:
+    """The opening word, when it is a form no imperative subject starts with."""
+    description = _CONVENTIONAL_PREFIX.sub("", subject.strip(), count=1)
+    first = _FIRST_WORD.match(description)
+    if first is None:
+        return None
+    return first.group(0) if first.group(0).lower() in NON_IMPERATIVE_OPENERS else None
+
 
 def run_commit_msg(path: str) -> int:
     """Check one commit message. 0 clean, 1 refused, 70 internal error."""
@@ -2094,6 +2148,12 @@ def run_commit_msg(path: str) -> int:
             findings.append(f"1:subject-length:{len(subject)} characters, at most {SUBJECT_MAX}")
         if _ANNOUNCING.match(subject):
             findings.append("1:announcing-opener:" + subject[:60])
+        opener = _non_imperative_opener(subject)
+        if opener is not None:
+            findings.append(
+                f'1:imperative-subject:"{opener}" is not imperative. '
+                "Write the subject as an instruction."
+            )
         findings.extend(f.render() for f in lint(rest, path=path) if f.severity == "error")
 
         for finding in findings:

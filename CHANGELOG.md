@@ -15,7 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Guidance deliverables.** Ten configurable structural elements: `recommendations`, `direction`, `progress`, `pushback`, `alternatives`, `assumptions`, `estimates`, `sources`, `summary`, and `verification`.
 - **Interactive setup wizard.** `copydesk setup` (alias `copydesk init`) provides guided setup across styles, channels, and harnesses with `--defaults`, `--yes`, `--dry-run`, and `--repair` flags.
 - **Uninstaller.** `copydesk uninstall` cleanly removes CopyDesk-owned hooks and styles, with an optional `--purge` flag to remove user configuration.
-- **Commit-message gate.** `git-hooks/commit-msg` and `copydesk check --commit-msg` enforce subject length, imperative mood, and prose rules at commit time.
+- **Commit-message gate.** `git-hooks/commit-msg` and `copydesk check --commit-msg` enforce subject length, imperative subject openers, and prose rules at commit time. `copydesk setup` installs the hook when the current directory is a git repository.
 - **JSON Schema.** `copydesk.schema.json` provides editor auto-completion and validation for configuration files.
 - **Path routing engine.** The `paths` configuration block (`ignore`, `warn`, `block`) controls file matching and action overrides.
 - **Three-location discovery.** Configuration merges across user (`~/.config/copydesk/config.json`), project (`copydesk.config.json`), and local (`copydesk.local.json`) with JSONC comment support.
