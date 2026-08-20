@@ -222,6 +222,12 @@ def _handle_check(args: list[str]) -> int:
         print("error: check needs at least one path, or - for standard input", file=sys.stderr)
         return 64
 
+    if args[0] == "--commit-msg":
+        if len(args) != 2:
+            print("error: --commit-msg requires a path", file=sys.stderr)
+            return 64
+        return linter.run_commit_msg(args[1])
+
     failed = False
     for source in args:
         if source.startswith("-") and source != "-":

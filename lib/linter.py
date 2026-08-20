@@ -2061,5 +2061,49 @@ def main(argv: Optional[list[str]] = None) -> int:
     return 64
 
 
+SUBJECT_MAX = 72
+_ANNOUNCING = re.compile(r"^\s*this commit\b", re.IGNORECASE)
+
+
+def run_commit_msg(path: str) -> int:
+    """Check one commit message. 0 clean, 1 refused, 70 internal error."""
+    try:
+        if config is not None:
+            try:
+                user = config.user_config_path()
+                proj = config.project_config_path(Path(path))
+                local = config.local_config_path(Path(path))
+                config.resolve(_rules_dir(), path, user_path=user, project_path=proj, local_path=local, channel="commits")
+            except config.ConfigError as err:
+                _report_config_error(str(err))
+                return 0  # fail open on malformed config
+
+        raw = Path(path).read_text(encoding="utf-8")
+        # git appends its template comments, and the whole diff under
+        # --verbose. Neither is the author's prose.
+        body = raw.split("\n# ------------------------ >8 ---")[0]
+        lines = [l for l in body.splitlines() if not l.startswith("#")]
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        if not lines:
+            return 0  # an empty message is git's business
+        subject, rest = lines[0], "\n".join(lines[1:])
+
+        findings = []
+        if len(subject) > SUBJECT_MAX:
+            findings.append(f"1:subject-length:{len(subject)} characters, at most {SUBJECT_MAX}")
+        if _ANNOUNCING.match(subject):
+            findings.append("1:announcing-opener:" + subject[:60])
+        findings.extend(f.render() for f in lint(rest, path=path) if f.severity == "error")
+
+        for finding in findings:
+            print(finding, file=sys.stderr)
+        return 1 if findings else 0
+    except Exception as error:  # noqa: BLE001 - fail open, loudly
+        print(f"copydesk: {type(error).__name__}: {error}", file=sys.stderr)
+        return 70
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
+

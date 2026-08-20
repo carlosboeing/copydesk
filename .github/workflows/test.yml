@@ -52,6 +52,7 @@ jobs:
             hooks/gate.sh \
             hooks/reminder.sh \
             install.sh \
+            git-hooks/commit-msg \
             git-hooks/pre-commit \
             git-hooks/private-workbench-guard/pre-commit \
             eval/run-corpus.sh

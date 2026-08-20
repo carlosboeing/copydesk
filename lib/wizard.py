@@ -174,6 +174,61 @@ def prove(home: Path) -> tuple[bool, str]:
     return blocked, reason[0] if reason else "no finding reported"
 
 
+class HookResult(NamedTuple):
+    installed: bool
+    message: str
+
+
+def _clean_git_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def hooks_directory(cwd: Path) -> Optional[Path]:
+    """Git's own answer, which honours worktrees and core.hooksPath."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-path", "hooks"],
+        cwd=str(cwd), capture_output=True, text=True, env=_clean_git_env(),
+    )
+    if result.returncode != 0:
+        return None
+    out = result.stdout.strip()
+    if not out:
+        return None
+    p = Path(out)
+    return p.resolve() if p.is_absolute() else (cwd / p).resolve()
+
+
+def install_commit_hook(cwd: Path) -> HookResult:
+    hooks_dir = hooks_directory(cwd)
+    if hooks_dir is None:
+        return HookResult(False, f"{cwd} is not a git repository")
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    target = hooks_dir / "commit-msg"
+    hook_src = (BUNDLE_ROOT / "git-hooks" / "commit-msg").read_text(encoding="utf-8")
+    if target.is_file():
+        try:
+            existing = target.read_text(encoding="utf-8")
+            if "# CopyDesk commits gate" in existing:
+                target.write_text(hook_src, encoding="utf-8")
+                os.chmod(target, 0o755)
+                return HookResult(True, f"updated {target}")
+            else:
+                return HookResult(
+                    False,
+                    f"skipped  {target} already exists\n"
+                    f"         To chain CopyDesk into it, add these lines at the end:\n"
+                    f'             copydesk check --commit-msg "$1"; status=$?\n'
+                    f'             [ "$status" -eq 1 ] && exit 1\n'
+                    f'             [ "$status" -gt 1 ] && echo "copydesk: exit $status; commit allowed" >&2',
+                )
+        except OSError as error:
+            return HookResult(False, f"error reading {target}: {error}")
+    target.write_text(hook_src, encoding="utf-8")
+    os.chmod(target, 0o755)
+    return HookResult(True, f"installed {target}")
+
+
+
 def _format_config(channels_config: dict, selected_agents: list[str]) -> str:
     """Format the generated user config with schema line and comments."""
     channels_dict = {}
