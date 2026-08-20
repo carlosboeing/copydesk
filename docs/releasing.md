@@ -6,7 +6,7 @@ A release is a tag push. Everything else is automated by [`.github/workflows/rel
 
 Three jobs, in order. Each one can stop the release.
 
-**`verify`** runs the suite on the exact commit and checks the generated carriers still match the preset. It refuses to continue unless `VERSION`, `package.json`, `bin/copydesk --version` and the tag all agree.
+**`verify`** runs the suite on the exact commit and checks the generated instructions still match the preset. It refuses to continue unless `VERSION`, `package.json`, `bin/copydesk --version` and the tag all agree.
 
 It then inspects the tarball. Ten required files must be present. `eval/`, `tests/`, `docs/`, `.workbench/` and compiled bytecode must be absent. The whole thing must stay under 200 kB.
 

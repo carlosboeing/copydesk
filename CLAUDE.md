@@ -55,8 +55,8 @@ Versioning follows the house pattern: a root `VERSION` file, `vX.Y.Z` tags, a fl
 
 - **The test suite is the safety net and it stays green.** `python3 -m unittest discover tests/`. The pre-commit hook runs it with no path guard, because an earlier guard exited 0 in silence once its path moved.
 - **Every scan states a control.** A scan returning nothing proves nothing until a pattern known to be present returns a hit through the same command form.
-- **The rule data travels with the linter.** `lib/linter.py` compiles `rules/plain-english.json` at import. An installed hook copy needs the preset beside it, or `COPYDESK_RULES` pointing at one. Without it the module raises `PresetNotFound` and the gate exits non-blocking.
-- **Carriers are generated, never hand-edited.** `scripts/generate-carriers.py` renders `output-styles/plain-english.md` and the reminder precis from the preset. Continuous integration runs `--check`.
+- **The rule data travels with the linter.** `lib/linter.py` compiles `rules/plain.json` at import. An installed hook copy needs the preset beside it, or `COPYDESK_RULES` pointing at one. Without it the module raises `PresetNotFound` and the gate exits non-blocking.
+- **Instructions are generated, never hand-edited.** `scripts/generate-instructions.py` renders `output-styles/plain-english.md` and the reminder precis from the preset. Continuous integration runs `--check`.
 - **The gate fails open.** A hook that blocks on its own misconfiguration is worse than one that lets the write through. It prints the error and records a telemetry event.
 - **Conventional Commits.** `<type>(<scope>): <description>`, imperative mood, subject at most 72 characters. Never write a bare `#N` unless it references a real GitHub issue.
 - **No emojis in files** unless asked.

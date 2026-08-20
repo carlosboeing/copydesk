@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Render CopyDesk's prose carriers from the preset document.
+"""Render CopyDesk's prose instructions from the preset document.
 
 The canonical rules used to live as prose in a design document, with three
 copies drifting apart. The preset owns them now, and this script writes the
 copies, so they stop being copies.
 
-    python3 scripts/generate-carriers.py           # write the carriers
-    python3 scripts/generate-carriers.py --check   # exit 1 if they differ
+    python3 scripts/generate-instructions.py           # write the instructions
+    python3 scripts/generate-instructions.py --check   # exit 1 if they differ
 
-Continuous integration runs --check, so a hand-edited carrier fails the build
+Continuous integration runs --check, so a hand-edited instruction set fails the build
 rather than reaching a release.
 """
 
@@ -31,7 +31,7 @@ REMINDER_END = "\nEOF\n"
 
 
 def render_output_style(preset: dict) -> str:
-    style = preset["carriers"]["output_style"]
+    style = preset["instructions"]["output_style"]
     return (
         "---\n"
         f"name: {style['name']}\n"
@@ -39,11 +39,11 @@ def render_output_style(preset: dict) -> str:
         f"keep-coding-instructions: {str(style['keep_coding_instructions']).lower()}\n"
         "---\n"
         "\n"
-        f"<!-- Generated from rules/{preset['id']}.json by scripts/generate-carriers.py. Do not edit by hand.\n"
-        f"     CopyDesk owns the canonical rules; this file is one carrier of the {preset['id']} preset. -->\n"
+        f"<!-- Generated from rules/{preset['id']}.json by scripts/generate-instructions.py. Do not edit by hand.\n"
+        f"     CopyDesk owns the canonical rules; this file is one instruction set of the {preset['id']} preset. -->\n"
         "\n"
         f"{RULES_START}\n"
-        f"{preset['carriers']['rules_block']}\n"
+        f"{preset['instructions']['rules_block']}\n"
         f"{RULES_END}\n"
     )
 
@@ -52,18 +52,18 @@ def render_reminder(preset: dict, existing: str) -> str:
     """Replace only the here-document. The surrounding script is not generated."""
     head, rest = existing.split(REMINDER_START, 1)
     _, tail = rest.split(REMINDER_END, 1)
-    return head + REMINDER_START + preset["carriers"]["reminder"] + REMINDER_END + tail
+    return head + REMINDER_START + preset["instructions"]["reminder"] + REMINDER_END + tail
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Render CopyDesk's prose carriers from the preset.")
+    parser = argparse.ArgumentParser(description="Render CopyDesk's prose instructions from the preset.")
     parser.add_argument("--check", action="store_true", help="compare instead of writing; exit 1 on a difference")
     args = parser.parse_args()
 
     preset = json.loads(PRESET_PATH.read_text(encoding="utf-8"))
 
-    words = len(preset["carriers"]["reminder"].split())
-    declared = preset["carriers"]["reminder_word_count"]
+    words = len(preset["instructions"]["reminder"].split())
+    declared = preset["instructions"]["reminder_word_count"]
     if words != declared:
         print(f"error  the reminder is {words} words; the preset declares {declared}", file=sys.stderr)
         return 1
@@ -78,14 +78,14 @@ def main() -> int:
         for path in stale:
             print(f"error  {path.relative_to(BUNDLE_ROOT)} differs from the preset", file=sys.stderr)
         if stale:
-            print("       run: python3 scripts/generate-carriers.py", file=sys.stderr)
+            print("       run: python3 scripts/generate-instructions.py", file=sys.stderr)
         return 1 if stale else 0
 
     for path in stale:
         path.write_text(targets[path], encoding="utf-8")
         print(f"wrote {path.relative_to(BUNDLE_ROOT)}")
     if not stale:
-        print("carriers already match the preset")
+        print("instructions already match the preset")
     return 0
 
 

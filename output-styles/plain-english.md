@@ -4,8 +4,8 @@ description: Structured but plain writing — full technical content, simpler se
 keep-coding-instructions: true
 ---
 
-<!-- Generated from rules/plain.json by scripts/generate-carriers.py. Do not edit by hand.
-     CopyDesk owns the canonical rules; this file is one carrier of the plain preset. -->
+<!-- Generated from rules/plain.json by scripts/generate-instructions.py. Do not edit by hand.
+     CopyDesk owns the canonical rules; this file is one instruction set of the plain preset. -->
 
 <!-- plain-english-rules:start -->
 **Answer first, then support it.**

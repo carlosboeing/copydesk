@@ -109,7 +109,7 @@ def _compiled(expression: str, flags: int = re.IGNORECASE) -> re.Pattern[str]:
 
 # The rule inventory is data. rules/<preset>.json owns it, and this module
 # compiles it at import. tests/test_rules_sync.py verifies that every executable
-# token reaches the compiled inventory and that the generated carriers match.
+# token reaches the compiled inventory and that the generated instructions match.
 #
 # Compilation order is the preset's order, and it is stable, because lint()
 # sorts findings by line, severity, check and excerpt.
