@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The guided setup wizard for CopyDesk."""
+"""The guided setup wizard, flags, proof run, and uninstaller for CopyDesk."""
 
 from __future__ import annotations
 
