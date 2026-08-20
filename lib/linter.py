@@ -43,7 +43,9 @@ import re
 import sys
 import tempfile
 import time
-from typing import Iterable, Optional, Union
+from typing import Iterable, NamedTuple, Optional, Union
+
+import channels
 
 
 FILE_STATISTICS_MIN_SENTENCES = 15
@@ -215,22 +217,25 @@ def effective_preset(path=None) -> tuple[dict, tuple[RulePattern, ...]]:
     used, because a gate that blocks on its own misconfiguration is worse
     than one that lets the write through.
     """
-    if config is None or path is None:
+def effective_preset(path: Optional[Union[str, Path]]) -> tuple[dict, tuple[RulePattern, ...]]:
+    """Return the (preset_dict, compiled_patterns) tuple that applies to `path`."""
+    if config is None:
         return PRESET, RULE_PATTERNS
     try:
         user = config.user_config_path()
-        project = config.project_config_path(path)
-        local = config.local_config_path(path)
+        project = config.project_config_path(path) if path else None
+        local = config.local_config_path(path) if path else None
     except config.ConfigError as error:
         _report_config_error(str(error))
         return PRESET, RULE_PATTERNS
 
-    if user is None and project is None and local is None:
-        return PRESET, RULE_PATTERNS
-
-    key = tuple(
-        (str(p), p.stat().st_mtime_ns) if p else None
-        for p in (user, project, local)
+    root_key = str(project.parent) if project else (str(local.parent) if local else (str(Path(path).resolve().parent) if path else ""))
+    key = (
+        root_key,
+        tuple(
+            (str(p), p.stat().st_mtime_ns) if p else None
+            for p in (user, project, local)
+        ),
     )
     cached = _PRESET_CACHE.get(key)
     if cached is not None:
@@ -864,42 +869,55 @@ def record_turn_event(session_id: Optional[str] = None) -> None:
     _record_event(event)
 
 
-def _proposed_document(payload: object) -> tuple[Optional[str], Optional[str], Optional[str]]:
+class Proposed(NamedTuple):
+    path: str
+    text: str
+    session_id: str
+    action: str          # "warn" or "block"; "ignore" never returns a record
+    channel: str
+
+
+def _proposed_document(payload: object) -> Optional[Proposed]:
     """Return the path, proposed Markdown, and session id or fail open."""
     if not isinstance(payload, dict):
-        return None, None, None
+        return None
 
     tool_name = payload.get("tool_name")
     tool_input = payload.get("tool_input")
     session_id = payload.get("session_id")
     if tool_name not in {"Write", "Edit"} or not isinstance(tool_input, dict):
-        return None, None, None
+        return None
     if not isinstance(session_id, str) or not session_id:
-        return None, None, None
+        return None
 
     file_path = tool_input.get("file_path")
-    if not isinstance(file_path, str) or not file_path.lower().endswith(".md"):
-        return None, None, None
+    if not isinstance(file_path, str):
+        return None
+
+    resolved, _ = effective_preset(file_path)
+    decision = channels.decide(file_path, resolved)
+    if decision.action == "ignore" or decision.channel is None:
+        return None
 
     if tool_name == "Write":
         content = tool_input.get("content")
-        return (file_path, content, session_id) if isinstance(content, str) else (None, None, None)
+        return Proposed(file_path, content, session_id, decision.action, decision.channel) if isinstance(content, str) else None
 
     old_string = tool_input.get("old_string")
     new_string = tool_input.get("new_string")
     replace_all = tool_input.get("replace_all")
     if not isinstance(old_string, str) or not old_string or not isinstance(new_string, str) or not isinstance(replace_all, bool):
-        return None, None, None
+        return None
 
     try:
         existing = Path(file_path).read_text(encoding="utf-8")
     except OSError:
-        return None, None, None
+        return None
     if old_string not in existing:
-        return None, None, None
+        return None
 
     occurrences = -1 if replace_all else 1
-    return file_path, existing.replace(old_string, new_string, occurrences), session_id
+    return Proposed(file_path, existing.replace(old_string, new_string, occurrences), session_id, decision.action, decision.channel)
 
 
 def _retry_limit(resolved: dict) -> int:
@@ -942,9 +960,15 @@ def run_hook(raw_payload: str) -> int:
         tool_name = payload.get("tool_name") if isinstance(payload, dict) else None
         tool_input = payload.get("tool_input") if isinstance(payload, dict) else None
 
-        file_path, proposed, session_id = _proposed_document(payload)
-        if file_path is None or proposed is None or session_id is None:
+        proposed_record = _proposed_document(payload)
+        if proposed_record is None:
             return 0
+
+        file_path = proposed_record.path
+        proposed = proposed_record.text
+        session_id = proposed_record.session_id
+        action = proposed_record.action
+        channel = proposed_record.channel
 
         # Time strictly around lint() call alone
         t_start = time.time()
@@ -974,8 +998,35 @@ def run_hook(raw_payload: str) -> int:
         findings_total = len(findings)
         rollups = _finding_rollups(findings_with_origin)
 
-        state_dir = _state_directory()
         now = time.time()
+
+        if action == "warn":
+            for finding in findings:
+                print(finding.render(), file=sys.stderr)
+            _record_event({
+                "ts": round(now, 1),
+                "event": "lint",
+                "surface": "gate",
+                "tool": tool_name,
+                "path": str(file_path),
+                "decision": "warn",
+                "streak": 0,
+                "duration_ms": duration_ms,
+                "bytes": doc_bytes,
+                "payload_bytes": payload_bytes,
+                "payload_words": payload_words,
+                "sentences": body_sentences,
+                "findings_total": findings_total,
+                "origin_totals": rollups["origin_totals"],
+                "rule_totals": rollups["rule_totals"],
+                "blocking_origin_totals": rollups["blocking_origin_totals"],
+                "blocking_rule_totals": rollups["blocking_rule_totals"],
+                "findings": _serialize_findings(findings_with_origin),
+                "session_id": session_id,
+            })
+            return 0
+
+        state_dir = _state_directory()
         state_dir.mkdir(parents=True, exist_ok=True)
         _sweep_state(state_dir, now)
         state_path = _state_path(state_dir, session_id)

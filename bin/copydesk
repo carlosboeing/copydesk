@@ -13,6 +13,7 @@ import time
 BUNDLE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BUNDLE_ROOT / "lib"))
 
+import channels  # noqa: E402
 import linter  # noqa: E402
 
 
@@ -198,6 +199,12 @@ def _handle_check(args: list[str]) -> int:
             except OSError as error:
                 print(f"{source}: {error}", file=sys.stderr)
                 failed = True
+                continue
+
+            resolved, _ = linter.effective_preset(abs_path)
+            decision = channels.decide(abs_path, resolved)
+            if decision.action == "ignore":
+                print(f"{source}: not checked (paths.ignore)")
                 continue
 
         t_start = time.time()

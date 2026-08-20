@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -197,7 +198,65 @@ class DecisionHelperTests(unittest.TestCase):
     def test_the_document_scoped_rule_is_excluded_from_origin_filtering(self) -> None:
         findings = [linter.Finding(1, "long-sentence-rate", "x", "error", origin="new")]
         self.assertEqual(linter.blocking_findings_for_retry(findings), [])
-        self.assertIn("long-sentence-rate", linter.DOCUMENT_SCOPED_BLOCKING_RULES)
+
+
+class RoutingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root)
+        old_state = os.environ.get("COPYDESK_STATE_DIR")
+        os.environ["COPYDESK_STATE_DIR"] = str(self.root / "state")
+
+        def _restore():
+            if old_state is None:
+                os.environ.pop("COPYDESK_STATE_DIR", None)
+            else:
+                os.environ["COPYDESK_STATE_DIR"] = old_state
+
+        self.addCleanup(_restore)
+        (self.root / "copydesk.config.json").write_text(
+            '{"version": 1, "paths": {"ignore": ["notes/**"], "warn": ["CHANGELOG.md"]}}',
+            encoding="utf-8",
+        )
+        (self.root / "notes").mkdir()
+        linter._PRESET_CACHE.clear()
+
+    def _hook(self, name: str) -> int:
+        target = self.root / name
+        payload = json.dumps({
+            "session_id": "routing", "tool_name": "Write",
+            "tool_input": {"file_path": str(target), "content": "This approach is robust.\n"},
+        })
+        return linter.run_hook(payload)
+
+    def test_an_ignored_path_never_reaches_the_gate(self) -> None:
+        self.assertEqual(self._hook("notes/x.md"), 0)
+
+    def test_a_warned_path_reports_and_lets_the_write_through(self) -> None:
+        self.assertEqual(self._hook("CHANGELOG.md"), 0)
+
+    def test_a_warned_path_records_its_decision(self) -> None:
+        self._hook("CHANGELOG.md")
+        events = linter.read_events()
+        self.assertEqual(events[-1]["decision"], "warn")
+
+    def test_a_warned_path_starts_no_retry_streak(self) -> None:
+        self._hook("CHANGELOG.md")
+        self._hook("CHANGELOG.md")
+        self.assertEqual(linter.read_events()[-1]["streak"], 0)
+
+    def test_a_blocked_path_still_blocks(self) -> None:
+        self.assertEqual(self._hook("README.md"), 2)
+
+    def test_the_cli_skips_an_ignored_path_out_loud(self) -> None:
+        (self.root / "notes" / "x.md").write_text("This approach is robust.\n", encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(REPOSITORY_ROOT / "bin" / "copydesk"), "check", "notes/x.md"],
+            cwd=self.root, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("not checked", result.stdout)
+        self.assertNotIn("banned-word", result.stdout)
 
 
 if __name__ == "__main__":

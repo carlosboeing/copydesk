@@ -23,6 +23,8 @@ from typing import Iterable, Optional, Union
 
 import jsonc
 
+import channels
+
 SCHEMA_VERSION = 1
 
 PROJECT_CONFIG_STEM = "copydesk.config"
@@ -30,6 +32,8 @@ LOCAL_CONFIG_NAME = "copydesk.local.json"
 JSON_SUFFIX = ".json"
 # Recognised but refused at v0. Naming them lets the message say why.
 FOREIGN_SUFFIXES = (".yaml", ".yml", ".toml")
+
+PATHS_DEFAULTS = {"ignore": [], "warn": [], "block": ["**/*.md"]}
 
 # The repo owns what gets committed into it; the user owns what is said to
 # them. A project file setting one of these is ignored and reported, never
@@ -391,7 +395,7 @@ def resolve(
         for rule_id, layer in (extra.get("rules") or {}).items():
             _apply_rule_layer(effective, rule_id, layer)
 
-    channels = {name: dict(body) for name, body in CHANNEL_DEFAULTS.items()}
+    channels_config = {name: dict(body) for name, body in CHANNEL_DEFAULTS.items()}
     agents = list(DEFAULT_AGENTS)
     gate = dict(GATE_DEFAULTS)
     telemetry = dict(TELEMETRY_DEFAULTS)
@@ -406,28 +410,67 @@ def resolve(
         else:
             provenance[prefix] = "built-in"
 
-    _stamp("channels", channels)
+    _stamp("channels", channels_config)
     _stamp("gate", gate)
     _stamp("telemetry", telemetry)
     provenance["agents"] = "built-in"
     provenance["paths"] = "built-in"
 
     for path, document in layers:
-        channels = _merge_channels(channels, document.get("channels"), path, warnings, provenance)
+        channels_config = _merge_channels(channels_config, document.get("channels"), path, warnings, provenance)
         if "agents" in document:
             agents = list(document["agents"])
             provenance["agents"] = str(path)
-        for block, target in (("gate", gate), ("telemetry", telemetry)):
+        for block, block_target in (("gate", gate), ("telemetry", telemetry)):
             for key, value in (document.get(block) or {}).items():
-                target[key] = value
+                block_target[key] = value
                 provenance[f"{block}.{key}"] = str(path)
         for rule_id, layer in (document.get("rules") or {}).items():
             _apply_rule_layer(effective, rule_id, layer)
 
-    effective["channels"] = channels
+    base_root = None
+    if project_path is not None:
+        base_root = str(project_path.parent)
+    elif target is not None:
+        p = Path(target).resolve()
+        base_root = str(p if p.is_dir() else p.parent)
+    else:
+        base_root = str(Path.cwd())
+
+    paths_merged = {k: list(v) for k, v in PATHS_DEFAULTS.items()}
+    path_rules: list[channels.PathRule] = []
+
+    # Layer 0: built-in
+    for action in ("ignore", "warn", "block"):
+        for pat in PATHS_DEFAULTS.get(action, ()):
+            path_rules.append(channels.PathRule(0, action, pat, base_root))
+
+    layer_idx = 0
+    for path, kind in ((user_path, "user"), (project_path, "project"), (local_path, "local")):
+        layer_idx += 1
+        if path is None:
+            continue
+        doc = next((d for p, d in layers if p == path), None)
+        if doc is None:
+            continue
+        layer_root = str(path.parent) if kind in ("project", "local") else base_root
+        layer_paths = doc.get("paths") or {}
+        if isinstance(layer_paths, dict):
+            for action in ("ignore", "warn", "block"):
+                pats = layer_paths.get(action) or []
+                if isinstance(pats, list):
+                    for pat in pats:
+                        if isinstance(pat, str):
+                            paths_merged.setdefault(action, []).append(pat)
+                            path_rules.append(channels.PathRule(layer_idx, action, pat, layer_root))
+                            provenance[f"paths.{action}"] = str(path)
+
+    effective["channels"] = channels_config
     effective["agents"] = agents
     effective["gate"] = gate
     effective["telemetry"] = telemetry
+    effective["paths"] = paths_merged
+    effective["pathRules"] = path_rules
     effective["provenance"] = provenance
     effective["sources"] = [str(p) for p, _ in layers]
     effective["warnings"] = warnings
