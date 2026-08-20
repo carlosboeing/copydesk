@@ -902,14 +902,22 @@ def _proposed_document(payload: object) -> tuple[Optional[str], Optional[str], O
     return file_path, existing.replace(old_string, new_string, occurrences), session_id
 
 
-def _warning_for_retry(hashes: list[str]) -> str:
+def _retry_limit(resolved: dict) -> int:
+    """1 to 5, defaulting to 3. Anything else is a config mistake, not a crash."""
+    value = (resolved.get("gate") or {}).get("retries", RETRY_LIMIT)
+    if isinstance(value, int) and 1 <= value <= 5:
+        return value
+    return RETRY_LIMIT
+
+
+def _warning_for_retry(hashes: list[str], limit: int = RETRY_LIMIT) -> str:
     if len(set(hashes)) == 1:
-        detail = f"same content submitted 3 times (sha256={hashes[-1]})"
-    elif len(set(hashes)) == RETRY_LIMIT:
-        detail = f"3 different attempts still failing (sha256={', '.join(hashes)})"
+        detail = f"same content submitted {limit} times (sha256={hashes[-1]})"
+    elif len(set(hashes)) == limit:
+        detail = f"{limit} different attempts still failing (sha256={', '.join(hashes)})"
     else:
-        detail = f"3 attempts still failing (sha256={', '.join(hashes)})"
-    return f"CopyDesk gate passed after 3 failed attempts: {detail}. Run /humanizer before the next edit."
+        detail = f"{limit} attempts still failing (sha256={', '.join(hashes)})"
+    return f"CopyDesk gate passed after {limit} failed attempts: {detail}. Run /humanizer before the next edit."
 
 
 def _write_retry_warning(message: str) -> None:
@@ -1040,10 +1048,13 @@ def run_hook(raw_payload: str) -> int:
         hashes = [value for value in previous_hashes if isinstance(value, str)][-2:] + [content_hash]
         streak = (previous.get("streak", 0) if isinstance(previous, dict) else 0) + 1
 
-        if streak >= RETRY_LIMIT:
+        resolved, _ = effective_preset(file_path)
+        retry_limit = _retry_limit(resolved)
+
+        if streak >= retry_limit:
             files.pop(file_path, None)
             _write_state(state_path, state)
-            _write_retry_warning(_warning_for_retry(hashes))
+            _write_retry_warning(_warning_for_retry(hashes, retry_limit))
             _record_event({
                 "ts": round(now, 1),
                 "event": "lint",

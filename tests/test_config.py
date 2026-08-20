@@ -323,7 +323,7 @@ class LocalLayerTests(unittest.TestCase):
         self.assertIn("copydesk.config.json", joined)
         self.assertIn("channels.chat", joined)
         self.assertIn("agents", joined)
-        self.assertNotIn("chat", resolved.get("channels", {}))
+        self.assertEqual(resolved["channels"]["chat"]["verbosity"], "low")
 
     def test_the_same_personal_key_in_a_local_file_is_kept(self) -> None:
         self._write("copydesk.local.json", '{"version": 1, "agents": ["codex"]}')
@@ -367,6 +367,78 @@ class EffectivePresetTests(unittest.TestCase):
             '{"version": 1, "rules": {"banned-word": {"remove": ["robust"]}}}', encoding="utf-8"
         )
         self.assertNotIn("banned-word", [f.check for f in linter.lint("This is robust.\n", path=self.doc)])
+
+
+class ChannelTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.doc = self.root / "doc.md"
+        self.doc.write_text("text\n", encoding="utf-8")
+
+    def _project(self, body: str) -> None:
+        (self.root / "copydesk.config.json").write_text(body, encoding="utf-8")
+
+    def test_the_four_channels_carry_their_defaults(self) -> None:
+        resolved = config.resolve(RULES_DIR, self.doc, user_path=None)
+        channels = resolved["channels"]
+        self.assertEqual(sorted(channels), ["chat", "commits", "documents", "reviews"])
+        self.assertEqual(channels["chat"]["verbosity"], "low")
+        self.assertEqual(channels["documents"]["verbosity"], "high")
+        self.assertEqual(channels["commits"]["style"], "engineer")
+        self.assertFalse(channels["reviews"]["enabled"])
+        self.assertTrue(channels["chat"]["enabled"])
+
+    def test_a_channel_setting_replaces_rather_than_merges(self) -> None:
+        self._project('{"version": 1, "channels": {"documents": {"style": "editorial"}}}')
+        resolved = config.resolve(RULES_DIR, self.doc, user_path=None)
+        self.assertEqual(resolved["channels"]["documents"]["style"], "editorial")
+        self.assertEqual(resolved["channels"]["documents"]["verbosity"], "high")
+
+    def test_guidance_booleans_merge_key_by_key(self) -> None:
+        self._project('{"version": 1, "channels": {"documents": {"guidance": {"sources": true}}}}')
+        guidance = config.resolve(RULES_DIR, self.doc, user_path=None)["channels"]["documents"]["guidance"]
+        self.assertTrue(guidance["sources"])
+        self.assertTrue(guidance["recommendations"])
+
+    def test_agents_replaces_wholesale(self) -> None:
+        (self.root / "copydesk.local.json").write_text(
+            '{"version": 1, "agents": ["codex"]}', encoding="utf-8"
+        )
+        self.assertEqual(config.resolve(RULES_DIR, self.doc, user_path=None)["agents"], ["codex"])
+
+    def test_match_globs_replace_wholesale(self) -> None:
+        self._project('{"version": 1, "channels": {"reviews": {"match": ["**/pr-body.md"]}}}')
+        reviews = config.resolve(RULES_DIR, self.doc, user_path=None)["channels"]["reviews"]
+        self.assertEqual(reviews["match"], ["**/pr-body.md"])
+
+    def test_an_unknown_channel_is_reported_never_fatal(self) -> None:
+        self._project('{"version": 1, "channels": {"emails": {"style": "plain"}}}')
+        resolved = config.resolve(RULES_DIR, self.doc, user_path=None)
+        self.assertIn("emails", " ".join(resolved["warnings"]))
+        self.assertNotIn("emails", resolved["channels"])
+
+    def test_every_value_records_the_file_that_set_it(self) -> None:
+        self._project('{"version": 1, "channels": {"documents": {"style": "editorial"}}}')
+        resolved = config.resolve(RULES_DIR, self.doc, user_path=None)
+        self.assertEqual(
+            resolved["provenance"]["channels.documents.style"],
+            str(self.root / "copydesk.config.json"),
+        )
+        self.assertEqual(resolved["provenance"]["channels.documents.verbosity"], "built-in")
+
+
+class RetryLimitTests(unittest.TestCase):
+    def test_the_configured_retry_limit_is_used(self) -> None:
+        resolved = {"gate": {"retries": 5}}
+        self.assertEqual(linter._retry_limit(resolved), 5)
+
+    def test_the_default_is_three(self) -> None:
+        self.assertEqual(linter._retry_limit({}), linter.RETRY_LIMIT)
+
+    def test_a_value_outside_one_to_five_falls_back(self) -> None:
+        self.assertEqual(linter._retry_limit({"gate": {"retries": 99}}), linter.RETRY_LIMIT)
+        self.assertEqual(linter._retry_limit({"gate": {"retries": 0}}), linter.RETRY_LIMIT)
 
 
 if __name__ == "__main__":

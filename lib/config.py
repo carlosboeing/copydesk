@@ -274,6 +274,75 @@ def _extends_list(document: dict, source: Path) -> list[str]:
     raise ConfigError(f"{source}: extends must be a string or an array of strings")
 
 
+CHANNEL_NAMES = ("chat", "documents", "commits", "reviews")
+
+# Every value here is a default the design's Part 2 example states.
+CHANNEL_DEFAULTS = {
+    "chat": {
+        "enabled": True,
+        "style": "plain",
+        "verbosity": "low",
+        "guidance": {
+            "recommendations": True,
+            "direction": True,
+            "progress": True,
+            "pushback": False,
+            "alternatives": False,
+        },
+        "match": [],
+    },
+    "documents": {
+        "enabled": True,
+        "style": "plain",
+        "verbosity": "high",
+        "guidance": {"recommendations": True},
+        "match": [],
+    },
+    "commits": {
+        "enabled": True,
+        "style": "engineer",
+        "verbosity": "low",
+        "guidance": {},
+        "match": [],
+    },
+    "reviews": {
+        "enabled": False,
+        "style": "plain",
+        "verbosity": "medium",
+        "guidance": {"pushback": True},
+        "match": [],
+    },
+}
+
+DEFAULT_AGENTS = ["claude-code"]
+GATE_DEFAULTS = {"retries": 3}
+TELEMETRY_DEFAULTS = {"events": True, "saveText": False}
+
+
+def _merge_channels(base: dict, layer: dict, source: Path, warnings: list, provenance: dict) -> dict:
+    merged = {name: dict(body) for name, body in base.items()}
+    for name, settings in (layer or {}).items():
+        if name not in CHANNEL_NAMES:
+            warnings.append(f"{source}: channels.{name} is not a known channel. Ignored.")
+            continue
+        if not isinstance(settings, dict):
+            raise ConfigError(f"{source}: channels.{name} must be an object")
+        target = merged[name]
+        for key, value in settings.items():
+            if key == "guidance" and isinstance(value, dict):
+                # Booleans merge key by key, so turning one id on never
+                # silently turns the channel's other ids off.
+                target["guidance"] = {**target.get("guidance", {}), **value}
+                for guidance_id in value:
+                    provenance[f"channels.{name}.guidance.{guidance_id}"] = str(source)
+            else:
+                # Scalars, enums and match globs replace. A glob set edits
+                # badly by patch, so it is replaced wholesale on purpose.
+                target[key] = value
+                provenance[f"channels.{name}.{key}"] = str(source)
+    return merged
+
+
 def resolve(
     rules_dir: Path,
     target: Optional[Union[str, Path]] = None,
@@ -322,15 +391,44 @@ def resolve(
         for rule_id, layer in (extra.get("rules") or {}).items():
             _apply_rule_layer(effective, rule_id, layer)
 
+    channels = {name: dict(body) for name, body in CHANNEL_DEFAULTS.items()}
+    agents = list(DEFAULT_AGENTS)
+    gate = dict(GATE_DEFAULTS)
+    telemetry = dict(TELEMETRY_DEFAULTS)
+    # Stamp every leaf, not every branch: doctor attributes values, and
+    # `channels.documents` is not a value anyone asks about.
+    provenance = {}
+
+    def _stamp(prefix: str, node) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                _stamp(f"{prefix}.{key}" if prefix else key, value)
+        else:
+            provenance[prefix] = "built-in"
+
+    _stamp("channels", channels)
+    _stamp("gate", gate)
+    _stamp("telemetry", telemetry)
+    provenance["agents"] = "built-in"
+    provenance["paths"] = "built-in"
+
     for path, document in layers:
-        for k, v in document.items():
-            if k in ("gate", "telemetry"):
-                effective.setdefault(k, {}).update(v)
-            elif k in ("agents", "channels"):
-                effective[k] = v
+        channels = _merge_channels(channels, document.get("channels"), path, warnings, provenance)
+        if "agents" in document:
+            agents = list(document["agents"])
+            provenance["agents"] = str(path)
+        for block, target in (("gate", gate), ("telemetry", telemetry)):
+            for key, value in (document.get(block) or {}).items():
+                target[key] = value
+                provenance[f"{block}.{key}"] = str(path)
         for rule_id, layer in (document.get("rules") or {}).items():
             _apply_rule_layer(effective, rule_id, layer)
 
+    effective["channels"] = channels
+    effective["agents"] = agents
+    effective["gate"] = gate
+    effective["telemetry"] = telemetry
+    effective["provenance"] = provenance
     effective["sources"] = [str(p) for p, _ in layers]
     effective["warnings"] = warnings
     return effective
