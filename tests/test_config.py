@@ -204,7 +204,7 @@ class CascadeTests(unittest.TestCase):
 
     def test_word_lists_merge_rather_than_replace(self) -> None:
         """Replacement would make extending a preset require restating it."""
-        baseline = self.tokens_for(config.load_preset_document(RULES_DIR, "plain-english"), "banned-word")
+        baseline = self.tokens_for(config.load_preset_document(RULES_DIR, "plain"), "banned-word")
         project = write_json(
             self.root / "copydesk.config.json",
             {"version": 1, "rules": {"banned-word": {"add": ["synergy"]}}},
@@ -217,11 +217,11 @@ class CascadeTests(unittest.TestCase):
             self.assertIn(token, tokens)
 
     def test_extends_accepts_a_string_and_an_array(self) -> None:
-        for value in ("plain-english", ["plain-english"]):
+        for value in ("plain", ["plain"]):
             with self.subTest(extends=value):
                 project = write_json(self.root / "copydesk.config.json", {"version": 1, "extends": value})
                 resolved = config.resolve(RULES_DIR, self.document, user_path=None, project_path=project)
-                self.assertEqual(resolved["id"], "plain-english")
+                self.assertEqual(resolved["id"], "plain")
 
     def test_severity_off_removes_the_rule_from_compilation(self) -> None:
         project = write_json(
@@ -426,6 +426,41 @@ class ChannelTests(unittest.TestCase):
             str(self.root / "copydesk.config.json"),
         )
         self.assertEqual(resolved["provenance"]["channels.documents.verbosity"], "built-in")
+
+    def test_a_document_is_linted_under_its_channel_style(self) -> None:
+        (self.root / "copydesk.config.json").write_text(
+            '{"version": 1, "channels": {"documents": {"style": "engineer"}}}', encoding="utf-8"
+        )
+        doc = self.root / "doc.md"
+        body = "The deployment pipeline runs a build step and then a test step and then a publish step here and then it deploys.\n"
+        doc.write_text(body, encoding="utf-8")
+        linter._PRESET_CACHE.clear()
+        self.assertIn("sentence-length", [f.check for f in linter.lint(body, path=doc)])
+
+    def test_a_reviews_file_is_linted_under_the_reviews_style(self) -> None:
+        (self.root / "copydesk.config.json").write_text(
+            '{"version": 1, "channels": {"reviews": {"enabled": true, "style": "engineer",'
+            ' "match": ["**/pr-body.md"]}}}', encoding="utf-8"
+        )
+        doc = self.root / "pr-body.md"
+        doc.write_text("x\n", encoding="utf-8")
+        linter._PRESET_CACHE.clear()
+        resolved, _ = linter.effective_preset(doc)
+        # Assert the effective threshold, not the preset id or the source
+        # list: merging a style changes neither, so a correct implementation
+        # would fail an assertion on those.
+        self.assertEqual(resolved["rules"]["sentence-length"]["hardMax"], 25)
+        self.assertEqual(resolved["provenance"]["channels.reviews.style"],
+                         str(self.root / "copydesk.config.json"))
+
+    def test_a_documents_file_keeps_the_plain_threshold(self) -> None:
+        # The control for the test above. Without it, 25 could be the default.
+        (self.root / "copydesk.config.json").write_text('{"version": 1}', encoding="utf-8")
+        doc = self.root / "doc.md"
+        doc.write_text("x\n", encoding="utf-8")
+        linter._PRESET_CACHE.clear()
+        resolved, _ = linter.effective_preset(doc)
+        self.assertEqual(resolved["rules"]["sentence-length"]["hardMax"], 40)
 
 
 class RetryLimitTests(unittest.TestCase):

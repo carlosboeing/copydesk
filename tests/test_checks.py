@@ -381,13 +381,13 @@ class UnglossedTermTests(unittest.TestCase):
 
     def test_the_rule_is_recorded_as_a_rule_never_as_a_pattern(self) -> None:
         """Recording it as a token list would mislead a port into treating a heuristic as data."""
-        preset = json.loads((REPOSITORY_ROOT / "rules" / "plain-english.json").read_text(encoding="utf-8"))
+        preset = json.loads((REPOSITORY_ROOT / "rules" / "plain.json").read_text(encoding="utf-8"))
         self.assertIn("unglossed-term", preset["rules"])
         self.assertEqual([b for b in preset["patterns"] if b["id"] == "unglossed-term"], [])
 
     def test_every_shipped_term_carries_a_recorded_reason(self) -> None:
         """A reader must be able to challenge one entry rather than the whole list."""
-        preset = json.loads((REPOSITORY_ROOT / "rules" / "plain-english.json").read_text(encoding="utf-8"))
+        preset = json.loads((REPOSITORY_ROOT / "rules" / "plain.json").read_text(encoding="utf-8"))
         vocabulary = preset["rules"]["unglossed-term"]["vocabulary"]
         explained = {term for group in vocabulary["rationale"].values() for term in group}
         self.assertSetEqual(set(vocabulary["add"]), explained)

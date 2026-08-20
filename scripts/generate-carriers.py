@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 BUNDLE_ROOT = Path(__file__).resolve().parents[1]
-PRESET_PATH = BUNDLE_ROOT / "rules" / "plain-english.json"
+PRESET_PATH = BUNDLE_ROOT / "rules" / "plain.json"
 OUTPUT_STYLE = BUNDLE_ROOT / "output-styles" / "plain-english.md"
 REMINDER = BUNDLE_ROOT / "hooks" / "reminder.sh"
 

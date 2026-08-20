@@ -24,6 +24,7 @@ from typing import Iterable, Optional, Union
 import jsonc
 
 import channels
+import styles
 
 SCHEMA_VERSION = 1
 
@@ -351,7 +352,7 @@ def resolve(
     rules_dir: Path,
     target: Optional[Union[str, Path]] = None,
     *,
-    default_preset: str = "plain-english",
+    default_preset: str = "plain",
     user_path: Optional[Path] = None,
     project_path: Optional[Path] = None,
     local_path: Optional[Path] = None,
@@ -379,21 +380,6 @@ def resolve(
         if kind == "project":
             warnings.extend(_strip_forbidden(path, document))
         layers.append((path, document))
-
-    # The base preset, then every preset named by extends, in array order.
-    named: list[str] = [default_preset]
-    for path, document in layers:
-        for preset_id in _extends_list(document, path):
-            if preset_id not in named:
-                named.append(preset_id)
-
-    effective = load_preset_document(rules_dir, named[0])
-    effective.setdefault("rules", {})
-    for preset_id in named[1:]:
-        extra = load_preset_document(rules_dir, preset_id)
-        effective["patterns"].extend(extra.get("patterns", []))
-        for rule_id, layer in (extra.get("rules") or {}).items():
-            _apply_rule_layer(effective, rule_id, layer)
 
     channels_config = {name: dict(body) for name, body in CHANNEL_DEFAULTS.items()}
     agents = list(DEFAULT_AGENTS)
@@ -425,6 +411,29 @@ def resolve(
             for key, value in (document.get(block) or {}).items():
                 block_target[key] = value
                 provenance[f"{block}.{key}"] = str(path)
+
+    # The base preset, then the channel style (if channel is set), then presets named by extends
+    named: list[str] = [default_preset]
+    if channel is not None:
+        channel_settings = channels_config.get(channel) or {}
+        style_preset = styles.preset_for(channel_settings.get("style", "plain"))
+        if style_preset not in named:
+            named.insert(1, style_preset)
+
+    for path, document in layers:
+        for preset_id in _extends_list(document, path):
+            if preset_id not in named:
+                named.append(preset_id)
+
+    effective = load_preset_document(rules_dir, named[0])
+    effective.setdefault("rules", {})
+    for preset_id in named[1:]:
+        extra = load_preset_document(rules_dir, preset_id)
+        effective["patterns"].extend(extra.get("patterns", []))
+        for rule_id, layer in (extra.get("rules") or {}).items():
+            _apply_rule_layer(effective, rule_id, layer)
+
+    for path, document in layers:
         for rule_id, layer in (document.get("rules") or {}).items():
             _apply_rule_layer(effective, rule_id, layer)
 

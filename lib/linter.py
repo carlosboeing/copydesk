@@ -133,8 +133,8 @@ def _preset_path() -> Path:
         return Path(override)
     here = Path(__file__).resolve()
     candidates = (
-        here.parents[1] / "rules" / "plain-english.json",   # source bundle
-        here.parent / "rules" / "plain-english.json",       # installed beside linter.py
+        here.parents[1] / "rules" / "plain.json",   # source bundle
+        here.parent / "rules" / "plain.json",       # installed beside linter.py
     )
     for candidate in candidates:
         if candidate.is_file():
@@ -230,25 +230,40 @@ def effective_preset(path: Optional[Union[str, Path]]) -> tuple[dict, tuple[Rule
         return PRESET, RULE_PATTERNS
 
     root_key = str(project.parent) if project else (str(local.parent) if local else (str(Path(path).resolve().parent) if path else ""))
-    key = (
-        root_key,
-        tuple(
-            (str(p), p.stat().st_mtime_ns) if p else None
-            for p in (user, project, local)
-        ),
+    files_key = tuple(
+        (str(p), p.stat().st_mtime_ns) if p else None
+        for p in (user, project, local)
     )
-    cached = _PRESET_CACHE.get(key)
+    routing_key = (root_key, files_key, None)
+    routing_cached = _PRESET_CACHE.get(routing_key)
+    if routing_cached is not None:
+        routing_resolved, _ = routing_cached
+    else:
+        try:
+            routing_resolved = config.resolve(_rules_dir(), path, user_path=user, project_path=project, local_path=local)
+            routing_compiled = compile_patterns(routing_resolved)
+            _PRESET_CACHE[routing_key] = (routing_resolved, routing_compiled)
+        except config.ConfigError as error:
+            _report_config_error(str(error))
+            return PRESET, RULE_PATTERNS
+
+    channel = channels.decide(str(path), routing_resolved).channel if path else None
+
+    full_key = (root_key, files_key, channel)
+    cached = _PRESET_CACHE.get(full_key)
     if cached is not None:
         return cached
 
     try:
-        resolved = config.resolve(_rules_dir(), path, user_path=user, project_path=project, local_path=local)
+        resolved = config.resolve(
+            _rules_dir(), path, user_path=user, project_path=project, local_path=local, channel=channel
+        )
         compiled = compile_patterns(resolved)
     except config.ConfigError as error:
         _report_config_error(str(error))
         return PRESET, RULE_PATTERNS
 
-    _PRESET_CACHE[key] = (resolved, compiled)
+    _PRESET_CACHE[full_key] = (resolved, compiled)
     return resolved, compiled
 
 

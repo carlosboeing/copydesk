@@ -17,7 +17,7 @@ sys.path.insert(0, str(LIBRARY))
 import linter  # noqa: E402
 
 
-PRESET_PATH = REPOSITORY_ROOT / "rules" / "plain-english.json"
+PRESET_PATH = REPOSITORY_ROOT / "rules" / "plain.json"
 GENERATOR = REPOSITORY_ROOT / "scripts" / "generate-carriers.py"
 OUTPUT_STYLE = REPOSITORY_ROOT / "output-styles" / "plain-english.md"
 
