@@ -218,23 +218,24 @@ def effective_preset(path=None) -> tuple[dict, tuple[RulePattern, ...]]:
     try:
         user = config.user_config_path()
         project = config.project_config_path(path)
+        local = config.local_config_path(path)
     except config.ConfigError as error:
         _report_config_error(str(error))
         return PRESET, RULE_PATTERNS
 
-    if user is None and project is None:
+    if user is None and project is None and local is None:
         return PRESET, RULE_PATTERNS
 
-    key = (
-        (str(user), user.stat().st_mtime_ns) if user else None,
-        (str(project), project.stat().st_mtime_ns) if project else None,
+    key = tuple(
+        (str(p), p.stat().st_mtime_ns) if p else None
+        for p in (user, project, local)
     )
     cached = _PRESET_CACHE.get(key)
     if cached is not None:
         return cached
 
     try:
-        resolved = config.resolve(_rules_dir(), path, user_path=user, project_path=project)
+        resolved = config.resolve(_rules_dir(), path, user_path=user, project_path=project, local_path=local)
         compiled = compile_patterns(resolved)
     except config.ConfigError as error:
         _report_config_error(str(error))

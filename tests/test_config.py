@@ -8,6 +8,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -284,6 +285,88 @@ class FailOpenTests(unittest.TestCase):
         linter.lint("text", path=document)
         self.assertEqual(len(linter._REPORTED_CONFIG_ERRORS), first)
         self.assertGreaterEqual(first, 1)
+
+
+class LocalLayerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root)
+
+    def _write(self, name: str, body: str) -> Path:
+        path = self.root / name
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_the_local_file_wins_over_the_project_file(self) -> None:
+        self._write("copydesk.config.json", '{"version": 1, "gate": {"retries": 2}}')
+        self._write("copydesk.local.json", '{"version": 1, "gate": {"retries": 5}}')
+        doc = self.root / "doc.md"
+        doc.write_text("text\n", encoding="utf-8")
+        resolved = config.resolve(RULES_DIR, doc, user_path=None)
+        self.assertEqual(resolved["gate"]["retries"], 5)
+
+    def test_a_local_file_alone_is_discovered(self) -> None:
+        self._write("copydesk.local.json", '{"version": 1, "gate": {"retries": 4}}')
+        doc = self.root / "doc.md"
+        doc.write_text("text\n", encoding="utf-8")
+        self.assertEqual(config.local_config_path(doc), self.root / "copydesk.local.json")
+
+    def test_a_personal_key_in_a_project_file_is_ignored_and_named(self) -> None:
+        self._write(
+            "copydesk.config.json",
+            '{"version": 1, "channels": {"chat": {"verbosity": "high"}}, "agents": ["codex"]}',
+        )
+        doc = self.root / "doc.md"
+        doc.write_text("text\n", encoding="utf-8")
+        resolved = config.resolve(RULES_DIR, doc, user_path=None)
+        joined = " ".join(resolved["warnings"])
+        self.assertIn("copydesk.config.json", joined)
+        self.assertIn("channels.chat", joined)
+        self.assertIn("agents", joined)
+        self.assertNotIn("chat", resolved.get("channels", {}))
+
+    def test_the_same_personal_key_in_a_local_file_is_kept(self) -> None:
+        self._write("copydesk.local.json", '{"version": 1, "agents": ["codex"]}')
+        doc = self.root / "doc.md"
+        doc.write_text("text\n", encoding="utf-8")
+        resolved = config.resolve(RULES_DIR, doc, user_path=None)
+        self.assertEqual(resolved["agents"], ["codex"])
+        self.assertEqual(resolved["warnings"], [])
+
+    def test_comments_in_a_config_file_load(self) -> None:
+        self._write(
+            "copydesk.config.json",
+            '{\n  "version": 1,  // required\n  "gate": {"retries": 2}\n}',
+        )
+        doc = self.root / "doc.md"
+        doc.write_text("text\n", encoding="utf-8")
+        self.assertEqual(config.resolve(RULES_DIR, doc, user_path=None)["gate"]["retries"], 2)
+
+
+class EffectivePresetTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.doc = self.root / "doc.md"
+        self.doc.write_text("This approach is robust.\n", encoding="utf-8")
+        linter._PRESET_CACHE.clear()
+
+    def test_a_local_only_file_reaches_the_linter(self) -> None:
+        (self.root / "copydesk.local.json").write_text(
+            '{"version": 1, "rules": {"banned-word": {"remove": ["robust"]}}}', encoding="utf-8"
+        )
+        findings = linter.lint(self.doc.read_text(encoding="utf-8"), path=self.doc)
+        self.assertNotIn("banned-word", [f.check for f in findings])
+
+    def test_editing_the_local_file_invalidates_the_cache(self) -> None:
+        local = self.root / "copydesk.local.json"
+        local.write_text('{"version": 1}', encoding="utf-8")
+        self.assertIn("banned-word", [f.check for f in linter.lint("This is robust.\n", path=self.doc)])
+        os.utime(local, (time.time() + 2, time.time() + 2))
+        local.write_text(
+            '{"version": 1, "rules": {"banned-word": {"remove": ["robust"]}}}', encoding="utf-8"
+        )
+        self.assertNotIn("banned-word", [f.check for f in linter.lint("This is robust.\n", path=self.doc)])
 
 
 if __name__ == "__main__":

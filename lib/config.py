@@ -21,12 +21,21 @@ import os
 from pathlib import Path
 from typing import Iterable, Optional, Union
 
+import jsonc
+
 SCHEMA_VERSION = 1
 
 PROJECT_CONFIG_STEM = "copydesk.config"
+LOCAL_CONFIG_NAME = "copydesk.local.json"
 JSON_SUFFIX = ".json"
 # Recognised but refused at v0. Naming them lets the message say why.
 FOREIGN_SUFFIXES = (".yaml", ".yml", ".toml")
+
+# The repo owns what gets committed into it; the user owns what is said to
+# them. A project file setting one of these is ignored and reported, never
+# an error, because a project should not be able to break a contributor's
+# install.
+PROJECT_FORBIDDEN_PREFIXES = ("channels.chat", "agents", "telemetry")
 
 # The config vocabulary is frozen at three values. The internal severity
 # strings are deliberately free, so the mapping happens here and the engine
@@ -44,9 +53,15 @@ def _read_json(path: Path) -> dict:
     except OSError as error:
         raise ConfigError(f"{path}: cannot be read ({error.strerror})") from error
     try:
-        loaded = json.loads(text)
+        stripped = jsonc.strip_comments(text)
+    except jsonc.UnterminatedComment as error:
+        raise ConfigError(f"{path}: {error}") from error
+    try:
+        loaded = json.loads(stripped)
     except json.JSONDecodeError as error:
-        raise ConfigError(f"{path}: is not valid JSON (line {error.lineno}, column {error.colno})") from error
+        raise ConfigError(
+            f"{path}: is not valid JSON (line {error.lineno}, column {error.colno})"
+        ) from error
     if not isinstance(loaded, dict):
         raise ConfigError(f"{path}: the top level must be an object")
     return loaded
@@ -104,6 +119,37 @@ def project_config_path(start: Union[str, Path]) -> Optional[Path]:
             )
         return only
     return None
+
+
+def local_config_path(start: Union[str, Path]) -> Optional[Path]:
+    """`copydesk.local.json` in the directory that holds the project file."""
+    here = Path(start).resolve()
+    directory = here if here.is_dir() else here.parent
+    for candidate_dir in (directory, *directory.parents):
+        local = candidate_dir / LOCAL_CONFIG_NAME
+        project = _configs_in(candidate_dir)
+        if local.is_file():
+            return local
+        if project:
+            return None
+    return None
+
+
+def _strip_forbidden(path: Path, document: dict) -> list[str]:
+    """Remove personal keys from a project layer. Returns what was dropped."""
+    warnings: list[str] = []
+    for prefix in PROJECT_FORBIDDEN_PREFIXES:
+        head, _, tail = prefix.partition(".")
+        if not tail:
+            if head in document:
+                document.pop(head)
+                warnings.append(f"{path}: {head} is a personal key. Ignored.")
+            continue
+        nested = document.get(head)
+        if isinstance(nested, dict) and tail in nested:
+            nested.pop(tail)
+            warnings.append(f"{path}: {prefix} is a personal key. Ignored.")
+    return warnings
 
 
 def _merge_list(base: Iterable[str], layer: dict) -> list[str]:
@@ -196,6 +242,8 @@ def resolve(
     default_preset: str = "plain-english",
     user_path: Optional[Path] = None,
     project_path: Optional[Path] = None,
+    local_path: Optional[Path] = None,
+    channel: Optional[str] = None,
 ) -> dict:
     """Return the effective preset for one document.
 
@@ -207,12 +255,17 @@ def resolve(
         user_path = user_config_path()
     if project_path is None and target is not None:
         project_path = project_config_path(target)
+    if local_path is None and target is not None:
+        local_path = local_config_path(target)
 
-    for path in (user_path, project_path):
+    warnings: list[str] = []
+    for path, kind in ((user_path, "user"), (project_path, "project"), (local_path, "local")):
         if path is None:
             continue
         document = _read_json(path)
         _check_version(path, document)
+        if kind == "project":
+            warnings.extend(_strip_forbidden(path, document))
         layers.append((path, document))
 
     # The base preset, then every preset named by extends, in array order.
@@ -231,10 +284,16 @@ def resolve(
             _apply_rule_layer(effective, rule_id, layer)
 
     for path, document in layers:
+        for k, v in document.items():
+            if k in ("gate", "telemetry"):
+                effective.setdefault(k, {}).update(v)
+            elif k in ("agents", "channels"):
+                effective[k] = v
         for rule_id, layer in (document.get("rules") or {}).items():
             _apply_rule_layer(effective, rule_id, layer)
 
     effective["sources"] = [str(p) for p, _ in layers]
+    effective["warnings"] = warnings
     return effective
 
 
