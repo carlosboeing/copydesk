@@ -6,35 +6,51 @@
 [![python: 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 [![status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-orange.svg)](docs/ROADMAP.md)
 
-**A prose gate for AI coding agents.** It refuses the write, so the bad sentence never reaches the file.
+**A prose gate and style system for AI coding agents.**
 
-Every other prose tool reads your text after it is written. CopyDesk sits one step earlier: it puts the rules in the model's context before it generates, and refuses the write if the model ignores them. No dependencies beyond the Python standard library.
+It prevents violations before generation, and refuses the write when a violation slips through.
+
+Every other prose tool reads your text after it is saved. CopyDesk works in two earlier moments: it compiles instructions into the model context before generation, and it intercepts file edits to refuse violations at write time.
+
+| When | What happens | Who is there |
+|---|---|---|
+| Before generation | Instructions enter the model context, so bad prose is never produced | **CopyDesk** |
+| At write time | The write is refused and the model revises | **CopyDesk** |
+| After the file is saved | The file is scored and a fix requested | sloptrim |
+| In continuous integration | The build reports or fails | Vale |
 
 ---
 
 ## What it looks like
 
-The part no other tool does happens when an agent tries to write. The gate refuses, and the agent revises before anything reaches your disk:
+### 1. Prevention (before generation)
+
+CopyDesk generates tuned output styles and instruction blocks for your agents. The model knows your style, verbosity, and constraints before writing a single token.
+
+```
+Answer first, then support it.
+Give the answer and one line of support.
+Cut any sentence that does not change what the reader knows or does.
+```
+
+### 2. Remediation (at write time)
+
+When an agent ignores instructions during a file write, the gate refuses the operation. The agent revises immediately.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/gate-demo-dark.png">
-  <img alt="A terminal showing an agent's edit refused by the CopyDesk gate. One finding is reported, banned-word on line 5, followed by a note that one pre-existing error in the file did not cause the block and needs no change. The agent revises and the second edit is written." src="docs/assets/gate-demo-light.png" width="100%">
+  <img alt="A terminal showing an agent edit refused by the CopyDesk gate." src="docs/assets/gate-demo-light.png" width="100%">
 </picture>
 
-Two details there matter more than they look.
+The gate blocks on new findings in the edited region, not on pre-existing errors in the file. It tells the model not to touch surrounding code or text.
 
-The gate blocked on **one** finding, not on every problem in the file. It reports the pre-existing error and explicitly says not to fix it. Asking a model to clean up prose it did not write is how a writing gate becomes something people switch off.
-
-You can also use it as an ordinary linter, on files or standard input:
+You can also run CopyDesk as a standalone CLI linter:
 
 ```console
 $ copydesk check release-notes.md
 release-notes.md:
-3:announcing-opener:Great question — let me walk you through it. This release delivers a robust and
-3:banned-word:Great question — let me walk you through it. This release delivers a robust and
-3:sentence-length:This release delivers a robust and comprehensive overhaul of the export pipeline…
-4:banned-word:comprehensive overhaul of the export pipeline, which is a testament to the team's
-5:banned-word:work over the last quarter and showcases the intricate improvements we've made to
+3:announcing-opener:Great question — let me walk you through it. This release delivers a solid and
+3:sentence-length:This release delivers a solid and significant overhaul of the export pipeline…
 8:idiom:That said, we should circle back on the remaining items. As noted above, the
 8:orphan-pointer:That said, we should circle back on the remaining items. As noted above, the
 9:soft-offer:former approach is deprecated. Happy to walk through any of this if you'd like.
@@ -42,28 +58,24 @@ release-notes.md:
 
 ## Why this exists
 
-AI agents write a great deal of prose: commit messages, pull request descriptions, documentation, release notes, and the running commentary in chat. Most of it has the same recognisable problems.
+AI coding agents produce four channels of prose: terminal chat, Markdown documentation, commit messages, and code review comments.
 
-- Sentences run to forty words.
-- Paragraphs never reach a point.
-- Openers announce what is coming instead of saying it.
-- A small vocabulary of words signals that a machine wrote this.
+Most unguided agent writing shares four flaws. Sentences stretch past forty words. Openers announce what is coming instead of answering. Chat repeats answered decisions turn after turn.
 
-Existing tools catch that after the fact. [Vale](https://vale.sh) is excellent and runs in continuous integration, where a finding costs a round trip and someone's attention. [sloptrim](https://github.com/seyedehsanhadi/sloptrim) scores files after they are saved, where a finding costs a rewrite the model already committed to.
+Post-hoc linters catch these issues in CI or after saving. That costs a full retry round trip or reviewer attention.
 
-Neither can reach the two moments where correction is cheapest, because neither was built for a producer that has a context window.
-
-**CopyDesk is.** It injects a short précis of the rules into the agent's context on every turn, so the text is often never generated. When it is generated anyway, the gate refuses the write and the agent gets one retry rather than a review comment three days later.
-
-There is a second gap. Roughly half of an agent's prose is chat that never becomes a file at all, and a file linter cannot see any of it. Measured across [1.5 million words of transcripts](docs/evidence/observational-baseline.md), that chat carries **9.14 blocking violations per 1,000 words against 5.42 in documents**. The worse half is the half nobody was checking.
+Measured across [1.5 million words of real transcripts](docs/evidence/observational-baseline.md), terminal chat carries 9.14 blocking violations per 1,000 words against 5.42 in documents. Chat never becomes a saved file, so a post-hoc file linter cannot inspect it. Prevention through compiled context instructions is the only way to reach chat.
 
 ## Contents
 
 - [Install](#install)
+- [Quickstart: Setup Wizard](#quickstart-setup-wizard)
+- [Channels](#channels)
+- [Styles](#styles)
 - [Usage](#usage)
-- [Set up the gate](#set-up-the-gate)
 - [Configuration](#configuration)
 - [Rules](#rules)
+- [Setting up the gate by hand](#setting-up-the-gate-by-hand)
 - [How it compares](#how-it-compares)
 - [Evidence](#evidence)
 - [Project status](#project-status)
@@ -77,13 +89,13 @@ There is a second gap. Roughly half of an agent's prose is chat that never becom
 npm install -g copydesk
 ```
 
-Or run it without installing:
+Or run directly without global installation:
 
 ```bash
 npx copydesk check README.md
 ```
 
-Or from a checkout, which puts `copydesk` on your `PATH` and changes nothing else:
+Or clone from source:
 
 ```bash
 git clone https://github.com/carlosboeing/copydesk.git
@@ -91,184 +103,226 @@ cd copydesk
 ./install.sh
 ```
 
-CopyDesk is a Python program distributed through npm, because npm never inspects the language of an executable it places on the path. It needs Python 3.9 or later and nothing else. There are no third-party packages to install, deliberately: the gate runs on every file an agent writes, so a slow import or a dependency conflict would be felt on every keystroke.
+CopyDesk requires Python 3.9 or later and has zero third-party dependencies.
 
-Verify the install at any time:
+## Quickstart: Setup Wizard
+
+Run the interactive wizard to configure styles, channels, and hooks:
+
+```bash
+copydesk setup
+```
+
+The wizard guides you through three choices:
+1. Preset style and verbosity for each channel.
+2. Connected harnesses and tools.
+3. Configuration review and proof run.
+
+You can also run unattended with defaults:
+
+```bash
+copydesk setup --defaults --yes
+```
+
+To check your installation and effective rules:
 
 ```bash
 copydesk doctor
 ```
 
-`doctor` prints the preset it resolved, the config files it found, where state is written, and whether the hooks are registered. It never changes anything.
+To remove all CopyDesk hooks and configurations:
+
+```bash
+copydesk uninstall
+```
+
+## Channels
+
+CopyDesk divides agent writing into four channels:
+
+| Channel | Medium | Gate mechanism | Default style |
+|---|---|---|---|
+| `chat` | Terminal conversational replies | Prevention only (context instructions) | `plain` (low verbosity) |
+| `documents` | Markdown files on disk | `PreToolUse` write/edit hook | `plain` (high verbosity) |
+| `commits` | Git commit messages | `commit-msg` git hook | `engineer` (low verbosity) |
+| `reviews` | PR and code review markdown | Configured `match` file patterns | `plain` (medium verbosity) |
+
+Read more in [docs/channels.md](docs/channels.md).
+
+## Styles
+
+CopyDesk ships four base styles:
+
+| Style | Purpose | Best suited for |
+|---|---|---|
+| `plain` | Answer first, concise supporting facts | Day-to-day coding, technical documentation |
+| `engineer` | Terse procedures, tables, minimal prose | API references, runbooks, schemas |
+| `editorial` | Narrative explanations, flowing paragraphs | Thought leadership, blog posts |
+| `general` | Plain terms with every specialized word glossed | Onboarding guides, non-technical docs |
+
+Read more in [docs/styles.md](docs/styles.md).
 
 ## Usage
 
-Check files, or standard input:
+Check files or standard input:
 
 ```bash
 copydesk check docs/guide.md CHANGELOG.md
 cat draft.md | copydesk check -
+copydesk check --commit-msg .git/COMMIT_EDITMSG
 ```
 
-See what the gate has been doing:
+Inspect rules and resolution:
 
 ```bash
-copydesk stats                    # a summary of recent activity
-copydesk stats --since 30d --json # machine-readable
-copydesk report --out report.md   # a written report
+copydesk doctor                  # explain active settings and health
+copydesk doctor docs/guide.md    # explain rules for a specific file
+copydesk doctor --rules          # list all rules and guidance parameters
 ```
 
-Exit codes follow the usual convention:
+Switch chat verbosity quickly:
+
+```bash
+copydesk set channels.chat.verbosity=medium
+```
+
+View local gate telemetry:
+
+```bash
+copydesk stats                    # activity summary
+copydesk stats --since 30d --json # JSON format
+copydesk report --out report.md   # detailed markdown report
+```
+
+Exit codes:
 
 | Code | Meaning |
-|---:|---|
-| `0` | clean, or warnings only |
-| `1` | findings that would block a write |
-| `2` | a hook refused the write |
-| `64` | usage error |
-
-## Set up the gate
-
-The gate is the reason CopyDesk exists. It currently ships a verified adapter for [Claude Code](https://claude.com/claude-code); other harnesses are on the [roadmap](docs/ROADMAP.md).
-
-Copy the hook, the linter and the rules into your hooks directory:
-
-```bash
-mkdir -p ~/.claude/hooks/copydesk/rules
-cp hooks/gate.sh hooks/reminder.sh lib/linter.py ~/.claude/hooks/copydesk/
-cp rules/plain-english.json ~/.claude/hooks/copydesk/rules/
-chmod +x ~/.claude/hooks/copydesk/gate.sh ~/.claude/hooks/copydesk/reminder.sh
-```
-
-Then register both hooks in `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Write|Edit",
-        "hooks": [{ "type": "command", "command": "~/.claude/hooks/copydesk/gate.sh" }]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [{ "type": "command", "command": "~/.claude/hooks/copydesk/reminder.sh" }]
-      }
-    ]
-  }
-}
-```
-
-`PreToolUse` is the gate that refuses writes. `UserPromptSubmit` is the 49-word précis that shapes the model before it writes anything, and it is the half that prevents rather than corrects.
-
-Run `copydesk doctor` afterwards to confirm both are live.
-
-Two things are worth knowing before you turn it on.
-
-**The rules file must travel with `linter.py`.** The linter compiles its rules at import. A copy without one reports `PresetNotFound` and stops checking, rather than silently passing everything.
-
-**The gate fails open, by design.** A malformed payload, an unreadable config or an internal error lets the write through and prints why. A hook that blocks your work because of its own misconfiguration is worse than no hook, so CopyDesk never does that. It is a writing-quality gate, not a security control.
+|---|---|
+| `0` | Clean, or warnings only |
+| `1` | Blocking prose findings |
+| `2` | Hook blocked a write |
+| `64` | Usage error |
+| `70` | Internal error (fails open for git commits) |
 
 ## Configuration
 
-Configuration is optional. With none, the built-in `plain-english` preset applies.
+Configuration is optional. By default, the `plain` preset applies.
 
-Two files are discovered and merged, rather than one overriding the other: a user file at `$XDG_CONFIG_HOME/copydesk/config.json`, and the nearest `copydesk.config.json` found walking up from the document being checked.
+CopyDesk merges configuration across three locations:
+
+| Layer | Path | Purpose |
+|---|---|---|
+| User | `~/.config/copydesk/config.json` | Personal defaults |
+| Project | `copydesk.config.json` | Repository standards |
+| Local | `copydesk.local.json` | Local overrides |
+
+JSON with comments (JSONC) is supported.
 
 ```json
 {
+  "$schema": "https://raw.githubusercontent.com/carlosboeing/copydesk/v0/copydesk.schema.json",
   "version": 1,
-  "extends": "plain-english",
+  "channels": {
+    "chat": { "style": "plain", "verbosity": "low" },
+    "documents": { "style": "engineer" }
+  },
+  "paths": {
+    "ignore": [".workbench/**", "drafts/**"],
+    "warn": ["CHANGELOG.md"]
+  },
   "rules": {
     "sentence-length": { "severity": "warn", "max": 30 },
-    "banned-word": { "add": ["synergy"], "remove": ["robust"] },
-    "unglossed-term": { "vocabulary": { "add": ["React", "Postgres"] } },
-    "nested-table": { "severity": "off" }
+    "banned-word": { "add": ["synergy"], "remove": ["solid"] },
+    "unglossed-term": { "add": ["React", "Postgres"] }
   }
 }
 ```
 
-Every rule takes a `severity` of `error`, `warn` or `off`. Word lists take `add` and `remove` rather than replacement, so extending a preset never means restating it.
-
-The project file wins over the user file. Your personal vocabulary should not quietly loosen the standard a repository publishes under.
-
-Full detail, including every error case, is in [docs/configuration.md](docs/configuration.md).
+Full details are in [docs/configuration.md](docs/configuration.md).
 
 ## Rules
 
-15 rules in three groups.
+15 rules across three groups:
 
-| Group | Example | How you change it |
-|---|---|---|
-| **Pattern** | `banned-word`, `idiom`, `soft-offer` | data — add and remove words |
-| **Metric** | `sentence-length`, `paragraph-length` | code with exposed thresholds |
-| **Structural** | `nested-table` | on or off |
+| Group | Rules |
+|---|---|
+| Pattern | `banned-word`, `idiom`, `soft-offer`, `announcing-opener`, `contrast-construction`, `orphan-pointer`, `verb-jargon` |
+| Metric | `sentence-length`, `paragraph-length`, `avg-sentence-length`, `long-sentence-rate`, `sentence-variation`, `list-dominated`, `unglossed-term` |
+| Structural | `nested-table` |
 
-Pattern rules live as data in `rules/plain-english.json`. Their shape deliberately matches Vale's `existence` check, which keeps a Vale importer cheap to build later. A token is an ordinary word, so adding one needs no regular expressions.
+Every rule and parameter is documented in [docs/rules.md](docs/rules.md).
 
-The rule worth singling out is **`unglossed-term`**. It flags a capitalised term the first time it appears with no gloss nearby, which is the failure a phrase-matching rule cannot see: the reader meets a name they have not been told the meaning of.
+## Setting up the gate by hand
 
-Full detection needs named-entity recognition, which is far beyond a regex linter. The workable version is a vocabulary you maintain, in three layers, because scope is the whole problem. "React" needs no gloss anywhere. Your own product name needs none inside its own repository and needs one in a blog post.
+`copydesk setup` handles installation automatically. If you prefer manual setup for Claude Code:
 
-Every rule, parameter and default is listed in [docs/rules.md](docs/rules.md).
+1. Copy hooks and rules:
+   ```bash
+   mkdir -p ~/.claude/hooks/copydesk/rules ~/.claude/output-styles
+   cp hooks/gate.sh hooks/reminder.sh lib/linter.py ~/.claude/hooks/copydesk/
+   cp rules/plain.json ~/.claude/hooks/copydesk/rules/
+   chmod +x ~/.claude/hooks/copydesk/gate.sh ~/.claude/hooks/copydesk/reminder.sh
+   ```
+
+2. Register in `~/.claude/settings.json`:
+   ```json
+   {
+     "hooks": {
+       "PreToolUse": [
+         {
+           "matcher": "Write|Edit",
+           "hooks": [{ "type": "command", "command": "~/.claude/hooks/copydesk/gate.sh" }]
+         }
+       ],
+       "UserPromptSubmit": [
+         {
+           "hooks": [{ "type": "command", "command": "~/.claude/hooks/copydesk/reminder.sh" }]
+         }
+       ]
+     }
+   }
+   ```
+
+3. Run `copydesk doctor` to verify registration.
 
 ## How it compares
 
-Correction gets more expensive as you move down this table.
-
 | When | What happens | Who is there |
 |---|---|---|
-| Before generation | Rules enter the model's context, so the text is never produced | **CopyDesk** |
-| At write time | The write is refused and the model must revise | **CopyDesk** |
-| After the file is saved | The file is scored and a fix requested | sloptrim |
+| Before generation | Instructions enter the model context | **CopyDesk** |
+| At write time | The write is refused | **CopyDesk** |
+| After the file is saved | The file is scored | sloptrim |
 | In continuous integration | The build reports or fails | Vale |
 
-The claim is about position, not about rule quality. Nobody else is standing in the first two rows.
+Where CopyDesk differs:
 
-**Where CopyDesk is behind**, and it is worth knowing before you install it:
-
-- **Vale** has eleven rule extension points, markup-aware parsing across four markup languages, official Microsoft and Google style guide rule sets, and editor integrations. CopyDesk has none of that.
-- **sloptrim** reads more than 20 file formats including `.docx` and `.epub`, against Markdown alone here. Its 0-100 score also reads more clearly to a newcomer than a pass-or-fail list.
-- On raw pattern count the three are comparable: sloptrim carries 71 patterns, CopyDesk 67 tokens across 7 pattern rules.
-
-CopyDesk will not win on breadth and does not try. Use Vale for a style guide in continuous integration. Use CopyDesk for the agent writing the text in the first place. They are not competing for the same slot.
+| Tool | Differences |
+|---|---|
+| **Vale** | Markup-aware parsing, official style packages, and editor integrations. |
+| **sloptrim** | Supports 20+ document formats and calculates holistic scores. |
+| **CopyDesk** | Real-time latency with zero runtime dependencies and fail-open guarantees. |
 
 ## Evidence
 
-Most claims about AI writing quality come with no numbers and no way to check them. These come with both, and the measurement scripts ship in `eval/`.
-
-- **[Observational baseline](docs/evidence/observational-baseline.md)** — 1,556,107 words of chat and 626,153 words of Markdown from real sessions. It breaks the rate down per rule, and includes a control run that removes the sessions which designed the rules.
-- **[Gate baseline](docs/evidence/baseline-results.md)** — two continuous ten-turn sessions recording model, effort, approval mode and a pinned target commit, measuring whether style decays across a long session. It does, and partially recovers.
+- **[Observational baseline](docs/evidence/observational-baseline.md)**: Analysis across 1,556,107 words of chat and 626,153 words of Markdown.
+- **[Gate baseline](docs/evidence/baseline-results.md)**: Multi-turn session evaluations tracking rule enforcement and instruction decay over time.
 
 ## Project status
 
-**`0.1.0`, pre-1.0 and in daily use by its author.** Expect the rules to be opinionated and the harness coverage to be thin. The command-line interface, the config schema and the rule identifiers are already frozen. A config you write today keeps working.
+**`0.2.0`, pre-1.0.** The CLI commands, config schema, rule identifiers, and channel definitions are stable.
 
-`1.0.0` is gated on one verifiable item rather than a date: a TypeScript implementation passing the Python test suite through `bin/copydesk`. The [roadmap](docs/ROADMAP.md) covers what comes between, and [CHANGELOG.md](CHANGELOG.md) covers what has shipped.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for future plans and [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Contributing
 
-Issues and pull requests are welcome. The most useful contributions right now are bug reports with a document that reproduces the problem, and disagreements with a rule.
-
-A rule that costs more than it catches is a defect. If something fires on prose you believe is fine, open an issue with the sentence.
-
-```bash
-python3 -m unittest discover tests/
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the test suite, the pre-commit hook and how to propose a rule change.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for test execution and contribution guidelines.
 
 ## Security
 
-CopyDesk makes no network calls, and document content never leaves your machine. Telemetry is written locally and can be reduced or disabled with `COPYDESK_LOG_FLAGGED_TEXT=0` and `COPYDESK_LOG=0`.
-
-To report a vulnerability, see [SECURITY.md](SECURITY.md).
+CopyDesk runs locally and makes no outbound network connections. Document contents never leave your machine. See [SECURITY.md](SECURITY.md).
 
 ## Licence and credits
 
 MIT. See [LICENSE](LICENSE).
 
-`lib/linter.py` is vendored and adapted from [`AminBlg/SimpleEnglish`](https://github.com/AminBlg/SimpleEnglish), also MIT. Its whitespace tokenizer, sentence splitter and exclusion approach are the foundation this is built on; the full notice travels in the file and in [LICENSE](LICENSE).
-
-The casing convention comes from [CrossRev's ADR 0010](https://github.com/carlosboeing/crossrev/blob/main/docs/adrs/0010-name-crossrev.md), adopted unchanged.
+`lib/linter.py` is adapted from [`AminBlg/SimpleEnglish`](https://github.com/AminBlg/SimpleEnglish) (MIT).

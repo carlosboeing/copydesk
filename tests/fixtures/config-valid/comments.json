@@ -1,0 +1,11 @@
+// CopyDesk configuration with comments
+{
+  /* Required version */
+  "version": 1,
+  "channels": {
+    "chat": {
+      // Style setting
+      "style": "editorial"
+    }
+  }
+}

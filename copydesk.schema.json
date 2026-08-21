@@ -1,0 +1,850 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://json.schemastore.org/copydesk.config.json",
+  "title": "CopyDesk configuration",
+  "type": "object",
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "The config schema version. Required."
+    },
+    "channels": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How each kind of writing reads.",
+      "properties": {
+        "chat": {
+          "type": "object",
+          "description": "Settings for the chat channel.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether this channel's instructions and gate coverage apply.",
+              "default": true
+            },
+            "style": {
+              "type": "string",
+              "enum": [
+                "plain",
+                "general",
+                "engineer",
+                "editorial"
+              ],
+              "description": "How writing in this channel reads.",
+              "default": "plain"
+            },
+            "verbosity": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "description": "How much this channel says."
+            },
+            "guidance": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Deliverables a reply in this channel must contain.",
+              "properties": {
+                "recommendations": {
+                  "type": "boolean",
+                  "description": "When a question or a choice is open, give a proposed answer and one reason for it. Never present the options and stop there."
+                },
+                "direction": {
+                  "type": "boolean",
+                  "description": "When work continues past this reply, name the next step. Do not end on a step you are about to take yourself."
+                },
+                "progress": {
+                  "type": "boolean",
+                  "description": "When a task spans turns, state position in one line, as in step 3 of 5, next is the backfill. Never list work already done."
+                },
+                "pushback": {
+                  "type": "boolean",
+                  "description": "Before agreeing with a premise that was challenged, give the strongest counter-argument you can, or say there is no counter-case."
+                },
+                "alternatives": {
+                  "type": "boolean",
+                  "description": "When you propose a solution, rank the alternatives with one line of trade-off each, and put the one you pick first."
+                },
+                "assumptions": {
+                  "type": "boolean",
+                  "description": "When you act under ambiguity, state the assumption you are acting on before the work, not after it."
+                },
+                "estimates": {
+                  "type": "boolean",
+                  "description": "Give an estimate in concrete units, as in about 15 minutes if tests cover this, an afternoon if not. Never say some work."
+                },
+                "sources": {
+                  "type": "boolean",
+                  "description": "Put the source beside a factual claim: file and line for code, a link for the web. A claim with no source is a guess."
+                },
+                "summary": {
+                  "type": "boolean",
+                  "description": "When a document runs long, open it with a three-sentence abstract saying what it is, what it decides, and who it is for."
+                },
+                "verification": {
+                  "type": "boolean",
+                  "description": "When you claim something is done or working, say how you verified it, or say untested. Never let the claim stand alone."
+                }
+              }
+            },
+            "match": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Globs assigning files to this channel."
+            }
+          }
+        },
+        "documents": {
+          "type": "object",
+          "description": "Settings for the documents channel.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether this channel's instructions and gate coverage apply.",
+              "default": true
+            },
+            "style": {
+              "type": "string",
+              "enum": [
+                "plain",
+                "general",
+                "engineer",
+                "editorial"
+              ],
+              "description": "How writing in this channel reads.",
+              "default": "plain"
+            },
+            "verbosity": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "description": "How much this channel says."
+            },
+            "guidance": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Deliverables a reply in this channel must contain.",
+              "properties": {
+                "recommendations": {
+                  "type": "boolean",
+                  "description": "When a question or a choice is open, give a proposed answer and one reason for it. Never present the options and stop there."
+                },
+                "direction": {
+                  "type": "boolean",
+                  "description": "When work continues past this reply, name the next step. Do not end on a step you are about to take yourself."
+                },
+                "progress": {
+                  "type": "boolean",
+                  "description": "When a task spans turns, state position in one line, as in step 3 of 5, next is the backfill. Never list work already done."
+                },
+                "pushback": {
+                  "type": "boolean",
+                  "description": "Before agreeing with a premise that was challenged, give the strongest counter-argument you can, or say there is no counter-case."
+                },
+                "alternatives": {
+                  "type": "boolean",
+                  "description": "When you propose a solution, rank the alternatives with one line of trade-off each, and put the one you pick first."
+                },
+                "assumptions": {
+                  "type": "boolean",
+                  "description": "When you act under ambiguity, state the assumption you are acting on before the work, not after it."
+                },
+                "estimates": {
+                  "type": "boolean",
+                  "description": "Give an estimate in concrete units, as in about 15 minutes if tests cover this, an afternoon if not. Never say some work."
+                },
+                "sources": {
+                  "type": "boolean",
+                  "description": "Put the source beside a factual claim: file and line for code, a link for the web. A claim with no source is a guess."
+                },
+                "summary": {
+                  "type": "boolean",
+                  "description": "When a document runs long, open it with a three-sentence abstract saying what it is, what it decides, and who it is for."
+                },
+                "verification": {
+                  "type": "boolean",
+                  "description": "When you claim something is done or working, say how you verified it, or say untested. Never let the claim stand alone."
+                }
+              }
+            },
+            "match": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Globs assigning files to this channel."
+            }
+          }
+        },
+        "commits": {
+          "type": "object",
+          "description": "Settings for the commits channel.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether this channel's instructions and gate coverage apply.",
+              "default": true
+            },
+            "style": {
+              "type": "string",
+              "enum": [
+                "plain",
+                "general",
+                "engineer",
+                "editorial"
+              ],
+              "description": "How writing in this channel reads.",
+              "default": "plain"
+            },
+            "verbosity": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "description": "How much this channel says."
+            },
+            "guidance": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Deliverables a reply in this channel must contain.",
+              "properties": {
+                "recommendations": {
+                  "type": "boolean",
+                  "description": "When a question or a choice is open, give a proposed answer and one reason for it. Never present the options and stop there."
+                },
+                "direction": {
+                  "type": "boolean",
+                  "description": "When work continues past this reply, name the next step. Do not end on a step you are about to take yourself."
+                },
+                "progress": {
+                  "type": "boolean",
+                  "description": "When a task spans turns, state position in one line, as in step 3 of 5, next is the backfill. Never list work already done."
+                },
+                "pushback": {
+                  "type": "boolean",
+                  "description": "Before agreeing with a premise that was challenged, give the strongest counter-argument you can, or say there is no counter-case."
+                },
+                "alternatives": {
+                  "type": "boolean",
+                  "description": "When you propose a solution, rank the alternatives with one line of trade-off each, and put the one you pick first."
+                },
+                "assumptions": {
+                  "type": "boolean",
+                  "description": "When you act under ambiguity, state the assumption you are acting on before the work, not after it."
+                },
+                "estimates": {
+                  "type": "boolean",
+                  "description": "Give an estimate in concrete units, as in about 15 minutes if tests cover this, an afternoon if not. Never say some work."
+                },
+                "sources": {
+                  "type": "boolean",
+                  "description": "Put the source beside a factual claim: file and line for code, a link for the web. A claim with no source is a guess."
+                },
+                "summary": {
+                  "type": "boolean",
+                  "description": "When a document runs long, open it with a three-sentence abstract saying what it is, what it decides, and who it is for."
+                },
+                "verification": {
+                  "type": "boolean",
+                  "description": "When you claim something is done or working, say how you verified it, or say untested. Never let the claim stand alone."
+                }
+              }
+            },
+            "match": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Globs assigning files to this channel."
+            }
+          }
+        },
+        "reviews": {
+          "type": "object",
+          "description": "Settings for the reviews channel.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether this channel's instructions and gate coverage apply.",
+              "default": true
+            },
+            "style": {
+              "type": "string",
+              "enum": [
+                "plain",
+                "general",
+                "engineer",
+                "editorial"
+              ],
+              "description": "How writing in this channel reads.",
+              "default": "plain"
+            },
+            "verbosity": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "description": "How much this channel says."
+            },
+            "guidance": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Deliverables a reply in this channel must contain.",
+              "properties": {
+                "recommendations": {
+                  "type": "boolean",
+                  "description": "When a question or a choice is open, give a proposed answer and one reason for it. Never present the options and stop there."
+                },
+                "direction": {
+                  "type": "boolean",
+                  "description": "When work continues past this reply, name the next step. Do not end on a step you are about to take yourself."
+                },
+                "progress": {
+                  "type": "boolean",
+                  "description": "When a task spans turns, state position in one line, as in step 3 of 5, next is the backfill. Never list work already done."
+                },
+                "pushback": {
+                  "type": "boolean",
+                  "description": "Before agreeing with a premise that was challenged, give the strongest counter-argument you can, or say there is no counter-case."
+                },
+                "alternatives": {
+                  "type": "boolean",
+                  "description": "When you propose a solution, rank the alternatives with one line of trade-off each, and put the one you pick first."
+                },
+                "assumptions": {
+                  "type": "boolean",
+                  "description": "When you act under ambiguity, state the assumption you are acting on before the work, not after it."
+                },
+                "estimates": {
+                  "type": "boolean",
+                  "description": "Give an estimate in concrete units, as in about 15 minutes if tests cover this, an afternoon if not. Never say some work."
+                },
+                "sources": {
+                  "type": "boolean",
+                  "description": "Put the source beside a factual claim: file and line for code, a link for the web. A claim with no source is a guess."
+                },
+                "summary": {
+                  "type": "boolean",
+                  "description": "When a document runs long, open it with a three-sentence abstract saying what it is, what it decides, and who it is for."
+                },
+                "verification": {
+                  "type": "boolean",
+                  "description": "When you claim something is done or working, say how you verified it, or say untested. Never let the claim stand alone."
+                }
+              }
+            },
+            "match": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Globs assigning files to this channel."
+            }
+          }
+        }
+      }
+    },
+    "agents": {
+      "type": "array",
+      "description": "Which AI tools CopyDesk sets up.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "antigravity",
+          "claude-code",
+          "codex",
+          "cursor",
+          "git",
+          "grok",
+          "kimi",
+          "opencode"
+        ]
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Which files the gate judges.",
+      "properties": {
+        "ignore": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Gitignore-style globs to ignore. A leading ! re-includes."
+        },
+        "warn": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Gitignore-style globs to warn. A leading ! re-includes."
+        },
+        "block": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Gitignore-style globs to block. A leading ! re-includes."
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Gate behaviour.",
+      "properties": {
+        "retries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "default": 3,
+          "description": "How many refusals before the gate lets the write through."
+        }
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-rule severity, word lists and thresholds.",
+      "properties": {
+        "announcing-opener": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the announcing-opener rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "add": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries added to announcing-opener's word list."
+            },
+            "remove": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries removed from announcing-opener's word list."
+            }
+          }
+        },
+        "avg-sentence-length": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the avg-sentence-length rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "min": {
+              "type": "integer",
+              "description": "avg-sentence-length threshold: min."
+            },
+            "max": {
+              "type": "integer",
+              "description": "avg-sentence-length threshold: max."
+            }
+          }
+        },
+        "banned-word": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the banned-word rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "add": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries added to banned-word's word list."
+            },
+            "remove": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries removed from banned-word's word list."
+            }
+          }
+        },
+        "contrast-construction": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the contrast-construction rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "add": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries added to contrast-construction's word list."
+            },
+            "remove": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries removed from contrast-construction's word list."
+            }
+          }
+        },
+        "idiom": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the idiom rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "add": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries added to idiom's word list."
+            },
+            "remove": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries removed from idiom's word list."
+            }
+          }
+        },
+        "list-dominated": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the list-dominated rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "exemptionRatio": {
+              "type": "number",
+              "description": "list-dominated threshold: exemptionRatio."
+            }
+          }
+        },
+        "long-sentence-rate": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the long-sentence-rate rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "maxRate": {
+              "type": "number",
+              "description": "long-sentence-rate threshold: maxRate."
+            }
+          }
+        },
+        "nested-table": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the nested-table rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            }
+          }
+        },
+        "orphan-pointer": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the orphan-pointer rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "add": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries added to orphan-pointer's word list."
+            },
+            "remove": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries removed from orphan-pointer's word list."
+            }
+          }
+        },
+        "paragraph-length": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the paragraph-length rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "maxSentences": {
+              "type": "integer",
+              "description": "paragraph-length threshold: maxSentences."
+            }
+          }
+        },
+        "sentence-length": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the sentence-length rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "max": {
+              "type": "integer",
+              "description": "sentence-length threshold: max."
+            },
+            "hardMax": {
+              "type": "integer",
+              "description": "sentence-length threshold: hardMax."
+            }
+          }
+        },
+        "sentence-variation": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the sentence-variation rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "minStdev": {
+              "type": "number",
+              "description": "sentence-variation threshold: minStdev."
+            }
+          }
+        },
+        "soft-offer": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the soft-offer rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "add": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries added to soft-offer's word list."
+            },
+            "remove": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries removed from soft-offer's word list."
+            }
+          }
+        },
+        "unglossed-term": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the unglossed-term rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "add": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries added to unglossed-term's word list."
+            },
+            "remove": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries removed from unglossed-term's word list."
+            }
+          }
+        },
+        "verb-jargon": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the verb-jargon rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "add": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries added to verb-jargon's word list."
+            },
+            "remove": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Entries removed from verb-jargon's word list."
+            }
+          }
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What CopyDesk records locally.",
+      "properties": {
+        "events": {
+          "type": "boolean",
+          "default": true,
+          "description": "Record one event per check."
+        },
+        "saveText": {
+          "type": "boolean",
+          "default": false,
+          "description": "Store the flagged text beside the event."
+        }
+      }
+    },
+    "extends": {
+      "description": "Advanced: a custom preset chain.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    }
+  }
+}

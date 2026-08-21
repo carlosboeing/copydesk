@@ -8,6 +8,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -203,7 +204,7 @@ class CascadeTests(unittest.TestCase):
 
     def test_word_lists_merge_rather_than_replace(self) -> None:
         """Replacement would make extending a preset require restating it."""
-        baseline = self.tokens_for(config.load_preset_document(RULES_DIR, "plain-english"), "banned-word")
+        baseline = self.tokens_for(config.load_preset_document(RULES_DIR, "plain"), "banned-word")
         project = write_json(
             self.root / "copydesk.config.json",
             {"version": 1, "rules": {"banned-word": {"add": ["synergy"]}}},
@@ -216,11 +217,11 @@ class CascadeTests(unittest.TestCase):
             self.assertIn(token, tokens)
 
     def test_extends_accepts_a_string_and_an_array(self) -> None:
-        for value in ("plain-english", ["plain-english"]):
+        for value in ("plain", ["plain"]):
             with self.subTest(extends=value):
                 project = write_json(self.root / "copydesk.config.json", {"version": 1, "extends": value})
                 resolved = config.resolve(RULES_DIR, self.document, user_path=None, project_path=project)
-                self.assertEqual(resolved["id"], "plain-english")
+                self.assertEqual(resolved["id"], "plain")
 
     def test_severity_off_removes_the_rule_from_compilation(self) -> None:
         project = write_json(
@@ -286,5 +287,229 @@ class FailOpenTests(unittest.TestCase):
         self.assertGreaterEqual(first, 1)
 
 
+class LocalLayerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root)
+
+    def _write(self, name: str, body: str) -> Path:
+        path = self.root / name
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_the_local_file_wins_over_the_project_file(self) -> None:
+        self._write("copydesk.config.json", '{"version": 1, "gate": {"retries": 2}}')
+        self._write("copydesk.local.json", '{"version": 1, "gate": {"retries": 5}}')
+        doc = self.root / "doc.md"
+        doc.write_text("text\n", encoding="utf-8")
+        resolved = config.resolve(RULES_DIR, doc, user_path=None)
+        self.assertEqual(resolved["gate"]["retries"], 5)
+
+    def test_a_local_file_alone_is_discovered(self) -> None:
+        self._write("copydesk.local.json", '{"version": 1, "gate": {"retries": 4}}')
+        doc = self.root / "doc.md"
+        doc.write_text("text\n", encoding="utf-8")
+        self.assertEqual(config.local_config_path(doc), self.root / "copydesk.local.json")
+
+    def test_a_personal_key_in_a_project_file_is_ignored_and_named(self) -> None:
+        self._write(
+            "copydesk.config.json",
+            '{"version": 1, "channels": {"chat": {"verbosity": "high"}}, "agents": ["codex"]}',
+        )
+        doc = self.root / "doc.md"
+        doc.write_text("text\n", encoding="utf-8")
+        resolved = config.resolve(RULES_DIR, doc, user_path=None)
+        joined = " ".join(resolved["warnings"])
+        self.assertIn("copydesk.config.json", joined)
+        self.assertIn("channels.chat", joined)
+        self.assertIn("agents", joined)
+        self.assertEqual(resolved["channels"]["chat"]["verbosity"], "low")
+
+    def test_the_same_personal_key_in_a_local_file_is_kept(self) -> None:
+        self._write("copydesk.local.json", '{"version": 1, "agents": ["codex"]}')
+        doc = self.root / "doc.md"
+        doc.write_text("text\n", encoding="utf-8")
+        resolved = config.resolve(RULES_DIR, doc, user_path=None)
+        self.assertEqual(resolved["agents"], ["codex"])
+        self.assertEqual(resolved["warnings"], [])
+
+    def test_comments_in_a_config_file_load(self) -> None:
+        self._write(
+            "copydesk.config.json",
+            '{\n  "version": 1,  // required\n  "gate": {"retries": 2}\n}',
+        )
+        doc = self.root / "doc.md"
+        doc.write_text("text\n", encoding="utf-8")
+        self.assertEqual(config.resolve(RULES_DIR, doc, user_path=None)["gate"]["retries"], 2)
+
+
+class EffectivePresetTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.doc = self.root / "doc.md"
+        self.doc.write_text("This approach is robust.\n", encoding="utf-8")
+        linter._PRESET_CACHE.clear()
+
+    def test_a_local_only_file_reaches_the_linter(self) -> None:
+        (self.root / "copydesk.local.json").write_text(
+            '{"version": 1, "rules": {"banned-word": {"remove": ["robust"]}}}', encoding="utf-8"
+        )
+        findings = linter.lint(self.doc.read_text(encoding="utf-8"), path=self.doc)
+        self.assertNotIn("banned-word", [f.check for f in findings])
+
+    def test_editing_the_local_file_invalidates_the_cache(self) -> None:
+        local = self.root / "copydesk.local.json"
+        local.write_text('{"version": 1}', encoding="utf-8")
+        self.assertIn("banned-word", [f.check for f in linter.lint("This is robust.\n", path=self.doc)])
+        os.utime(local, (time.time() + 2, time.time() + 2))
+        local.write_text(
+            '{"version": 1, "rules": {"banned-word": {"remove": ["robust"]}}}', encoding="utf-8"
+        )
+        self.assertNotIn("banned-word", [f.check for f in linter.lint("This is robust.\n", path=self.doc)])
+
+
+class ChannelTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.doc = self.root / "doc.md"
+        self.doc.write_text("text\n", encoding="utf-8")
+
+    def _project(self, body: str) -> None:
+        (self.root / "copydesk.config.json").write_text(body, encoding="utf-8")
+
+    def test_the_four_channels_carry_their_defaults(self) -> None:
+        resolved = config.resolve(RULES_DIR, self.doc, user_path=None)
+        channels = resolved["channels"]
+        self.assertEqual(sorted(channels), ["chat", "commits", "documents", "reviews"])
+        self.assertEqual(channels["chat"]["verbosity"], "low")
+        self.assertEqual(channels["documents"]["verbosity"], "high")
+        self.assertEqual(channels["commits"]["style"], "engineer")
+        self.assertFalse(channels["reviews"]["enabled"])
+        self.assertTrue(channels["chat"]["enabled"])
+
+    def test_a_channel_setting_replaces_rather_than_merges(self) -> None:
+        self._project('{"version": 1, "channels": {"documents": {"style": "editorial"}}}')
+        resolved = config.resolve(RULES_DIR, self.doc, user_path=None)
+        self.assertEqual(resolved["channels"]["documents"]["style"], "editorial")
+        self.assertEqual(resolved["channels"]["documents"]["verbosity"], "high")
+
+    def test_guidance_booleans_merge_key_by_key(self) -> None:
+        self._project('{"version": 1, "channels": {"documents": {"guidance": {"sources": true}}}}')
+        guidance = config.resolve(RULES_DIR, self.doc, user_path=None)["channels"]["documents"]["guidance"]
+        self.assertTrue(guidance["sources"])
+        self.assertTrue(guidance["recommendations"])
+
+    def test_agents_replaces_wholesale(self) -> None:
+        (self.root / "copydesk.local.json").write_text(
+            '{"version": 1, "agents": ["codex"]}', encoding="utf-8"
+        )
+        self.assertEqual(config.resolve(RULES_DIR, self.doc, user_path=None)["agents"], ["codex"])
+
+    def test_match_globs_replace_wholesale(self) -> None:
+        self._project('{"version": 1, "channels": {"reviews": {"match": ["**/pr-body.md"]}}}')
+        reviews = config.resolve(RULES_DIR, self.doc, user_path=None)["channels"]["reviews"]
+        self.assertEqual(reviews["match"], ["**/pr-body.md"])
+
+    def test_an_unknown_channel_is_reported_never_fatal(self) -> None:
+        self._project('{"version": 1, "channels": {"emails": {"style": "plain"}}}')
+        resolved = config.resolve(RULES_DIR, self.doc, user_path=None)
+        self.assertIn("emails", " ".join(resolved["warnings"]))
+        self.assertNotIn("emails", resolved["channels"])
+
+    def test_every_value_records_the_file_that_set_it(self) -> None:
+        self._project('{"version": 1, "channels": {"documents": {"style": "editorial"}}}')
+        resolved = config.resolve(RULES_DIR, self.doc, user_path=None)
+        self.assertEqual(
+            resolved["provenance"]["channels.documents.style"],
+            str(self.root / "copydesk.config.json"),
+        )
+        self.assertEqual(resolved["provenance"]["channels.documents.verbosity"], "built-in")
+
+    def test_a_document_is_linted_under_its_channel_style(self) -> None:
+        (self.root / "copydesk.config.json").write_text(
+            '{"version": 1, "channels": {"documents": {"style": "engineer"}}}', encoding="utf-8"
+        )
+        doc = self.root / "doc.md"
+        body = "The deployment pipeline runs a build step and then a test step and then a publish step here and then it deploys.\n"
+        doc.write_text(body, encoding="utf-8")
+        linter._PRESET_CACHE.clear()
+        self.assertIn("sentence-length", [f.check for f in linter.lint(body, path=doc)])
+
+    def test_a_reviews_file_is_linted_under_the_reviews_style(self) -> None:
+        (self.root / "copydesk.config.json").write_text(
+            '{"version": 1, "channels": {"reviews": {"enabled": true, "style": "engineer",'
+            ' "match": ["**/pr-body.md"]}}}', encoding="utf-8"
+        )
+        doc = self.root / "pr-body.md"
+        doc.write_text("x\n", encoding="utf-8")
+        linter._PRESET_CACHE.clear()
+        resolved, _ = linter.effective_preset(doc)
+        # Assert the effective threshold, not the preset id or the source
+        # list: merging a style changes neither, so a correct implementation
+        # would fail an assertion on those.
+        self.assertEqual(resolved["rules"]["sentence-length"]["hardMax"], 25)
+        self.assertEqual(resolved["provenance"]["channels.reviews.style"],
+                         str(self.root / "copydesk.config.json"))
+
+    def test_a_documents_file_keeps_the_plain_threshold(self) -> None:
+        # The control for the test above. Without it, 25 could be the default.
+        (self.root / "copydesk.config.json").write_text('{"version": 1}', encoding="utf-8")
+        doc = self.root / "doc.md"
+        doc.write_text("x\n", encoding="utf-8")
+        linter._PRESET_CACHE.clear()
+        resolved, _ = linter.effective_preset(doc)
+        self.assertEqual(resolved["rules"]["sentence-length"]["hardMax"], 40)
+
+
+class RetryLimitTests(unittest.TestCase):
+    def test_the_configured_retry_limit_is_used(self) -> None:
+        resolved = {"gate": {"retries": 5}}
+        self.assertEqual(linter._retry_limit(resolved), 5)
+
+    def test_the_default_is_three(self) -> None:
+        self.assertEqual(linter._retry_limit({}), linter.RETRY_LIMIT)
+
+    def test_a_value_outside_one_to_five_falls_back(self) -> None:
+        self.assertEqual(linter._retry_limit({"gate": {"retries": 99}}), linter.RETRY_LIMIT)
+        self.assertEqual(linter._retry_limit({"gate": {"retries": 0}}), linter.RETRY_LIMIT)
+
+
+class RuleValidationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def _write(self, content: str) -> Path:
+        p = self.tmp / "copydesk.config.json"
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def test_an_unknown_threshold_is_refused(self) -> None:
+        with self.assertRaises(config.ConfigError) as caught:
+            config.resolve(RULES_DIR, None, user_path=self._write('{"version": 1, "rules": {"sentence-length": {"maxx": 5}}}'))
+        self.assertIn("maxx", str(caught.exception))
+        self.assertIn("hardMax", str(caught.exception))
+
+    def test_a_threshold_from_another_rule_is_refused(self) -> None:
+        with self.assertRaises(config.ConfigError):
+            config.resolve(RULES_DIR, None, user_path=self._write('{"version": 1, "rules": {"sentence-length": {"minStdev": 4}}}'))
+
+    def test_an_unknown_rule_is_refused(self) -> None:
+        with self.assertRaises(config.ConfigError) as caught:
+            config.resolve(RULES_DIR, None, user_path=self._write('{"version": 1, "rules": {"nonexistent": {"severity": "error"}}}'))
+        self.assertIn("nonexistent", str(caught.exception))
+
+    def test_wrong_type_threshold_is_refused(self) -> None:
+        with self.assertRaises(config.ConfigError):
+            config.resolve(RULES_DIR, None, user_path=self._write('{"version": 1, "rules": {"sentence-length": {"max": "five"}}}'))
+
+    def test_boolean_for_integer_threshold_is_refused(self) -> None:
+        with self.assertRaises(config.ConfigError):
+            config.resolve(RULES_DIR, None, user_path=self._write('{"version": 1, "rules": {"sentence-length": {"max": true}}}'))
+
+
 if __name__ == "__main__":
     unittest.main()
+

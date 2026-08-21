@@ -16,6 +16,9 @@ fi
 
 if [[ -n "$LINTER" ]] && command -v python3 >/dev/null 2>&1; then
   python3 "$LINTER" --turn >/dev/null 2>&1 || true
+  if python3 "$LINTER" --reminder 2>/dev/null; then
+    exit 0
+  fi
 fi
 
 cat << 'EOF'

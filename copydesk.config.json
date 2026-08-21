@@ -1,78 +1,65 @@
 {
   "version": 1,
-  "extends": "plain-english",
+  "extends": "plain",
+  "paths": {
+    "warn": [
+      "CHANGELOG.md",
+      "CONTRIBUTING.md",
+      "docs/adrs/*.md",
+      "docs/evidence/*.md",
+      "docs/releasing.md"
+    ]
+  },
   "rules": {
     "unglossed-term": {
-      "vocabulary": {
-        "add": [
-          "ADR",
-          "Agy",
-          "Anthropic",
-          "Antigravity",
-          "CHANGELOG.md",
-          "CONTRIBUTING.md",
-          "Claude",
-          "Codex",
-          "Context7",
-          "CopyDesk",
-          "CrossRev",
-          "Cursor",
-          "Fathom",
-          "Gemini",
-          "Grok",
-          "Headroom",
-          "Kimi",
-          "LICENSE",
-          "Ollama",
-          "Opus",
-          "Penmark",
-          "Playwright",
-          "README.md",
-          "ROADMAP.md",
-          "RTK",
-          "SECURITY.md",
-          "SKILL.md",
-          "Superpowers",
-          "WebBridge"
-        ],
-        "rationale": {
-          "harnesses, models and vendors this repository names constantly": [
-            "Agy",
-            "Anthropic",
-            "Antigravity",
-            "Claude",
-            "Codex",
-            "Cursor",
-            "Gemini",
-            "Grok",
-            "Kimi",
-            "Ollama",
-            "Opus"
-          ],
-          "the author's own projects and the tools they run beside": [
-            "Context7",
-            "CopyDesk",
-            "CrossRev",
-            "Fathom",
-            "Headroom",
-            "Penmark",
-            "Playwright",
-            "RTK",
-            "Superpowers",
-            "WebBridge"
-          ],
-          "repository filenames this project names in prose and links": [
-            "ADR",
-            "CHANGELOG.md",
-            "CONTRIBUTING.md",
-            "LICENSE",
-            "README.md",
-            "ROADMAP.md",
-            "SECURITY.md",
-            "SKILL.md"
-          ]
-        }
-      }
+      "add": [
+        "ADR",
+        "Agy",
+        "Anthropic",
+        "Antigravity",
+        "August",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md",
+        "Changelog",
+        "Claude",
+        "Code",
+        "Codex",
+        "Context7",
+        "CopyDesk",
+        "CrossRev",
+        "Cursor",
+        "Docker",
+        "Fathom",
+        "Gemini",
+        "Go",
+        "Grok",
+        "Headroom",
+        "Homebrew",
+        "Hub",
+        "JSONC",
+        "Keep",
+        "Kimi",
+        "LICENSE",
+        "NuGet",
+        "OIDC",
+        "Ollama",
+        "OpenID",
+        "Opus",
+        "Penmark",
+        "Playwright",
+        "PyPI",
+        "README.md",
+        "ROADMAP.md",
+        "RTK",
+        "RubyGems",
+        "SECURITY.md",
+        "SKILL.md",
+        "Semantic",
+        "Superpowers",
+        "Vale",
+        "Versioning",
+        "WebBridge"
+      ]
     }
   }
 }

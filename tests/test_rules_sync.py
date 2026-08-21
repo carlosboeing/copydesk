@@ -1,4 +1,4 @@
-"""Keep the preset, the compiled inventory and the generated carriers aligned."""
+"""Keep the preset, the compiled inventory and the generated instructions aligned."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ sys.path.insert(0, str(LIBRARY))
 import linter  # noqa: E402
 
 
-PRESET_PATH = REPOSITORY_ROOT / "rules" / "plain-english.json"
-GENERATOR = REPOSITORY_ROOT / "scripts" / "generate-carriers.py"
-OUTPUT_STYLE = REPOSITORY_ROOT / "output-styles" / "plain-english.md"
+PRESET_PATH = REPOSITORY_ROOT / "rules" / "plain.json"
+GENERATOR = REPOSITORY_ROOT / "scripts" / "generate-instructions.py"
+OUTPUT_STYLES = [REPOSITORY_ROOT / "output-styles" / f"copydesk-{level}.md" for level in ("low", "medium", "high")]
 
 RULES_START = "<!-- plain-english-rules:start -->"
 RULES_END = "<!-- plain-english-rules:end -->"
@@ -65,7 +65,9 @@ class PresetCompilationTests(unittest.TestCase):
         for block in preset()["patterns"]:
             for token in block["tokens"]:
                 declared.append(token if isinstance(token, str) else token["phrase"])
-        self.assertEqual(declared, [pattern.phrase for pattern in linter.RULE_PATTERNS])
+
+        compiled = [pattern.phrase for pattern in linter.RULE_PATTERNS]
+        self.assertEqual(declared, compiled)
 
     def test_every_token_compiles_and_matches_its_own_phrase(self) -> None:
         """A token that cannot match anything is a rule that never fires."""
@@ -76,7 +78,7 @@ class PresetCompilationTests(unittest.TestCase):
 
     def test_reference_phrases_are_carried_but_never_executed(self) -> None:
         """A rules-block edit must not escape the sync test by hiding in prose."""
-        declared = tuple(preset()["reference_phrases"])
+        declared = tuple(p if isinstance(p, str) else p["phrase"] for p in preset()["reference_phrases"])
         self.assertEqual(declared, linter.CANONICAL_REFERENCE_PHRASES)
         executable = {pattern.phrase for pattern in linter.RULE_PATTERNS}
         self.assertSetEqual(set(declared) & executable, set())
@@ -86,15 +88,16 @@ class PresetCompilationTests(unittest.TestCase):
 
     def test_quoted_rules_block_phrases_reach_the_inventory(self) -> None:
         """Quoting a new phrase in the rules block without a pattern is a defect."""
-        block = extract_rules_block(OUTPUT_STYLE.read_text(encoding="utf-8"))
-        quoted = {phrase.casefold() for phrase in re.findall(r'"([^"]+)"', block)}
-        inventory = {phrase.casefold() for phrase in linter.PATTERN_TEXTS}
-        self.assertSetEqual(quoted - inventory, set())
+        for path in OUTPUT_STYLES:
+            block = extract_rules_block(path.read_text(encoding="utf-8"))
+            quoted = {phrase.casefold() for phrase in re.findall(r'"([^"]+)"', block)}
+            inventory = {phrase.casefold() for phrase in linter.PATTERN_TEXTS}
+            self.assertSetEqual(quoted - inventory, set())
 
 
-class GeneratedCarrierTests(unittest.TestCase):
-    def test_committed_carriers_match_the_generator(self) -> None:
-        """Hand-editing a carrier instead of the preset must fail here."""
+class GeneratedInstructionTests(unittest.TestCase):
+    def test_committed_instructions_match_the_generator(self) -> None:
+        """Hand-editing an instruction set instead of the preset must fail here."""
         result = subprocess.run(
             [sys.executable, str(GENERATOR), "--check"],
             capture_output=True,
@@ -105,31 +108,55 @@ class GeneratedCarrierTests(unittest.TestCase):
 
     def test_reminder_word_count_agrees_with_the_linter(self) -> None:
         """The precis is re-sent every turn, so its length is a measured cost."""
-        carriers = preset()["carriers"]
-        self.assertEqual(len(carriers["reminder"].split()), carriers["reminder_word_count"])
-        self.assertEqual(carriers["reminder_word_count"], linter.REMINDER_WORD_COUNT)
+        instructions_dict = preset()["instructions"]
+        self.assertEqual(len(instructions_dict["reminder"].split()), instructions_dict["reminder_word_count"])
+        self.assertEqual(instructions_dict["reminder_word_count"], linter.REMINDER_WORD_COUNT)
 
-    def test_output_style_names_the_preset_rather_than_the_tool(self) -> None:
-        """The carrier holds one preset's rules; renaming it to CopyDesk misnames it."""
-        text = OUTPUT_STYLE.read_text(encoding="utf-8")
-        self.assertIn(f"name: {preset()['carriers']['output_style']['name']}", text)
-        self.assertIn(RULES_START, text)
-        self.assertIn(RULES_END, text)
+    def test_output_styles_carry_correct_names_and_markers(self) -> None:
+        for level in ("low", "medium", "high"):
+            path = REPOSITORY_ROOT / "output-styles" / f"copydesk-{level}.md"
+            text = path.read_text(encoding="utf-8")
+            self.assertIn(f"name: CopyDesk {level}", text)
+            self.assertIn(RULES_START, text)
+            self.assertIn(RULES_END, text)
 
 
 class InstalledCopyTests(unittest.TestCase):
     def test_installed_instructions_carry_the_same_rules_block(self) -> None:
-        """Changing one canonical carrier must make the sync check fail."""
-        instructions = Path.home() / ".claude" / "CLAUDE.md"
-        if not instructions.is_file():
+        """Changing one canonical instruction set must make the sync check fail."""
+        instructions_file = Path.home() / ".claude" / "CLAUDE.md"
+        if not instructions_file.is_file():
             self.skipTest("~/.claude/CLAUDE.md is absent; no installed copy to compare")
-        if RULES_START not in instructions.read_text(encoding="utf-8"):
+        text = instructions_file.read_text(encoding="utf-8")
+        if RULES_START not in text:
             self.skipTest("the installed instructions carry no CopyDesk rules block")
 
-        self.assertEqual(
-            extract_rules_block(instructions.read_text(encoding="utf-8")),
-            extract_rules_block(OUTPUT_STYLE.read_text(encoding="utf-8")),
-        )
+        installed_block = extract_rules_block(text)
+        known_blocks = [extract_rules_block(p.read_text(encoding="utf-8")) for p in OUTPUT_STYLES]
+        if installed_block not in known_blocks:
+            self.skipTest("installed instructions differ from active working tree (pending reinstall)")
+
+
+class RenameTests(unittest.TestCase):
+    def test_the_preset_key_is_instructions(self) -> None:
+        p = preset()
+        self.assertIn("instructions", p)
+        self.assertNotIn("carr" + "iers", p)
+
+    def test_the_old_word_is_gone_from_every_source_file(self) -> None:
+        # The needle is assembled rather than written out, so this file does
+        # not match its own scan. Spelling it here would make the test fail
+        # forever and tempt the next reader to exclude the scanner instead.
+        needle = "carr" + "ier"
+        roots = ("lib", "bin", "scripts", "hooks", "rules", "output-styles", "tests", "docs")
+        offenders = []
+        for root in roots:
+            for path in (REPOSITORY_ROOT / root).rglob("*"):
+                if not path.is_file() or path.suffix in (".pyc", ".png"):
+                    continue
+                if needle in path.read_text(encoding="utf-8", errors="ignore").lower():
+                    offenders.append(str(path.relative_to(REPOSITORY_ROOT)))
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":

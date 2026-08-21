@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "id": "engineer",
+  "title": "Engineer",
+  "description": "Terse. One instruction per sentence, tables over prose.",
+  "extends": "plain",
+  "patterns": [],
+  "rules": {
+    "sentence-length": {
+      "severity": "error",
+      "max": 20,
+      "hardMax": 25
+    },
+    "avg-sentence-length": {
+      "severity": "warn",
+      "min": 8,
+      "max": 15
+    },
+    "list-dominated": {
+      "severity": "off"
+    },
+    "paragraph-length": {
+      "severity": "error",
+      "maxSentences": 3
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "id": "editorial",
+  "title": "Editorial",
+  "description": "Flowing short paragraphs. Structure is rare and deliberate.",
+  "extends": "plain",
+  "patterns": [],
+  "rules": {
+    "list-dominated": {
+      "severity": "error",
+      "exemptionRatio": 0.25
+    },
+    "sentence-variation": {
+      "severity": "error",
+      "minStdev": 5.0
+    },
+    "paragraph-length": {
+      "severity": "error",
+      "maxSentences": 5
+    }
+  }
+}

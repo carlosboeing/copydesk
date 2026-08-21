@@ -43,7 +43,9 @@ import re
 import sys
 import tempfile
 import time
-from typing import Iterable, Optional, Union
+from typing import Iterable, NamedTuple, Optional, Union
+
+import channels
 
 
 FILE_STATISTICS_MIN_SENTENCES = 15
@@ -53,6 +55,8 @@ LONG_SENTENCE_RATE = 0.10
 AVG_SENTENCE_MIN_WORDS = 12
 AVG_SENTENCE_MAX_WORDS = 20
 MIN_SENTENCE_VARIATION = 4.0
+PARAGRAPH_MAX_SENTENCES = 4
+LIST_EXEMPTION_RATIO = 0.5
 RETRY_LIMIT = 3
 STATE_TTL_SECONDS = 24 * 60 * 60
 ROTATION_SIZE_BYTES = 8 * 1024 * 1024  # 8 MB
@@ -105,7 +109,7 @@ def _compiled(expression: str, flags: int = re.IGNORECASE) -> re.Pattern[str]:
 
 # The rule inventory is data. rules/<preset>.json owns it, and this module
 # compiles it at import. tests/test_rules_sync.py verifies that every executable
-# token reaches the compiled inventory and that the generated carriers match.
+# token reaches the compiled inventory and that the generated instructions match.
 #
 # Compilation order is the preset's order, and it is stable, because lint()
 # sorts findings by line, severity, check and excerpt.
@@ -115,6 +119,11 @@ try:
     import config
 except ImportError:  # pragma: no cover - the linter still lints without a cascade
     config = None
+
+try:
+    import instructions
+except ImportError:
+    instructions = None
 
 
 def _preset_path() -> Path:
@@ -129,8 +138,8 @@ def _preset_path() -> Path:
         return Path(override)
     here = Path(__file__).resolve()
     candidates = (
-        here.parents[1] / "rules" / "plain-english.json",   # source bundle
-        here.parent / "rules" / "plain-english.json",       # installed beside linter.py
+        here.parents[1] / "rules" / "plain.json",   # source bundle
+        here.parent / "rules" / "plain.json",       # installed beside linter.py
     )
     for candidate in candidates:
         if candidate.is_file():
@@ -213,34 +222,53 @@ def effective_preset(path=None) -> tuple[dict, tuple[RulePattern, ...]]:
     used, because a gate that blocks on its own misconfiguration is worse
     than one that lets the write through.
     """
-    if config is None or path is None:
+def effective_preset(path: Optional[Union[str, Path]]) -> tuple[dict, tuple[RulePattern, ...]]:
+    """Return the (preset_dict, compiled_patterns) tuple that applies to `path`."""
+    if config is None:
         return PRESET, RULE_PATTERNS
     try:
         user = config.user_config_path()
-        project = config.project_config_path(path)
+        project = config.project_config_path(path) if path else None
+        local = config.local_config_path(path) if path else None
     except config.ConfigError as error:
         _report_config_error(str(error))
         return PRESET, RULE_PATTERNS
 
-    if user is None and project is None:
-        return PRESET, RULE_PATTERNS
-
-    key = (
-        (str(user), user.stat().st_mtime_ns) if user else None,
-        (str(project), project.stat().st_mtime_ns) if project else None,
+    root_key = str(project.parent) if project else (str(local.parent) if local else (str(Path(path).resolve().parent) if path else ""))
+    files_key = tuple(
+        (str(p), p.stat().st_mtime_ns) if p else None
+        for p in (user, project, local)
     )
-    cached = _PRESET_CACHE.get(key)
+    routing_key = (root_key, files_key, None)
+    routing_cached = _PRESET_CACHE.get(routing_key)
+    if routing_cached is not None:
+        routing_resolved, _ = routing_cached
+    else:
+        try:
+            routing_resolved = config.resolve(_rules_dir(), path, user_path=user, project_path=project, local_path=local)
+            routing_compiled = compile_patterns(routing_resolved)
+            _PRESET_CACHE[routing_key] = (routing_resolved, routing_compiled)
+        except config.ConfigError as error:
+            _report_config_error(str(error))
+            return PRESET, RULE_PATTERNS
+
+    channel = channels.decide(str(path), routing_resolved).channel if path else None
+
+    full_key = (root_key, files_key, channel)
+    cached = _PRESET_CACHE.get(full_key)
     if cached is not None:
         return cached
 
     try:
-        resolved = config.resolve(_rules_dir(), path, user_path=user, project_path=project)
+        resolved = config.resolve(
+            _rules_dir(), path, user_path=user, project_path=project, local_path=local, channel=channel
+        )
         compiled = compile_patterns(resolved)
     except config.ConfigError as error:
         _report_config_error(str(error))
         return PRESET, RULE_PATTERNS
 
-    _PRESET_CACHE[key] = (resolved, compiled)
+    _PRESET_CACHE[full_key] = (resolved, compiled)
     return resolved, compiled
 
 
@@ -263,6 +291,16 @@ def _rule_severity(preset: dict, rule_id: str, default: str) -> str:
     if declared is None:
         return default
     return config.SEVERITY_TO_INTERNAL.get(declared, default) if config else default
+
+
+def _rule_number(preset: dict, rule_id: str, key: str, default: float) -> float:
+    """A configured threshold, or the built-in default. Never raises."""
+    entry = (preset.get("rules") or {}).get(rule_id) or {}
+    value = entry.get(key, default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 # The rules block also quotes advisory instructions and worked examples that a
 # regex must not enforce. Their exact text stays in the same inventory, so a
@@ -364,19 +402,21 @@ def _line_number(text: str, position: int) -> int:
     return text.count("\n", 0, position) + 1
 
 
-def _document_is_exempt(path: Optional[Union[str, Path]], text: str) -> bool:
+def _list_ratio(text: str) -> float:
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return 0.0
+    return sum(1 for line in lines if _LIST_LINE.match(line)) / len(lines)
+
+
+def _document_is_exempt(path: Optional[Union[str, Path]], text: str, ratio: float = LIST_EXEMPTION_RATIO) -> bool:
     name = Path(path).name.lower() if path else ""
     if any(token in name for token in ("checklist", "changelog", "roadmap", "status", "toc", "table-of-contents")):
         return True
-
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
-        return False
-    list_lines = sum(1 for line in lines if _LIST_LINE.match(line))
-    return list_lines * 2 > len(lines)
+    return _list_ratio(text) > ratio
 
 
-def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error") -> Iterable[Finding]:
+def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error", max_sentences: int = PARAGRAPH_MAX_SENTENCES) -> Iterable[Finding]:
     if exempt:
         return ()
     findings: list[Finding] = []
@@ -387,7 +427,7 @@ def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error") -> 
         if not paragraph.strip() or all(_LIST_LINE.match(line) for line in paragraph.splitlines() if line.strip()):
             continue
         paragraph_sentences = _sentence_records(paragraph)
-        if len(paragraph_sentences) > 4:
+        if len(paragraph_sentences) > max_sentences:
             line = _line_number(text, max(0, position))
             findings.append(Finding(line, "paragraph-length", _excerpt(paragraph), severity))
     return findings
@@ -472,7 +512,8 @@ def _term_is_glossed(term: str, sentence: str) -> bool:
 
 def _vocabulary(preset: dict) -> frozenset:
     entry = (preset.get("rules") or {}).get("unglossed-term") or {}
-    return frozenset((entry.get("vocabulary") or {}).get("add", ()))
+    tokens = (entry.get("vocabulary") or {}).get("add", ()) or entry.get("add", ())
+    return frozenset(tokens)
 
 
 def _unglossed_findings(text: str, preset: dict, severity: str):
@@ -547,7 +588,17 @@ def lint(text: str, path: Optional[Union[str, Path]] = None) -> list[Finding]:
     preset, patterns = effective_preset(path)
     body = exclude_markdown(text)
     records = _sentence_records(body)
-    exempt = _document_is_exempt(path, body)
+
+    warn_words = _rule_number(preset, "sentence-length", "max", LONG_SENTENCE_WARNING_WORDS)
+    error_words = _rule_number(preset, "sentence-length", "hardMax", LONG_SENTENCE_ERROR_WORDS)
+    max_sentences = int(_rule_number(preset, "paragraph-length", "maxSentences", PARAGRAPH_MAX_SENTENCES))
+    avg_min = _rule_number(preset, "avg-sentence-length", "min", AVG_SENTENCE_MIN_WORDS)
+    avg_max = _rule_number(preset, "avg-sentence-length", "max", AVG_SENTENCE_MAX_WORDS)
+    max_rate = _rule_number(preset, "long-sentence-rate", "maxRate", LONG_SENTENCE_RATE)
+    min_stdev = _rule_number(preset, "sentence-variation", "minStdev", MIN_SENTENCE_VARIATION)
+    exemption_ratio = _rule_number(preset, "list-dominated", "exemptionRatio", LIST_EXEMPTION_RATIO)
+
+    exempt = _document_is_exempt(path, body, exemption_ratio)
     findings: list[Finding] = []
 
     sentence_severity = _rule_severity(preset, "sentence-length", "warning")
@@ -556,36 +607,43 @@ def lint(text: str, path: Optional[Union[str, Path]] = None) -> list[Finding]:
     average_severity = _rule_severity(preset, "avg-sentence-length", "warning")
     variation_severity = _rule_severity(preset, "sentence-variation", "warning")
 
+    list_severity = _rule_severity(preset, "list-dominated", "off")
+    if list_severity != "off" and _list_ratio(body) > exemption_ratio:
+        findings.append(
+            Finding(1, "list-dominated", f"{_list_ratio(body):.0%} of lines are list items", list_severity)
+        )
+
     if sentence_severity != "off":
         for sentence in records:
-            if sentence.words > LONG_SENTENCE_ERROR_WORDS:
+            if sentence.words > error_words:
                 findings.append(Finding(sentence.line, "sentence-length", _excerpt(sentence.text), "error"))
-            elif sentence.words > LONG_SENTENCE_WARNING_WORDS:
+            elif sentence.words > warn_words:
                 findings.append(Finding(sentence.line, "sentence-length", _excerpt(sentence.text), sentence_severity))
 
     if paragraph_severity != "off":
-        findings.extend(_paragraph_findings(body, exempt=exempt, severity=paragraph_severity))
+        findings.extend(_paragraph_findings(body, exempt=exempt, severity=paragraph_severity, max_sentences=max_sentences))
 
     if not exempt and len(records) >= FILE_STATISTICS_MIN_SENTENCES:
-        long_sentences = [sentence for sentence in records if sentence.words > LONG_SENTENCE_WARNING_WORDS]
-        if rate_severity != "off" and len(long_sentences) * 10 > len(records):
+        long_sentences = [sentence for sentence in records if sentence.words > warn_words]
+        if rate_severity != "off" and len(long_sentences) > len(records) * max_rate:
+            thresh_str = int(warn_words) if warn_words.is_integer() else warn_words
             findings.append(
                 Finding(
                     1,
                     "long-sentence-rate",
-                    f"{len(long_sentences)}/{len(records)} qualifying sentences exceed {LONG_SENTENCE_WARNING_WORDS} words",
+                    f"{len(long_sentences)}/{len(records)} qualifying sentences exceed {thresh_str} words",
                     rate_severity,
                 )
             )
 
         average = sum(sentence.words for sentence in records) / len(records)
-        if average_severity != "off" and (average < AVG_SENTENCE_MIN_WORDS or average > AVG_SENTENCE_MAX_WORDS):
+        if average_severity != "off" and (average < avg_min or average > avg_max):
             findings.append(
                 Finding(1, "avg-sentence-length", f"average sentence length is {average:.1f} words", average_severity)
             )
 
         variation = sqrt(sum((sentence.words - average) ** 2 for sentence in records) / len(records))
-        if variation < MIN_SENTENCE_VARIATION:
+        if variation < min_stdev:
             if variation_severity != "off":
                 findings.append(
                     Finding(1, "sentence-variation", f"sentence length variation is {variation:.1f} words", variation_severity)
@@ -831,52 +889,73 @@ def record_turn_event(session_id: Optional[str] = None) -> None:
     _record_event(event)
 
 
-def _proposed_document(payload: object) -> tuple[Optional[str], Optional[str], Optional[str]]:
+class Proposed(NamedTuple):
+    path: str
+    text: str
+    session_id: str
+    action: str          # "warn" or "block"; "ignore" never returns a record
+    channel: str
+
+
+def _proposed_document(payload: object) -> Optional[Proposed]:
     """Return the path, proposed Markdown, and session id or fail open."""
     if not isinstance(payload, dict):
-        return None, None, None
+        return None
 
     tool_name = payload.get("tool_name")
     tool_input = payload.get("tool_input")
     session_id = payload.get("session_id")
     if tool_name not in {"Write", "Edit"} or not isinstance(tool_input, dict):
-        return None, None, None
+        return None
     if not isinstance(session_id, str) or not session_id:
-        return None, None, None
+        return None
 
     file_path = tool_input.get("file_path")
-    if not isinstance(file_path, str) or not file_path.lower().endswith(".md"):
-        return None, None, None
+    if not isinstance(file_path, str):
+        return None
+
+    resolved, _ = effective_preset(file_path)
+    decision = channels.decide(file_path, resolved)
+    if decision.action == "ignore" or decision.channel is None:
+        return None
 
     if tool_name == "Write":
         content = tool_input.get("content")
-        return (file_path, content, session_id) if isinstance(content, str) else (None, None, None)
+        return Proposed(file_path, content, session_id, decision.action, decision.channel) if isinstance(content, str) else None
 
     old_string = tool_input.get("old_string")
     new_string = tool_input.get("new_string")
     replace_all = tool_input.get("replace_all")
     if not isinstance(old_string, str) or not old_string or not isinstance(new_string, str) or not isinstance(replace_all, bool):
-        return None, None, None
+        return None
 
     try:
         existing = Path(file_path).read_text(encoding="utf-8")
     except OSError:
-        return None, None, None
+        return None
     if old_string not in existing:
-        return None, None, None
+        return None
 
     occurrences = -1 if replace_all else 1
-    return file_path, existing.replace(old_string, new_string, occurrences), session_id
+    return Proposed(file_path, existing.replace(old_string, new_string, occurrences), session_id, decision.action, decision.channel)
 
 
-def _warning_for_retry(hashes: list[str]) -> str:
+def _retry_limit(resolved: dict) -> int:
+    """1 to 5, defaulting to 3. Anything else is a config mistake, not a crash."""
+    value = (resolved.get("gate") or {}).get("retries", RETRY_LIMIT)
+    if isinstance(value, int) and 1 <= value <= 5:
+        return value
+    return RETRY_LIMIT
+
+
+def _warning_for_retry(hashes: list[str], limit: int = RETRY_LIMIT) -> str:
     if len(set(hashes)) == 1:
-        detail = f"same content submitted 3 times (sha256={hashes[-1]})"
-    elif len(set(hashes)) == RETRY_LIMIT:
-        detail = f"3 different attempts still failing (sha256={', '.join(hashes)})"
+        detail = f"same content submitted {limit} times (sha256={hashes[-1]})"
+    elif len(set(hashes)) == limit:
+        detail = f"{limit} different attempts still failing (sha256={', '.join(hashes)})"
     else:
-        detail = f"3 attempts still failing (sha256={', '.join(hashes)})"
-    return f"CopyDesk gate passed after 3 failed attempts: {detail}. Run /humanizer before the next edit."
+        detail = f"{limit} attempts still failing (sha256={', '.join(hashes)})"
+    return f"CopyDesk gate passed after {limit} failed attempts: {detail}. Run /humanizer before the next edit."
 
 
 def _write_retry_warning(message: str) -> None:
@@ -901,9 +980,15 @@ def run_hook(raw_payload: str) -> int:
         tool_name = payload.get("tool_name") if isinstance(payload, dict) else None
         tool_input = payload.get("tool_input") if isinstance(payload, dict) else None
 
-        file_path, proposed, session_id = _proposed_document(payload)
-        if file_path is None or proposed is None or session_id is None:
+        proposed_record = _proposed_document(payload)
+        if proposed_record is None:
             return 0
+
+        file_path = proposed_record.path
+        proposed = proposed_record.text
+        session_id = proposed_record.session_id
+        action = proposed_record.action
+        channel = proposed_record.channel
 
         # Time strictly around lint() call alone
         t_start = time.time()
@@ -933,8 +1018,35 @@ def run_hook(raw_payload: str) -> int:
         findings_total = len(findings)
         rollups = _finding_rollups(findings_with_origin)
 
-        state_dir = _state_directory()
         now = time.time()
+
+        if action == "warn":
+            for finding in findings:
+                print(finding.render(), file=sys.stderr)
+            _record_event({
+                "ts": round(now, 1),
+                "event": "lint",
+                "surface": "gate",
+                "tool": tool_name,
+                "path": str(file_path),
+                "decision": "warn",
+                "streak": 0,
+                "duration_ms": duration_ms,
+                "bytes": doc_bytes,
+                "payload_bytes": payload_bytes,
+                "payload_words": payload_words,
+                "sentences": body_sentences,
+                "findings_total": findings_total,
+                "origin_totals": rollups["origin_totals"],
+                "rule_totals": rollups["rule_totals"],
+                "blocking_origin_totals": rollups["blocking_origin_totals"],
+                "blocking_rule_totals": rollups["blocking_rule_totals"],
+                "findings": _serialize_findings(findings_with_origin),
+                "session_id": session_id,
+            })
+            return 0
+
+        state_dir = _state_directory()
         state_dir.mkdir(parents=True, exist_ok=True)
         _sweep_state(state_dir, now)
         state_path = _state_path(state_dir, session_id)
@@ -1007,10 +1119,13 @@ def run_hook(raw_payload: str) -> int:
         hashes = [value for value in previous_hashes if isinstance(value, str)][-2:] + [content_hash]
         streak = (previous.get("streak", 0) if isinstance(previous, dict) else 0) + 1
 
-        if streak >= RETRY_LIMIT:
+        resolved, _ = effective_preset(file_path)
+        retry_limit = _retry_limit(resolved)
+
+        if streak >= retry_limit:
             files.pop(file_path, None)
             _write_state(state_path, state)
-            _write_retry_warning(_warning_for_retry(hashes))
+            _write_retry_warning(_warning_for_retry(hashes, retry_limit))
             _record_event({
                 "ts": round(now, 1),
                 "event": "lint",
@@ -1745,10 +1860,209 @@ def format_report_markdown(summary: dict[str, object], source: Optional[Path] = 
     return "\n".join(lines)
 
 
+def user_layer() -> dict:
+    """Built-ins, then styles, then the user file. No project or local layer.
+
+    Static files render from these three only. Project and local settings
+    ride the reminder's delta line instead, so two repositories never fight
+    over one global file.
+    """
+    if config is None:
+        return {}
+    return config.resolve(_rules_dir(), None, user_path=config.user_config_path(),
+                          project_path=None, local_path=None, channel="chat")
+
+
+def stale_output_styles(home: Path) -> list[str]:
+    """The installed output styles that no longer match their inputs.
+
+    The marker holds the fingerprint of the body as rendered at build time, so
+    the comparison re-renders that body now. Hashing the installed bytes
+    instead would compare the file with itself, and a changed config would
+    never show up. The reminder and doctor both call this, so neither can
+    hash a different payload from the generator.
+    """
+    directory = home / ".claude" / "output-styles"
+    if instructions is None or not directory.is_dir():
+        return []
+    try:
+        layer = user_layer()
+    except Exception:
+        return []         # cannot re-render: fail open, say nothing
+    pattern = re.compile(re.escape(instructions.FINGERPRINT_MARKER) + r"([0-9a-f]{12})")
+    stale: list[str] = []
+    for installed in sorted(directory.glob("copydesk-*.md")):
+        # The level is the file's own, because each renders a different body.
+        level = installed.stem[len("copydesk-"):]
+        if level not in instructions.VERBOSITY_LEVELS:
+            continue
+        try:
+            rendered = installed.read_text(encoding="utf-8")
+        except OSError:
+            continue      # unreadable: say nothing about it
+        marker = pattern.search(rendered)
+        if marker is None:
+            continue
+        try:
+            fresh = instructions.render_output_style_body(layer, level)
+        except Exception:
+            continue
+        if marker.group(1) != instructions.fingerprint(fresh):
+            stale.append(installed.name)
+    return stale
+
+
+def _fingerprint_notice(home: Path) -> Optional[str]:
+    """One line when an installed static file no longer matches its inputs."""
+    stale = stale_output_styles(home)
+    if not stale:
+        return None
+    return f"{stale[0]} is out of date. Run: copydesk setup --repair"
+
+
+_LIST_ITEM = re.compile(r"^\s*(?:\d+[.)]|[-*+])\s+\S")
+
+
+def _closing_block(text: str) -> Optional[str]:
+    """The final contiguous run of list items, or None.
+
+    Trailing blank lines are skipped, and an indented continuation stays with
+    the item it wraps. Anything else ends the run, so body bullets and closing
+    prose stay out of the hash.
+    """
+    lines = text.rstrip().splitlines()
+    end = len(lines)
+    while end and not lines[end - 1].strip():
+        end -= 1
+    start = end
+    while start and (_LIST_ITEM.match(lines[start - 1]) or
+                     (lines[start - 1].startswith((" ", "\t")) and lines[start - 1].strip())):
+        start -= 1
+    if start == end or not _LIST_ITEM.match(lines[start]):
+        return None
+    return "\n".join(line.strip() for line in lines[start:end])
+
+
+def _closer_hash(text: str) -> Optional[str]:
+    """Hash the reply's closing list, or None when it has none.
+
+    A restated decisions list is the most reported chat failure, and the
+    reminder hook is the one place a chat-side check can run, because chat
+    never reaches the gate.
+    """
+    block = _closing_block(text)
+    if block is None:
+        return None
+    return hashlib.sha256(block.encode("utf-8")).hexdigest()[:16]
+
+
+def _last_assistant_reply(path: Path) -> Optional[str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        role = record.get("role") or record.get("type")
+        msg = record.get("message")
+        if isinstance(msg, dict):
+            role = role or msg.get("role")
+            content = msg.get("content")
+        else:
+            content = record.get("content") or record.get("text")
+        if role in ("assistant", "model", "assistant_response"):
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                texts = [
+                    block.get("text", "")
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") in ("text", None) and "text" in block
+                ]
+                if texts:
+                    return "\n".join(texts)
+    return None
+
+
+def _check_repeat_closer(payload: dict) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    session_id = payload.get("session_id")
+    transcript_path = payload.get("transcript_path")
+    if not session_id or not transcript_path:
+        return None
+    t_file = Path(transcript_path)
+    if not t_file.is_file():
+        return None
+    reply = _last_assistant_reply(t_file)
+    if not reply:
+        return None
+    current_hash = _closer_hash(reply)
+    if not current_hash:
+        return None
+    state_dir = _state_directory() / "sessions"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    hash_file = state_dir / f"{session_id}.closer"
+    prev_hash = None
+    if hash_file.is_file():
+        try:
+            prev_hash = hash_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    try:
+        hash_file.write_text(current_hash, encoding="utf-8")
+    except OSError:
+        pass
+    if prev_hash and prev_hash == current_hash:
+        return "Your last two replies ended on the same list. Do not restate it."
+    return None
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments == ["--hook"]:
         return run_hook(sys.stdin.read())
+    if arguments == ["--reminder"]:
+        try:
+            payload = {}
+            import select
+            if select.select([sys.stdin], [], [], 0.0)[0]:
+                raw = sys.stdin.read()
+                if raw:
+                    try:
+                        parsed = json.loads(raw)
+                        if isinstance(parsed, dict):
+                            payload = parsed
+                    except Exception:
+                        pass
+            resolved, _ = effective_preset(Path.cwd())
+            inst = resolved.get("instructions") or (resolved.get("preset") or {}).get("instructions") or {}
+            reminder_text = inst.get("reminder", "")
+            if not reminder_text:
+                return 1
+            lines = [reminder_text]
+            if instructions is not None:
+                delta_line = instructions.delta(user_layer(), resolved)
+                if delta_line:
+                    lines.append(delta_line)
+            closer_notice = _check_repeat_closer(payload)
+            if closer_notice:
+                lines.append(closer_notice)
+            notice = _fingerprint_notice(Path(os.environ.get("HOME", str(Path.home()))))
+            if notice:
+                lines.append(notice)
+            print("\n".join(lines))
+            return 0
+        except Exception:
+            return 1
     if arguments == ["--turn"]:
         session_id = None
         try:
@@ -1763,9 +2077,96 @@ def main(argv: Optional[list[str]] = None) -> int:
             pass
         record_turn_event(session_id)
         return 0
-    print("usage: linter.py --hook | --turn", file=sys.stderr)
+    print("usage: linter.py --hook | --turn | --reminder", file=sys.stderr)
     return 64
+
+
+SUBJECT_MAX = 72
+_ANNOUNCING = re.compile(r"^\s*this commit\b", re.IGNORECASE)
+
+# `type(scope): ` in front of the description, per Conventional Commits. The
+# mood test reads the description, because the type is never a verb form.
+_CONVENTIONAL_PREFIX = re.compile(r"^[a-z]+(?:\([^)]*\))?!?:\s+")
+_FIRST_WORD = re.compile(r"[A-Za-z']+")
+
+# The third-person, past and gerund forms of the verbs that open commit
+# subjects in practice. A closed list rather than a general mood detector:
+# reading mood needs a parser, and a false positive on a gate that refuses
+# commits costs more than the extra cases a guess would catch. A subject such
+# as "Reset tokens are expired" therefore passes, and the instructions rather
+# than the gate are what keep it from being written.
+NON_IMPERATIVE_OPENERS = frozenset("""
+    added adding adds allowed allowing allows avoided avoiding avoids
+    bumped bumping bumps changed changes changing created creates creating
+    deleted deletes deleting dropped dropping drops ensured ensures ensuring
+    fixed fixes fixing handled handles handling
+    implemented implementing implements improved improves improving
+    introduced introduces introducing kept keeping keeps letting lets
+    made makes making moved moves moving prevented preventing prevents
+    refactored refactoring refactors removed removes removing
+    renamed renames renaming returned returning returns
+    reverted reverting reverts supported supporting supports
+    updated updates updating used uses using
+""".split())
+
+
+def _non_imperative_opener(subject: str) -> Optional[str]:
+    """The opening word, when it is a form no imperative subject starts with."""
+    description = _CONVENTIONAL_PREFIX.sub("", subject.strip(), count=1)
+    first = _FIRST_WORD.match(description)
+    if first is None:
+        return None
+    return first.group(0) if first.group(0).lower() in NON_IMPERATIVE_OPENERS else None
+
+
+def run_commit_msg(path: str) -> int:
+    """Check one commit message. 0 clean, 1 refused, 70 internal error."""
+    try:
+        if config is not None:
+            try:
+                user = config.user_config_path()
+                proj = config.project_config_path(Path(path))
+                local = config.local_config_path(Path(path))
+                config.resolve(_rules_dir(), path, user_path=user, project_path=proj, local_path=local, channel="commits")
+            except config.ConfigError as err:
+                _report_config_error(str(err))
+                return 0  # fail open on malformed config
+
+        raw = Path(path).read_text(encoding="utf-8")
+        # git appends its template comments, and the whole diff under
+        # --verbose. Neither is the author's prose.
+        body = raw.split("\n# ------------------------ >8 ---")[0]
+        lines = [l for l in body.splitlines() if not l.startswith("#")]
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        if not lines:
+            return 0  # an empty message is git's business
+        subject, message = lines[0], "\n".join(lines)
+
+        findings = []
+        if len(subject) > SUBJECT_MAX:
+            findings.append(f"1:subject-length:{len(subject)} characters, at most {SUBJECT_MAX}")
+        if _ANNOUNCING.match(subject):
+            findings.append("1:announcing-opener:" + subject[:60])
+        opener = _non_imperative_opener(subject)
+        if opener is not None:
+            findings.append(
+                f'1:imperative-subject:"{opener}" is not imperative. '
+                "Write the subject as an instruction."
+            )
+        # The whole message, subject included. Linting the body alone let a
+        # blocking word through in the one line every reader sees, and it
+        # reported body findings one line short of where they sit.
+        findings.extend(f.render() for f in lint(message, path=path) if f.severity == "error")
+
+        for finding in findings:
+            print(finding, file=sys.stderr)
+        return 1 if findings else 0
+    except Exception as error:  # noqa: BLE001 - fail open, loudly
+        print(f"copydesk: {type(error).__name__}: {error}", file=sys.stderr)
+        return 70
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

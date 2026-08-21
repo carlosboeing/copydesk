@@ -46,8 +46,8 @@ jobs:
       - name: The suite must pass on the exact commit being released
         run: python3 -m unittest discover tests/
 
-      - name: The carriers must match the preset
-        run: python3 scripts/generate-carriers.py --check
+      - name: The instructions must match the preset
+        run: python3 scripts/generate-instructions.py --check
 
       - name: VERSION, package.json and the tag must agree
         id: version

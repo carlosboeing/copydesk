@@ -1,6 +1,6 @@
 {
   "name": "copydesk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A cross-harness prose gate for AI agents",
   "license": "MIT",
   "author": "Carlos Boeing",
@@ -30,7 +30,9 @@
     "lib/",
     "rules/",
     "hooks/",
+    "git-hooks/",
     "output-styles/",
+    "copydesk.schema.json",
     "VERSION",
     "LICENSE",
     "!**/__pycache__",

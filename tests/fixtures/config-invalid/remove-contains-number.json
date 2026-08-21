@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "rules": {
+    "banned-word": {
+      "remove": [123]
+    }
+  }
+}
