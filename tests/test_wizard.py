@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -516,6 +517,74 @@ class InstalledStyleTests(unittest.TestCase):
             self.assertIn(
                 instructions._VERBOSITY_LINES[level], style.read_text(encoding="utf-8")
             )
+
+
+class ExistingSettingsTests(unittest.TestCase):
+    """A harness settings file setup cannot parse is refused, never replaced."""
+
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+        (self.home / ".claude").mkdir()
+        self.settings = self.home / ".claude" / "settings.json"
+
+    def _cli(self, *args) -> subprocess.CompletedProcess:
+        env = dict(
+            os.environ,
+            COPYDESK_HOME=str(self.home),
+            XDG_CONFIG_HOME=str(self.home / "config"),
+            PATH=str(self.home / "nothing"),
+        )
+        return subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "copydesk"), *args],
+            cwd=self.home, capture_output=True, text=True, env=env, input="",
+        )
+
+    def test_a_settings_file_that_will_not_parse_stops_setup(self) -> None:
+        original = '{"model": "opus", "permissions": {"allow": ["Bash"]}\n'
+        self.settings.write_text(original, encoding="utf-8")
+        result = self._cli("setup", "--defaults", "--yes")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.settings.read_text(encoding="utf-8"), original)
+
+    def test_the_refusal_names_the_path_and_the_reason(self) -> None:
+        self.settings.write_text('{"model": "opus"\n', encoding="utf-8")
+        output = self._cli("setup", "--defaults", "--yes").stdout
+        self.assertIn(str(self.settings), output)
+        self.assertIn("line", output.lower())
+
+    def test_nothing_is_written_before_the_refusal(self) -> None:
+        self.settings.write_text("{ not json", encoding="utf-8")
+        self._cli("setup", "--defaults", "--yes")
+        self.assertFalse((self.home / ".claude" / "hooks" / "copydesk").exists())
+        self.assertFalse((self.home / "config" / "copydesk" / "config.json").exists())
+
+    def test_a_settings_file_holding_a_list_is_refused(self) -> None:
+        original = "[]\n"
+        self.settings.write_text(original, encoding="utf-8")
+        self.assertEqual(self._cli("setup", "--defaults", "--yes").returncode, 1)
+        self.assertEqual(self.settings.read_text(encoding="utf-8"), original)
+
+    def test_a_settings_file_that_parses_keeps_its_other_keys(self) -> None:
+        # The control. Without it the four tests above could pass on a setup
+        # that refuses every existing settings.json.
+        self.settings.write_text(
+            '{"model": "opus", "permissions": {"allow": ["Bash"]}}', encoding="utf-8"
+        )
+        result = self._cli("setup", "--defaults", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        document = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(document["model"], "opus")
+        self.assertEqual(document["permissions"], {"allow": ["Bash"]})
+        self.assertIn("PreToolUse", document["hooks"])
+
+    def test_comments_in_a_settings_file_are_not_a_refusal(self) -> None:
+        self.settings.write_text(
+            '{\n  // mine\n  "model": "opus"\n}\n', encoding="utf-8"
+        )
+        result = self._cli("setup", "--defaults", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(self.settings.read_text(encoding="utf-8"))["model"], "opus")
 
 
 if __name__ == "__main__":

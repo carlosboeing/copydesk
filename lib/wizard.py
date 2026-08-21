@@ -360,12 +360,38 @@ def _read_config(path: Path) -> Optional[dict]:
     return document if isinstance(document, dict) else None
 
 
+def _read_settings(path: Path) -> tuple[Optional[dict], str]:
+    """A harness settings file, and why it could not be read.
+
+    `({}, "")` is no file, so there is nothing to preserve. `(document, "")` is
+    a file that parsed. `(None, reason)` is a file that exists and did not,
+    which setup refuses rather than writes over: its keys were never
+    understood, so a plan built from an empty document drops every one of them.
+    """
+    if not path.is_file():
+        return {}, ""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        return None, error.strerror or str(error)
+    try:
+        document = json.loads(jsonc.strip_comments(text))
+    except ValueError as error:
+        # json.JSONDecodeError and jsonc.UnterminatedComment are both
+        # ValueError, and both name the position the user is looking at.
+        return None, str(error)
+    if not isinstance(document, dict):
+        return None, "the top level is not an object"
+    return document, ""
+
+
 def _build_plan(
     home: Path,
     config_path: Path,
     config_body: str,
     selected_tools: list[str],
     resolved_config: dict,
+    settings_doc: dict,
     write_config: bool = True,
 ) -> apply.Plan:
     # Repair rebuilds what CopyDesk generates. The config is the user's own
@@ -401,13 +427,10 @@ def _build_plan(
                 instructions.render_output_style(resolved_config, level),
             ))
 
+        # The document is read once, by the caller, so that a settings file
+        # that will not parse stops setup before the first write rather than
+        # being silently replaced here by an empty one.
         settings_path = home / ".claude" / "settings.json"
-        settings_doc = {}
-        if settings_path.is_file():
-            try:
-                settings_doc = json.loads(jsonc.strip_comments(settings_path.read_text(encoding="utf-8")))
-            except Exception:
-                settings_doc = {}
         hooks = settings_doc.setdefault("hooks", {})
         pre_tool = hooks.setdefault("PreToolUse", [])
         pre_tool = [
@@ -669,9 +692,27 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
     except config_mod.ConfigError as error:
         out_stream.write(f"error  {error}\n")
         return 1
+
+    # A settings.json that will not parse is refused rather than written over.
+    # Treating it as absent replaced the file with CopyDesk's hooks and nothing
+    # else, dropping every key it held, and a successful apply keeps no copy of
+    # what was there. Only the harness that owns the file is affected, so
+    # setting up Codex alone is not blocked by a broken Claude settings file.
+    settings_doc: dict = {}
+    if "claude-code" in selected_tools:
+        settings_path = copydesk_home / ".claude" / "settings.json"
+        read_settings, reason = _read_settings(settings_path)
+        if read_settings is None:
+            out_stream.write(
+                f"error  {settings_path} exists and cannot be read ({reason}). "
+                "Fix it or move it aside, then run setup again.\n"
+            )
+            return 1
+        settings_doc = read_settings
+
     plan = _build_plan(
         copydesk_home, config_file, config_body, selected_tools, resolved_config,
-        write_config=not repairing_settings,
+        settings_doc, write_config=not repairing_settings,
     )
 
     # The commit-msg hook lives in the repository rather than under the home
