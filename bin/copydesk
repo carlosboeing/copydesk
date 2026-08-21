@@ -305,7 +305,7 @@ def _doctor_bare() -> int:
             has_commit_hook = False
             if hooks_dir:
                 hook_file = hooks_dir / "commit-msg"
-                if hook_file.is_file() and "# CopyDesk commits gate" in hook_file.read_text(encoding="utf-8", errors="ignore"):
+                if hook_file.is_file() and wizard.HOOK_MARKER in hook_file.read_text(encoding="utf-8", errors="ignore"):
                     has_commit_hook = True
             if not has_commit_hook:
                 print("  commits is prevention-only (no commit-msg hook installed in this repository).")

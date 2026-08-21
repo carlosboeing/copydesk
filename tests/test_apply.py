@@ -84,13 +84,30 @@ class RollbackTests(unittest.TestCase):
         self.assertEqual(first.read_text(encoding="utf-8"), "a\n")
         self.assertFalse((self.home / "nope").exists())
 
-    def test_a_successful_apply_keeps_one_backup_per_real_file(self) -> None:
+    def test_a_write_failing_after_an_earlier_one_restores_the_earlier_one(self) -> None:
+        # The test above returns at pre-validation, so nothing is written and
+        # the rollback never runs. This one fails on the second write, after
+        # the first has already changed the file, which is the only case the
+        # in-memory restore exists for. The second path is under a file rather
+        # than a directory, so the failure does not depend on permissions.
+        first = self.home / "a.md"
+        first.write_text("a\n", encoding="utf-8")
+        result = apply.execute(apply.Plan(writes=[
+            apply.Write(first, "new a"),
+            apply.Write(first / "b.md", "new b"),
+        ]))
+        self.assertFalse(result.ok)
+        self.assertEqual(first.read_text(encoding="utf-8"), "a\n")
+
+    def test_a_successful_apply_leaves_no_snapshot_behind(self) -> None:
+        # Setup reads settings.json, which carries credentials. A copy beside
+        # it would be created at the process umask and never deleted.
         target = self.home / "settings.json"
-        target.write_text("{}\n", encoding="utf-8")
+        target.write_text('{"apiKey": "s3cret"}\n', encoding="utf-8")
         result = apply.execute(apply.Plan(writes=[apply.Write(target, '{"hooks": {}}')]))
         self.assertTrue(result.ok)
-        backups = list(self.home.glob("settings.json.copydesk-backup-*"))
-        self.assertEqual(len(backups), 1)
+        self.assertEqual(sorted(p.name for p in self.home.iterdir()), ["settings.json"])
+        self.assertNotIn("s3cret", target.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

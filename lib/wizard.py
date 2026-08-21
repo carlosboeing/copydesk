@@ -180,6 +180,12 @@ def prove(home: Path) -> tuple[bool, str]:
     return blocked, reason[0] if reason else "no finding reported"
 
 
+# The line that says a commit-msg hook is CopyDesk's. Setup replaces a hook
+# carrying it and uninstall removes one; anything else belongs to the
+# repository and is left alone.
+HOOK_MARKER = "# CopyDesk commits gate"
+
+
 class HookResult(NamedTuple):
     installed: bool
     message: str
@@ -207,34 +213,64 @@ def hooks_directory(cwd: Path) -> Optional[Path]:
         return None
 
 
+class HookPlan(NamedTuple):
+    write: Optional[apply.Write]  # None when there is nothing to write
+    message: str
+    ok: bool = True               # False means setup must stop before writing
+
+
+def _foreign_hook_message(target: Path) -> str:
+    return (
+        f"skipped  {target} already exists\n"
+        f"         To chain CopyDesk into it, add these lines at the end:\n"
+        f'             copydesk check --commit-msg "$1"; status=$?\n'
+        f'             [ "$status" -eq 1 ] && exit 1\n'
+        f'             [ "$status" -gt 1 ] && echo "copydesk: exit $status; commit allowed" >&2'
+    )
+
+
+def plan_commit_hook(hooks_dir: Path) -> HookPlan:
+    """Decide the commit-msg write before any of the plan is applied.
+
+    Deciding needs to read the existing hook, and a hook someone else wrote is
+    left alone. Doing that here means the write itself joins the setup plan,
+    so a hook that cannot be written rolls back every earlier write with it.
+    Installing it after the plan applied made a failure there leave the home
+    directory changed and setup still reporting success.
+    """
+    target = hooks_dir / "commit-msg"
+    source = BUNDLE_ROOT / "git-hooks" / "commit-msg"
+    try:
+        hook_src = source.read_text(encoding="utf-8")
+    except OSError as error:
+        return HookPlan(None, f"cannot read {source}: {error}", ok=False)
+    if not target.is_file():
+        return HookPlan(apply.Write(target, hook_src), f"installed {target}")
+    try:
+        existing = target.read_text(encoding="utf-8")
+    except OSError as error:
+        return HookPlan(None, f"cannot read {target}: {error}", ok=False)
+    if HOOK_MARKER in existing:
+        return HookPlan(apply.Write(target, hook_src), f"updated {target}")
+    return HookPlan(None, _foreign_hook_message(target))
+
+
 def install_commit_hook(cwd: Path) -> HookResult:
+    """Install the hook on its own. `run_setup` goes through the plan instead,
+    so that a failure there rolls back with every other write."""
     hooks_dir = hooks_directory(cwd)
     if hooks_dir is None:
         return HookResult(False, f"{cwd} is not a git repository")
-    hooks_dir.mkdir(parents=True, exist_ok=True)
-    target = hooks_dir / "commit-msg"
-    hook_src = (BUNDLE_ROOT / "git-hooks" / "commit-msg").read_text(encoding="utf-8")
-    if target.is_file():
-        try:
-            existing = target.read_text(encoding="utf-8")
-            if "# CopyDesk commits gate" in existing:
-                target.write_text(hook_src, encoding="utf-8")
-                os.chmod(target, 0o755)
-                return HookResult(True, f"updated {target}")
-            else:
-                return HookResult(
-                    False,
-                    f"skipped  {target} already exists\n"
-                    f"         To chain CopyDesk into it, add these lines at the end:\n"
-                    f'             copydesk check --commit-msg "$1"; status=$?\n'
-                    f'             [ "$status" -eq 1 ] && exit 1\n'
-                    f'             [ "$status" -gt 1 ] && echo "copydesk: exit $status; commit allowed" >&2',
-                )
-        except OSError as error:
-            return HookResult(False, f"error reading {target}: {error}")
-    target.write_text(hook_src, encoding="utf-8")
-    os.chmod(target, 0o755)
-    return HookResult(True, f"installed {target}")
+    planned = plan_commit_hook(hooks_dir)
+    if planned.write is None:
+        return HookResult(False, planned.message)
+    try:
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        planned.write.path.write_text(planned.write.content, encoding="utf-8")
+        os.chmod(planned.write.path, 0o755)
+    except OSError as error:
+        return HookResult(False, f"cannot write {planned.write.path}: {error}")
+    return HookResult(True, planned.message)
 
 
 
@@ -613,13 +649,17 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
         write_config=not repairing_settings,
     )
 
-    # The commit-msg hook lives in the repository, not under the home
-    # directory, so it sits outside the plan and is named separately.
-    commit_hook = (
-        repository_hooks / "commit-msg"
-        if repository_hooks is not None and "git" in selected_tools
-        else None
-    )
+    # The commit-msg hook lives in the repository rather than under the home
+    # directory, but it joins the same plan: setup is all-or-nothing, so a
+    # hook that cannot be written must roll back every write before it.
+    hook_plan = None
+    if repository_hooks is not None and "git" in selected_tools:
+        hook_plan = plan_commit_hook(repository_hooks)
+        if not hook_plan.ok:
+            out_stream.write(f"error  {hook_plan.message}\n")
+            return 1
+        if hook_plan.write is not None:
+            plan = apply.Plan(writes=[*plan.writes, hook_plan.write])
 
     # Review panel
     out_stream.write("Configured tools:\n")
@@ -630,8 +670,10 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
     out_stream.write(COPY["review"] + "\n")
     for write in plan.writes:
         out_stream.write(f"  {write.path}\n")
-    if commit_hook is not None:
-        out_stream.write(f"  {commit_hook}\n")
+    if hook_plan is not None and hook_plan.write is None:
+        # A hook someone else wrote is named here and left alone, so the
+        # commits gate never silently replaces a repository's own check.
+        out_stream.write(hook_plan.message + "\n")
     out_stream.flush()
 
     if args.dry_run:
@@ -655,11 +697,15 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
         out_stream.write(f"error  {res.message}\n")
         return 1
 
-    if commit_hook is not None:
-        # A hook someone else wrote is reported and left alone, so the commits
-        # gate never silently replaces a repository's own check.
-        hook_result = install_commit_hook(repository)
-        out_stream.write(hook_result.message + "\n")
+    if hook_plan is not None and hook_plan.write is not None:
+        # git ignores a hook it cannot execute, so a failure here leaves the
+        # commits gate silently off. It is reported rather than assumed.
+        try:
+            os.chmod(hook_plan.write.path, 0o755)
+        except OSError as error:
+            out_stream.write(f"error  cannot make {hook_plan.write.path} executable: {error}\n")
+            return 1
+        out_stream.write(hook_plan.message + "\n")
 
     if "claude-code" in selected_tools:
         gate_path = copydesk_home / ".claude" / "hooks" / "copydesk" / "gate.sh"
@@ -733,7 +779,7 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
     commit_hook = repository_hooks / "commit-msg" if repository_hooks else None
     if commit_hook is not None and commit_hook.is_file():
         try:
-            if "# CopyDesk commits gate" in commit_hook.read_text(encoding="utf-8"):
+            if HOOK_MARKER in commit_hook.read_text(encoding="utf-8"):
                 targets.append(apply.Target(real=commit_hook, kind="created"))
             else:
                 commit_hook = None

@@ -390,6 +390,21 @@ class CommitHookSetupTests(unittest.TestCase):
         self.assertIn("already exists", result.stdout)
         self.assertEqual(self.hook.read_text(encoding="utf-8"), theirs)
 
+    def test_a_hook_that_cannot_be_written_fails_the_whole_setup(self) -> None:
+        # Setup advertises all-or-nothing. Installing the hook after the plan
+        # applied meant a failure here left every home write in place and
+        # still reported success.
+        self.hook.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.hook.parent, 0o500)
+        self.addCleanup(os.chmod, self.hook.parent, 0o700)
+        result = self._cli("setup", "--defaults", "--yes")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertFalse(self.hook.exists())
+        self.assertFalse(
+            (self.home / "config" / "copydesk" / "config.json").exists(),
+            "a write from earlier in the plan survived the failed hook install",
+        )
+
     def test_uninstall_removes_the_hook_setup_installed(self) -> None:
         self._cli("setup", "--defaults", "--yes")
         self.assertTrue(self.hook.is_file())

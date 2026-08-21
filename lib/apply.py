@@ -2,7 +2,6 @@ import json
 import os
 import re
 import shutil
-import time
 from pathlib import Path
 from typing import NamedTuple, Optional, Sequence, Union
 
@@ -43,7 +42,7 @@ def plan_targets(paths: Sequence[Union[str, Path]], block: str) -> list[Target]:
     """Coalesce paths that resolve to one real file.
 
     Global instruction files are often symlinks. Two links to one CLAUDE.md
-    get one write, one backup and one review line naming both aliases.
+    get one write and one review line naming both aliases.
     """
     by_real: dict[Path, Target] = {}
     for path in paths:
@@ -96,18 +95,21 @@ def remove_marked_block(path: Path) -> None:
 def execute(plan: Plan) -> Result:
     """Execute a plan atomically.
 
-    Takes one backup per real file before writing. If any write fails,
-    rolls back all modified files from original content and removes newly created files.
+    Holds the original text of every file it touches in memory. If any write
+    fails, rolls back all modified files from that text and removes newly
+    created files.
+
+    The originals stay in memory and never reach disk. A snapshot beside the
+    file would outlive the command that needed it, and these are files such as
+    settings.json that carry credentials: `write_text` creates a copy at the
+    process umask, so the copy can be readable where the original was not.
     """
     # 1. Pre-validation: check must_exist
     for write in plan.writes:
         if write.must_exist and not write.path.exists():
             return Result(ok=False, failed=write.path, message=f"{write.path} does not exist")
 
-    # 2. Backups: one per real file that exists
-    timestamp = time.strftime("%Y%m%d%H%M%S")
-    backed_up_real_paths: set[Path] = set()
-    created_backups: list[Path] = []
+    # 2. Originals: one read per real file that exists
     original_contents: dict[Path, str] = {}
     created_files: list[Path] = []
     created_dirs: list[Path] = []
@@ -118,13 +120,8 @@ def execute(plan: Plan) -> Result:
             real_p = p.resolve() if p.exists() or p.is_symlink() else p
 
             if p.exists() or (p.is_symlink() and real_p.exists()):
-                if real_p not in backed_up_real_paths:
-                    backed_up_real_paths.add(real_p)
-                    content = real_p.read_text(encoding="utf-8")
-                    original_contents[real_p] = content
-                    backup_path = real_p.parent / f"{real_p.name}.copydesk-backup-{timestamp}"
-                    backup_path.write_text(content, encoding="utf-8")
-                    created_backups.append(backup_path)
+                if real_p not in original_contents:
+                    original_contents[real_p] = real_p.read_text(encoding="utf-8")
             else:
                 cur = p.parent
                 new_dirs = []
@@ -161,13 +158,6 @@ def execute(plan: Plan) -> Result:
             try:
                 if d.exists() and not list(d.iterdir()):
                     d.rmdir()
-            except OSError:
-                pass
-
-        for b in created_backups:
-            try:
-                if b.exists():
-                    b.unlink()
             except OSError:
                 pass
 
@@ -249,11 +239,11 @@ def _prune_empty(start: Path, homes: "list[Path]") -> None:
 
 
 def remove_owned(targets: list[Target], homes: "list[Path]" = ()) -> Result:
-    """Remove only what CopyDesk put there. Never restores a backup.
+    """Remove only what CopyDesk put there. Never restores earlier content.
 
-    A backup is a snapshot from setup time. Restoring it during uninstall
-    would discard every edit made since, so backups serve one purpose:
-    rolling back a failed apply, inside the same command.
+    Setup keeps a file's original text for one command only, to roll back a
+    failed apply. Restoring anything at uninstall time would discard every
+    edit made since, so uninstall deletes CopyDesk's own region and stops.
 
     `homes` names the harness directories the prune must not climb past.
     """
