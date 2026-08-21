@@ -89,7 +89,11 @@ jobs:
         run: |
           set -euo pipefail
           npm pack --dry-run --json > pack.json
-          node -e '
+          # The script reaches node on stdin through a quoted heredoc rather
+          # than inside `node -e '...'`. An apostrophe in one of its comments
+          # closed that shell string and killed the v0.2.1 release with a
+          # syntax error. A heredoc has no such edge.
+          node <<'NODE'
             const [pack] = require("./pack.json");
             const files = pack.files.map(f => f.path).sort();
             console.log(files.join("\n"));
@@ -134,7 +138,7 @@ jobs:
               console.error("::error::tarball exceeds the 200 kB budget");
               process.exit(1);
             }
-          '
+          NODE
 
   publish:
     name: Publish to npm
