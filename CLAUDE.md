@@ -26,6 +26,18 @@ Working memory — brainstorms, designs, plans, reviews, notes, and the captured
 
 A pre-commit hook at `git-hooks/private-workbench-guard/pre-commit` refuses a commit that stages the workbench as a gitlink. `git add -f .workbench` records a submodule reference, publishing the private repository's name and commit SHA even though clones get none of its content.
 
+## What a public artifact may say
+
+Commit messages, pull request and issue titles and bodies, review comments and release notes are public and permanent. A reader arrives with the repository and nothing else.
+
+**Never name a private or local source in one.** Not `.workbench`, not `copydesk-workbench`, not the bare phrase "the workbench", not a path to a document held there, not `/Users/...`, not a client name or an internal cost figure.
+
+The damage is a citation the reader cannot follow. "See the plan in the workbench" says something exists and withholds it, which is worse than saying nothing. **Restate the fact instead:** put the reasoning in the body in its own words, or in an ADR under `docs/adrs/` that the artifact then links. A record that cannot be published is "held locally, available on request".
+
+**No hook catches this.** `git-hooks/private-workbench-guard/pre-commit` reads the staged diff, so it never sees a message or a body, and `gh pr create --body` reaches the GitHub API without touching git.
+
+A pull request body follows `.github/PULL_REQUEST_TEMPLATE.md`, which `gh pr create --body` bypasses. An issue title is one clause under 60 characters naming the change or the symptom.
+
 ## The compatibility contract
 
 Six items are frozen from the first public release. A language rewrite must not move them. Everything else is internal and free to change.
