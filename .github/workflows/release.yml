@@ -13,11 +13,12 @@ name: release
 #   npm trust github copydesk --file release.yml \
 #     --repo carlosboeing/copydesk --allow-publish
 #
-# 0.1.0 went out on an NPM_TOKEN secret, because npm needs a package to exist
-# before a publisher can be added to it (npm/cli#8544). That secret is gone.
-# 0.2.0 failed with ENEEDAUTH because the publisher was never added in its
-# place, and because an absent NPM_TOKEN still made setup-node write an
-# .npmrc declaring an empty _authToken.
+# 0.1.0 was published by hand. Its CI publish failed with ENEEDAUTH, because
+# npm needs a package to exist before a publisher can be added to it
+# (npm/cli#8544), and no publisher existed yet. 0.2.0 then failed the same
+# way: the publisher was still absent, and an unset NPM_TOKEN made setup-node
+# write an .npmrc declaring an empty _authToken, which reads as auth that is
+# configured and wrong rather than auth that is missing.
 #
 # No `environment:` on the publish job. npm matches the environment as an OIDC
 # claim, so a block here must be mirrored by --env there or the exchange fails.
