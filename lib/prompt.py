@@ -8,16 +8,23 @@ not, and --defaults for no terminal at all.
 
 from __future__ import annotations
 
+import os
 import sys
-from typing import NamedTuple, Optional, Sequence, TextIO
+from typing import Callable, NamedTuple, Optional, Sequence, TextIO
 
 # The vocabulary Claude Code's own menus use. The verb order is fixed, and
 # inapplicable keys drop out: a single-select never shows space.
 _KEYS = {
-    "select": ("up down navigate", "enter confirm", "esc back"),
-    "multiselect": ("up down navigate", "space toggle", "enter confirm", "esc back"),
-    "confirm": ("up down navigate", "enter confirm", "esc back"),
+    "select": ("{nav} to navigate", "Enter to confirm", "Esc to go back"),
+    "multiselect": ("{nav} to navigate", "Space to toggle", "Enter to confirm", "Esc to go back"),
+    "confirm": ("{nav} to navigate", "Enter to confirm", "Esc to go back"),
 }
+
+# Arrow glyphs read as the keys they name, where the terminal can print them.
+# A terminal under LANG=C cannot, and writing one there raises rather than
+# degrading, so the bar falls back to words it can always encode.
+_NAV_GLYPH, _NAV_PLAIN = "\u2191/\u2193", "up/down"
+_SEP_GLYPH, _SEP_PLAIN = " \u00b7 ", " - "
 
 
 class Cancelled(Exception):
@@ -30,8 +37,23 @@ class Option(NamedTuple):
     available: bool = True
 
 
-def key_bar(kind: str) -> str:
-    return " - ".join(_KEYS[kind])
+def _encodable(stream: Optional[TextIO], text: str) -> bool:
+    """Whether `stream` can print `text` without raising."""
+    encoding = getattr(stream, "encoding", None) or "ascii"
+    try:
+        text.encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        return False
+    return True
+
+
+def key_bar(kind: str, stream: Optional[TextIO] = None) -> str:
+    """The key hints for one kind of question, in one line."""
+    stream = sys.stdout if stream is None else stream
+    glyphs = _encodable(stream, _NAV_GLYPH + _SEP_GLYPH)
+    nav = _NAV_GLYPH if glyphs else _NAV_PLAIN
+    separator = _SEP_GLYPH if glyphs else _SEP_PLAIN
+    return separator.join(part.format(nav=nav) for part in _KEYS[kind])
 
 
 def is_interactive(stdin: Optional[TextIO] = None) -> bool:
@@ -45,40 +67,91 @@ def is_interactive(stdin: Optional[TextIO] = None) -> bool:
         return False
 
 
+_ARROWS = {"A": "up", "B": "down", "C": "right", "D": "left"}
+
+# The byte that ends a CSI sequence, per ECMA-48: anything from `@` to `~`.
+# Parameters and intermediates come before it and are all below `@`.
+_CSI_FINAL = frozenset(chr(c) for c in range(0x40, 0x7F))
+
+UNKNOWN = "unknown"
+
+
+def _decode_key(read_byte: Callable[[], str], more_waiting: Callable[[], bool]) -> str:
+    """Name one keypress, given a way to read a byte and to ask for another.
+
+    An arrow key arrives as three bytes: escape, `[`, then a letter. Escape
+    pressed alone arrives as one. Telling them apart means reading the first
+    byte, then asking whether more are waiting, which is what `more_waiting`
+    answers.
+
+    A sequence that is not an arrow returns `UNKNOWN` rather than "esc", and
+    every caller ignores it. Home, End, Page Up, Shift+Tab, the function
+    keys, a bracketed paste and a mouse click all arrive as escape sequences.
+    Naming them "esc" cancelled the wizard, because "esc" means go back.
+
+    Separated from `_get_key` so the naming can be tested without a terminal.
+    """
+    ch = read_byte()
+    if ch == "\x03":  # Ctrl+C
+        raise Cancelled("Cancelled by user")
+    if ch == "\x1b":
+        if not more_waiting():
+            return "esc"  # Escape by itself.
+        intro = read_byte()
+        if intro == "[":
+            # Read to the end of the sequence whatever it turns out to be, so
+            # no trailing byte is left to be read as a keypress of its own.
+            body = ""
+            while True:
+                b = read_byte()
+                body += b
+                if b in _CSI_FINAL:
+                    break
+            return _ARROWS[body] if body in _ARROWS else UNKNOWN
+        if intro == "O":
+            read_byte()  # SS3: one byte follows, and none of them navigate.
+            return UNKNOWN
+        return UNKNOWN
+    if ch in ("\r", "\n"):
+        return "enter"
+    if ch == " ":
+        return "space"
+    return ch
+
+
 def _get_key(stdin: TextIO) -> str:
-    """Read a single key or escape sequence in raw mode."""
+    """Read a single key or escape sequence in raw mode.
+
+    Bytes come off the file descriptor rather than through `stdin.read`. A
+    terminal hands over all three bytes of an arrow key at once, and a text
+    wrapper pulls every one of them into its own buffer on the first read.
+    `select` then looks at the descriptor, finds nothing waiting, and
+    concludes that Escape was pressed by itself. Every arrow key cancelled
+    the wizard. Staying at the descriptor leaves the remaining bytes where
+    `select` can see them.
+    """
     import select as select_mod
     import termios
     import tty
 
     fd = stdin.fileno()
+
+    def read_byte() -> str:
+        data = os.read(fd, 1)
+        if not data:  # The terminal closed mid-question.
+            raise Cancelled("Cancelled by user")
+        # latin-1 maps every byte to a character and never raises. Only ASCII
+        # keys are named below, so a stray byte becomes a character that no
+        # branch matches, which is what should happen to it.
+        return data.decode("latin-1")
+
+    def more_waiting() -> bool:
+        return bool(select_mod.select([fd], [], [], 0.05)[0])
+
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        ch = stdin.read(1)
-        if ch == "\x03":  # Ctrl+C
-            raise Cancelled("Cancelled by user")
-        if ch == "\x1b":  # Escape sequence
-            r, _, _ = select_mod.select([stdin], [], [], 0.05)
-            if not r:
-                raise Cancelled("Cancelled by user")
-            ch2 = stdin.read(1)
-            if ch2 == "[":
-                ch3 = stdin.read(1)
-                if ch3 == "A":
-                    return "up"
-                elif ch3 == "B":
-                    return "down"
-                elif ch3 == "C":
-                    return "right"
-                elif ch3 == "D":
-                    return "left"
-            return "esc"
-        if ch in ("\r", "\n"):
-            return "enter"
-        if ch == " ":
-            return "space"
-        return ch
+        return _decode_key(read_byte, more_waiting)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
@@ -91,7 +164,7 @@ def _select_raw(
     stdout: TextIO,
 ) -> int:
     current = max(0, min(default_index, len(options) - 1))
-    bar = key_bar("select")
+    bar = key_bar("select", stdout)
     lines_rendered = 0
 
     stdout.write("\x1b[?25l")  # Hide cursor
@@ -140,7 +213,7 @@ def _multiselect_raw(
 ) -> list[int]:
     current = 0
     selected = set(preselected)
-    bar = key_bar("multiselect")
+    bar = key_bar("multiselect", stdout)
     lines_rendered = 0
 
     stdout.write("\x1b[?25l")  # Hide cursor

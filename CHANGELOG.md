@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.2]
+
+### Fixed
+
+- **Arrow keys cancelled `copydesk setup` instead of navigating it.** The key reader took the first byte through a text wrapper, which pulled the rest of the escape sequence into its own buffer. The `select` that asks whether more bytes are waiting then looked at an empty file descriptor and concluded that Escape had been pressed alone. Bytes now come off the descriptor, where `select` can see them.
+- **Any unrecognised escape sequence cancelled the wizard.** Home, End, Page Up, Page Down, Shift+Tab, the function keys, a bracketed paste and a mouse click all arrive as escape sequences, and all of them were read as a bare Escape. The reader now consumes each sequence to its end and ignores the ones that do not navigate.
+
+### Changed
+
+- **The key hint bar uses arrow glyphs**: `↑/↓ to navigate · Space to toggle · Enter to confirm · Esc to go back`. A terminal that cannot encode them, such as one running under `LANG=C`, gets `up/down to navigate - Space to toggle - ...` instead, because writing a glyph such a terminal cannot print raises rather than degrading.
+
 ## [0.2.1]
 
 ### Changed
