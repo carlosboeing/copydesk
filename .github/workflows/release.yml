@@ -104,13 +104,26 @@ jobs:
               process.exit(1);
             }
 
-            // Working memory, tests and evaluation data must never publish.
-            const forbidden = files.filter(f =>
-              f.startsWith("eval/") || f.startsWith("tests/") ||
-              f.startsWith("docs/") || f.startsWith(".workbench/") ||
-              f.includes("__pycache__") || f.endsWith(".pyc"));
-            if (forbidden.length) {
-              console.error("::error::must not publish: " + forbidden.join(", "));
+            // An allowlist, not a blocklist. Every packed path must fall under
+            // package.json `files`, or be one npm always includes. A blocklist
+            // only catches the leaks somebody thought of; this catches any path
+            // that appears because `files` was widened. The `!` entries are
+            // package.json's own exclusions and are checked after.
+            const spec = require("./package.json").files;
+            const allowed = spec.filter(a => !a.startsWith("!"));
+            const always = ["LICENSE", "README.md", "package.json"];
+            const stray = files.filter(f =>
+              !always.includes(f) &&
+              !allowed.some(a => a.endsWith("/") ? f.startsWith(a) : f === a));
+            if (stray.length) {
+              console.error("::error::not covered by package.json files: " + stray.join(", "));
+              process.exit(1);
+            }
+
+            const compiled = files.filter(f =>
+              f.includes("__pycache__") || f.endsWith(".pyc") || f.endsWith(".pyo"));
+            if (compiled.length) {
+              console.error("::error::compiled Python must not publish: " + compiled.join(", "));
               process.exit(1);
             }
 
