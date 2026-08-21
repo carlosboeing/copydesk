@@ -36,6 +36,14 @@ If a rule fires on prose you believe is fine, open an issue with the sentence. A
 
 `CLAUDE.md` lists six frozen items, including rule identifiers and the command-line surface. A pull request changing one of them needs to say why the break is worth it.
 
+## Pull requests and issues
+
+Open a pull request with [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md). Filing with `gh pr create --body` skips the template, so apply it by hand.
+
+A body is read by people who have never seen the branch. Open with what changes and why. Cite files in this repository by path. Paste the test output rather than asserting that it passed.
+
+An issue title is one clause under 60 characters naming the change or the symptom. A body says what was measured and cites `file:line` for code that already exists.
+
 ## Commits
 
 Conventional Commits: `<type>(<scope>): <description>`, imperative mood, subject at most 72 characters. The body explains why.
