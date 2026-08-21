@@ -461,28 +461,47 @@ def _merge_channels(base: dict, layer: dict, source: Path, warnings: list, prove
     return merged
 
 
+class _Discover:
+    """The default for the three config paths: go and find that layer.
+
+    `None` used to mean this, which left no way to say "read no user config".
+    Callers that meant it wrote `user_path=None` and were given the user's
+    file anyway, so the instruction generator rendered the shipped output
+    styles from whatever the contributor had installed.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - for a failed assertion
+        return "<discover>"
+
+
+DISCOVER = _Discover()
+
+
 def resolve(
     rules_dir: Path,
     target: Optional[Union[str, Path]] = None,
     *,
     default_preset: str = "plain",
-    user_path: Optional[Path] = None,
-    project_path: Optional[Path] = None,
-    local_path: Optional[Path] = None,
+    user_path: Union[Path, None, _Discover] = DISCOVER,
+    project_path: Union[Path, None, _Discover] = DISCOVER,
+    local_path: Union[Path, None, _Discover] = DISCOVER,
     channel: Optional[str] = None,
 ) -> dict:
     """Return the effective preset for one document.
+
+    Each of the three config paths takes a `Path` to read, `None` to skip
+    that layer, or `DISCOVER` to look for it. `DISCOVER` is the default.
 
     Raises ConfigError. Callers fail open and report rather than blocking.
     """
     layers: list[tuple[Path, dict]] = []
 
-    if user_path is None:
+    if isinstance(user_path, _Discover):
         user_path = user_config_path()
-    if project_path is None and target is not None:
-        project_path = project_config_path(target)
-    if local_path is None and target is not None:
-        local_path = local_config_path(target)
+    if isinstance(project_path, _Discover):
+        project_path = project_config_path(target) if target is not None else None
+    if isinstance(local_path, _Discover):
+        local_path = local_config_path(target) if target is not None else None
 
     warnings: list[str] = []
     for path, kind in ((user_path, "user"), (project_path, "project"), (local_path, "local")):
