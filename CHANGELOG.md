@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.3]
+
+### Fixed
+
+- **Escape inside a Customize question crashed the wizard.** The style, verbosity and guidance questions had no handler for it, so `Cancelled` reached the top and Python printed a traceback. Escape now returns to the question before it, which is what the key bar has always said it does.
+- **Escape went nowhere useful even where it did not crash.** The six questions that caught it ended setup outright. Escape now moves back one question everywhere, and cancels only at the first question, where there is nothing behind it.
+
+### Changed
+
+- **Git has its own question.** It was the eighth entry in a list of AI tools, mixing two different things: the other seven configure an assistant in your home directory, while git installs a commit-msg hook into whichever repository you run setup from. The new question says so: `Check your commit messages in this repository too?`
+- **Going back and forward again keeps your answer.** Each question offers what you chose last time as its default rather than resetting.
+
 ## [0.2.2]
 
 ### Fixed

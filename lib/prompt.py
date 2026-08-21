@@ -56,6 +56,29 @@ def key_bar(kind: str, stream: Optional[TextIO] = None) -> str:
     return separator.join(part.format(nav=nav) for part in _KEYS[kind])
 
 
+def ask_in_order(steps: Sequence[Callable[[], None]]) -> None:
+    """Ask each step in turn. Escape goes back to the one before it.
+
+    Escape at the first step re-raises `Cancelled`, so nesting one run of
+    this inside another puts the user back at the enclosing question rather
+    than ending the wizard. A wizard whose groups nest that way gets working
+    back-navigation without a state machine: the call stack is the history.
+
+    Steps take no arguments and record their own answers, so a step re-asked
+    on the way back can offer what was chosen the first time as its default.
+    """
+    index = 0
+    while index < len(steps):
+        try:
+            steps[index]()
+        except Cancelled:
+            if index == 0:
+                raise
+            index -= 1
+            continue
+        index += 1
+
+
 def is_interactive(stdin: Optional[TextIO] = None) -> bool:
     stream = stdin or sys.stdin
     try:

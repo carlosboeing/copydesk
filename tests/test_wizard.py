@@ -587,5 +587,34 @@ class ExistingSettingsTests(unittest.TestCase):
         self.assertEqual(json.loads(self.settings.read_text(encoding="utf-8"))["model"], "opus")
 
 
+class GitIsNotAnAIToolTests(unittest.TestCase):
+    """Git has its own question.
+
+    It was an entry in the AI-tools list, which mixed two things: seven
+    entries write into the home directory and configure an assistant, and
+    the eighth writes a hook into whichever repository you happen to be in.
+    """
+
+    def test_the_registry_still_carries_git(self) -> None:
+        # The control. If git left the registry the test below would pass by
+        # accident, and the commit-msg hook would have no adapter at all.
+        self.assertIn("git", adapters.REGISTRY)
+        self.assertEqual(adapters.REGISTRY["git"].label, "Git commit messages")
+
+    def test_the_tools_question_asks_about_ai_tools_only(self) -> None:
+        # The wizard builds its options from the registry minus git. Asserting
+        # on the copy would not catch a list built the old way, so this walks
+        # the source for the exclusion the flow depends on.
+        source = (ROOT / "lib" / "wizard.py").read_text()
+        self.assertIn('name != "git"', source)
+
+    def test_the_git_question_says_where_it_writes(self) -> None:
+        # A user reading it should know the hook goes into this repository
+        # rather than into their home directory like everything else.
+        self.assertIn("repository", wizard.COPY["git"].lower())
+        self.assertIn("commit-msg hook", wizard.COPY["git_yes"])
+        self.assertIn("home directory", wizard.COPY["git_no_because"])
+
+
 if __name__ == "__main__":
     unittest.main()

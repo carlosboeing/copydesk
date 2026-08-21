@@ -374,5 +374,70 @@ class OneReaderTests(unittest.TestCase):
         self.assertEqual(found, ["read"])
 
 
+class AskInOrderTests(unittest.TestCase):
+    """`ask_in_order`, the thing that makes "Esc to go back" true.
+
+    No terminal needed: the steps raise `Cancelled` directly, which is what
+    a picker does when the user presses Escape.
+    """
+
+    def test_escape_re_asks_the_step_before(self) -> None:
+        asked: list = []
+        escaped = []
+
+        def first() -> None:
+            asked.append("first")
+
+        def second() -> None:
+            asked.append("second")
+            if not escaped:
+                escaped.append(True)
+                raise prompt.Cancelled("esc")
+
+        prompt.ask_in_order([first, second])
+        self.assertEqual(asked, ["first", "second", "first", "second"])
+
+    def test_escape_at_the_first_step_re_raises(self) -> None:
+        # The caller decides what is behind the first question. At the top of
+        # the wizard that is nothing, so it cancels; inside a group it is the
+        # question that opened the group.
+        def only() -> None:
+            raise prompt.Cancelled("esc")
+
+        with self.assertRaises(prompt.Cancelled):
+            prompt.ask_in_order([only])
+
+    def test_a_nested_group_hands_escape_back_to_its_opener(self) -> None:
+        # This is the reported defect in miniature. Escape at the first
+        # question inside Customize has to reach the preset question, which
+        # is a step in the enclosing list, not end the wizard.
+        asked: list = []
+        tried = []
+
+        def outer_first() -> None:
+            asked.append("preset")
+
+        def inner_first() -> None:
+            asked.append("style")
+            if not tried:
+                tried.append(True)
+                raise prompt.Cancelled("esc")
+
+        def outer_second() -> None:
+            prompt.ask_in_order([inner_first])
+
+        prompt.ask_in_order([outer_first, outer_second])
+        self.assertEqual(asked, ["preset", "style", "preset", "style"])
+
+    def test_every_step_runs_once_when_nobody_escapes(self) -> None:
+        # The control. Without it the tests above could pass on a driver that
+        # re-ran steps for no reason.
+        asked: list = []
+        # `name=name` binds now. Without it every lambda closes over the same
+        # variable and all three append whatever it ended up as.
+        prompt.ask_in_order([lambda name=name: asked.append(name) for name in ("a", "b", "c")])
+        self.assertEqual(asked, ["a", "b", "c"])
+
+
 if __name__ == "__main__":
     unittest.main()
