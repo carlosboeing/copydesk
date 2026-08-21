@@ -15,6 +15,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import apply  # noqa: E402
 
 
+def install_block(path: Path, block: str) -> None:
+    """Put a marked region into `path` the way setup does.
+
+    Setup reads, splices and writes through a plan. These tests only need the
+    region to be there before they exercise removal, so they take the same
+    route rather than hand-rolling the marker text.
+    """
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    result = apply.execute(
+        apply.Plan(writes=[apply.Write(path, apply.splice_marked_block(existing, block))])
+    )
+    assert result.ok, result.message
+
+
 class SymlinkTests(unittest.TestCase):
     def setUp(self) -> None:
         self.home = Path(tempfile.mkdtemp())
@@ -33,13 +47,18 @@ class SymlinkTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in plan[0].aliases), ["agents-AGENTS.md", "codex-AGENTS.md"])
 
     def test_the_write_goes_through_the_link_not_over_it(self) -> None:
+        # Setup names the link, `plan_targets` resolves it, and the write goes
+        # to the resolved file. Writing the link itself would replace one
+        # shared instruction file with several.
         real = self.home / "CLAUDE.md"
         real.write_text("original\n", encoding="utf-8")
         link = self.home / "AGENTS.md"
         link.symlink_to(real)
-        apply.write_marked_block(link, "BLOCK")
+        [target] = apply.plan_targets([link], block="BLOCK")
+        install_block(target.real, target.block)
         self.assertTrue(link.is_symlink())
         self.assertIn("BLOCK", real.read_text(encoding="utf-8"))
+        self.assertIn("original", real.read_text(encoding="utf-8"))
 
 
 class MarkedBlockTests(unittest.TestCase):
@@ -48,21 +67,34 @@ class MarkedBlockTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.home)
 
     def test_a_re_run_replaces_the_region(self) -> None:
-        target = self.home / "AGENTS.md"
-        target.write_text("keep me\n", encoding="utf-8")
-        apply.write_marked_block(target, "FIRST")
-        apply.write_marked_block(target, "SECOND")
-        text = target.read_text(encoding="utf-8")
-        self.assertIn("keep me", text)
-        self.assertIn("SECOND", text)
-        self.assertNotIn("FIRST", text)
-        self.assertEqual(text.count("<!-- copydesk:start -->"), 1)
+        first = apply.splice_marked_block("keep me\n", "FIRST")
+        second = apply.splice_marked_block(first, "SECOND")
+        self.assertIn("keep me", second)
+        self.assertIn("SECOND", second)
+        self.assertNotIn("FIRST", second)
+        self.assertEqual(second.count(apply.MARKER_START), 1)
+
+    def test_a_first_run_appends_one_blank_line_and_no_more(self) -> None:
+        # The separator rule. `remove_marked_block` strips what this adds, so
+        # the two have to agree on it for an uninstall to be byte-exact.
+        self.assertEqual(
+            apply.splice_marked_block("keep me\n", "BLOCK"),
+            "keep me\n\n<!-- copydesk:start -->\nBLOCK\n<!-- copydesk:end -->\n",
+        )
+        self.assertEqual(
+            apply.splice_marked_block("keep me\n\n", "BLOCK"),
+            "keep me\n\n<!-- copydesk:start -->\nBLOCK\n<!-- copydesk:end -->\n",
+        )
+        self.assertEqual(
+            apply.splice_marked_block("", "BLOCK"),
+            "<!-- copydesk:start -->\nBLOCK\n<!-- copydesk:end -->\n",
+        )
 
     def test_removing_the_block_leaves_the_file_as_it_was(self) -> None:
         target = self.home / "AGENTS.md"
         original = "keep me\n"
         target.write_text(original, encoding="utf-8")
-        apply.write_marked_block(target, "FIRST")
+        install_block(target, "FIRST")
         apply.remove_marked_block(target)
         self.assertEqual(target.read_text(encoding="utf-8"), original)
 
@@ -124,7 +156,7 @@ class UninstallResidueTests(unittest.TestCase):
 
     def test_a_file_copydesk_created_is_removed_when_its_region_goes(self) -> None:
         target = self.home / "AGENTS.md"
-        apply.write_marked_block(target, "BLOCK")
+        install_block(target, "BLOCK")
         self.assertTrue(target.is_file())
         apply.remove_marked_block(target)
         self.assertFalse(target.exists(), "an empty file CopyDesk created is litter")
@@ -135,7 +167,7 @@ class UninstallResidueTests(unittest.TestCase):
         target = self.home / "AGENTS.md"
         original = "# My own instructions\n\nKeep these.\n"
         target.write_text(original, encoding="utf-8")
-        apply.write_marked_block(target, "BLOCK")
+        install_block(target, "BLOCK")
         apply.remove_marked_block(target)
         self.assertTrue(target.is_file())
         self.assertEqual(target.read_text(encoding="utf-8"), original)
@@ -143,7 +175,7 @@ class UninstallResidueTests(unittest.TestCase):
     def test_a_file_of_only_whitespace_counts_as_empty(self) -> None:
         target = self.home / "AGENTS.md"
         target.write_text("\n\n", encoding="utf-8")
-        apply.write_marked_block(target, "BLOCK")
+        install_block(target, "BLOCK")
         apply.remove_marked_block(target)
         self.assertFalse(target.exists())
 

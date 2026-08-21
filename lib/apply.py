@@ -54,23 +54,21 @@ def plan_targets(paths: Sequence[Union[str, Path]], block: str) -> list[Target]:
     return list(by_real.values())
 
 
-def write_marked_block(path: Path, block: str) -> None:
-    """Replace CopyDesk's region, or append one. Writes through a symlink.
+def splice_marked_block(existing: str, block: str) -> str:
+    """Return `existing` with CopyDesk's region replaced, or appended if absent.
 
-    Opening the path given rather than its target means a link stays a link.
-    Replacing the file would turn one shared instruction file into several.
+    Pure by design. Every write goes through `execute` so the plan can roll
+    back, which means the new text has to exist before anything touches disk.
+    A variant that read the file itself would also have to decide what an
+    unreadable file means, and that is the caller's decision: setup lets the
+    read raise, so an unreadable file stops the run instead of being replaced
+    by CopyDesk's region alone.
     """
     region = f"{MARKER_START}\n{block}\n{MARKER_END}\n"
-    try:
-        existing = path.read_text(encoding="utf-8")
-    except OSError:
-        existing = ""
     if _REGION.search(existing):
-        updated = _REGION.sub(region, existing, count=1)
-    else:
-        separator = "" if not existing or existing.endswith("\n\n") else "\n"
-        updated = existing + separator + region
-    path.write_text(updated, encoding="utf-8")
+        return _REGION.sub(region, existing, count=1)
+    separator = "" if not existing or existing.endswith("\n\n") else "\n"
+    return existing + separator + region
 
 
 def remove_marked_block(path: Path) -> None:
@@ -88,7 +86,7 @@ def remove_marked_block(path: Path) -> None:
         # zero-byte file behind is litter an uninstall should not produce.
         path.unlink(missing_ok=True)
         return
-    # The separator write_marked_block added goes with it.
+    # The separator splice_marked_block added goes with it.
     path.write_text(updated.rstrip("\n") + "\n", encoding="utf-8")
 
 

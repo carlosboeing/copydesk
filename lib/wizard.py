@@ -479,13 +479,7 @@ def _build_plan(
             orig = ""
             if target.real.is_file():
                 orig = target.real.read_text(encoding="utf-8")
-            region = f"{apply.MARKER_START}\n{agents_body}\n{apply.MARKER_END}\n"
-            if apply._REGION.search(orig):
-                new_content = apply._REGION.sub(region, orig, count=1)
-            else:
-                sep = "" if not orig or orig.endswith("\n\n") else "\n"
-                new_content = orig + sep + region
-            writes.append(apply.Write(target.real, new_content))
+            writes.append(apply.Write(target.real, apply.splice_marked_block(orig, agents_body)))
 
     return apply.Plan(writes=writes)
 

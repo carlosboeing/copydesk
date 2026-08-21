@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.1]
+
+### Changed
+
+- **Marked-block splicing has one implementation.** `apply.splice_marked_block(existing, block)` returns the new file text and touches no disk, so setup computes every region before the plan writes anything. The setup wizard calls it instead of repeating the splice and reaching into a private regular expression.
+
+### Removed
+
+- **`apply.write_marked_block`.** No production code called it. It also caught `OSError` on read and continued with empty text, so a file that existed but could not be read would have been replaced by CopyDesk's region alone. Setup lets that read raise, which stops the run before any write. The seven tests that covered it moved onto the surviving path.
+
 ## [0.2.0]
 
 ### Added
