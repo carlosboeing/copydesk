@@ -1,4 +1,10 @@
-"""The prompt kit, driven through pipes rather than a terminal."""
+"""The prompt kit: through pipes where that is enough, through a real
+pseudo-terminal where it is not.
+
+The arrow-key defect lived in the gap between those two. Reading a key
+through a pipe never reproduced it, because a pipe delivers what was
+written and a terminal delivers a whole escape sequence at once.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +12,7 @@ import io
 import sys
 import unittest
 from pathlib import Path
+from typing import Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
@@ -198,6 +205,173 @@ except prompt.Cancelled:
         # The control. Without it the test above could pass by naming every
         # sequence an arrow, which would break the documented esc-to-go-back.
         self.assertEqual(self._press(b"\x1b"), "esc")
+
+
+class EveryPickerTests(unittest.TestCase):
+    """Arrow keys through the three public entry points, on a real terminal.
+
+    Every interactive question the wizard asks -- the rerun fork, the tools,
+    the channels, the preset, the style, the verbosity, the guidance, the
+    apply confirmation and the uninstall confirmation -- is one of `select`,
+    `multiselect` or `confirm`. Driving those three covers all of them, and
+    `OneReaderTests` below is what keeps that true.
+    """
+
+    SCRIPT = """
+import sys
+sys.path.insert(0, {lib!r})
+import prompt
+OPTIONS = [prompt.Option("first", "", True),
+           prompt.Option("second", "", True),
+           prompt.Option("third", "", True)]
+devnull = open("/dev/null", "w")
+try:
+    sys.stderr.write("RESULT=%r" % (prompt.{call},))
+except prompt.Cancelled:
+    sys.stderr.write("RESULT=cancelled")
+sys.stderr.flush()
+"""
+
+    TAIL = ", stdin=sys.stdin, stdout=devnull)"
+
+    def setUp(self) -> None:
+        try:
+            import pty  # noqa: F401
+        except ImportError:  # pragma: no cover - Windows
+            self.skipTest("no pty on this platform")
+
+    def _drive(self, call: str, presses: Sequence[bytes]) -> str:
+        """Run one picker on a pseudo-terminal and press `presses` at it.
+
+        One keypress per write. The picker puts the terminal in raw mode to
+        read a key and takes it out again afterwards, so a burst written in
+        one go lands partly in a cooked terminal and does not survive.
+        """
+        import os
+        import pty
+        import select
+        import time
+
+        lib = str(Path(__file__).resolve().parents[1] / "lib")
+        source = self.SCRIPT.format(lib=lib, call=call)
+        pid, fd = pty.fork()
+        if pid == 0:  # pragma: no cover - the child execs immediately
+            os.execv(sys.executable, [sys.executable, "-c", source])
+
+        out = b""
+
+        def collect(seconds: float) -> None:
+            nonlocal out
+            end = time.time() + seconds
+            while time.time() < end and b"RESULT=" not in out:
+                if not select.select([fd], [], [], 0.05)[0]:
+                    continue
+                try:
+                    chunk = os.read(fd, 65536)
+                except OSError:  # the child exited and closed the terminal
+                    return
+                if not chunk:
+                    return
+                out += chunk
+
+        collect(0.4)
+        for press in presses:
+            os.write(fd, press)
+            collect(0.15)
+        collect(2.0)
+
+        try:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        except (ProcessLookupError, ChildProcessError):  # pragma: no cover
+            pass
+        os.close(fd)
+        text = out.decode(errors="replace")
+        return text.split("RESULT=", 1)[1].strip() if "RESULT=" in text else text.strip()
+
+    # Sequences a terminal sends that must move nothing and cancel nothing.
+    NOISE = [b"\x1b[H", b"\x1b[F", b"\x1b[5~", b"\x1b[6~", b"\x1b[Z", b"\x1bOP", b"\x1b[200~"]
+
+    def test_select_navigates(self) -> None:
+        call = "select('Pick one', OPTIONS, 0" + self.TAIL
+        self.assertEqual(self._drive(call, [b"\x1b[B"] + self.NOISE + [b"\r"]), "1")
+
+    def test_select_wraps_from_the_top(self) -> None:
+        call = "select('Pick one', OPTIONS, 0" + self.TAIL
+        self.assertEqual(self._drive(call, [b"\x1b[A", b"\r"]), "2")
+
+    def test_multiselect_toggles_the_row_the_arrows_reached(self) -> None:
+        call = "multiselect('Pick some', OPTIONS, ()" + self.TAIL
+        self.assertEqual(self._drive(call, [b"\x1b[B", b"\x1b[B"] + self.NOISE + [b" ", b"\r"]), "[2]")
+
+    def test_confirm_reads_the_arrow_not_the_default(self) -> None:
+        # `confirm` is a two-option select, and it is the question `uninstall`
+        # asks. Down moves off Yes, so the answer has to be False.
+        call = "confirm('Proceed?', True" + self.TAIL
+        self.assertEqual(self._drive(call, [b"\x1b[B"] + self.NOISE + [b"\r"]), "False")
+
+    def test_escape_still_cancels_every_one_of_them(self) -> None:
+        # The control. Without it each test above could pass by ignoring every
+        # key, including the one that means stop.
+        for name, call in [
+            ("select", "select('Pick one', OPTIONS, 0" + self.TAIL),
+            ("multiselect", "multiselect('Pick some', OPTIONS, ()" + self.TAIL),
+            ("confirm", "confirm('Proceed?', True" + self.TAIL),
+        ]:
+            with self.subTest(picker=name):
+                self.assertEqual(self._drive(call, [b"\x1b"]), "cancelled")
+
+
+class OneReaderTests(unittest.TestCase):
+    """No picker may read the terminal by itself.
+
+    The arrow-key defect was one function reading stdin its own way. A second
+    picker added later could reintroduce it without any behaviour test
+    noticing, because it would have its own tests and they would pass.
+    """
+
+    def test_only_get_key_touches_the_terminal(self) -> None:
+        import ast
+
+        source = (Path(__file__).resolve().parents[1] / "lib" / "prompt.py").read_text()
+        tree = ast.parse(source)
+        offenders = []
+        inner = {
+            n
+            for f in ast.walk(tree)
+            if isinstance(f, ast.FunctionDef) and f.name == "_get_key"
+            for n in ast.walk(f)
+            if isinstance(n, ast.FunctionDef)
+        }
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef) or node in inner:
+                continue
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Attribute):
+                    continue
+                target = call.func
+                base = target.value
+                name = getattr(base, "id", None) or getattr(base, "attr", None)
+                if target.attr in {"read", "read1"} and name in {"stdin", "os", "buffer"}:
+                    offenders.append(f"{node.name} calls {name}.{target.attr}")
+        self.assertEqual(
+            offenders, [], "every picker must go through _get_key, which handles escape sequences"
+        )
+
+    def test_the_check_can_see_an_offender(self) -> None:
+        # The control for the test above, which would otherwise pass on an
+        # empty tree or a broken walk.
+        import ast
+
+        tree = ast.parse("def picker(stdin):\n    return stdin.read(1)\n")
+        found = [
+            n.func.attr
+            for f in ast.walk(tree)
+            if isinstance(f, ast.FunctionDef)
+            for n in ast.walk(f)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "read"
+        ]
+        self.assertEqual(found, ["read"])
 
 
 if __name__ == "__main__":
