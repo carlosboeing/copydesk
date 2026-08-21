@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **`resolve()` ignored a caller that asked for no user configuration.** `user_path=None` meant "go and find it" rather than "read none", so twenty-six call sites that opted out were handed the file anyway. `None` now skips that layer and a `DISCOVER` sentinel is the default.
+- **The instruction generator read the contributor's own configuration.** On a machine with CopyDesk installed, `scripts/generate-instructions.py --check` failed, and running the generator would have written personal settings into the three committed output styles. It now resolves the preset alone.
+
 ## [0.2.3]
 
 ### Fixed

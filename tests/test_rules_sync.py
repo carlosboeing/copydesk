@@ -106,6 +106,78 @@ class GeneratedInstructionTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_a_user_config_does_not_reach_the_generated_styles(self) -> None:
+        """The generator renders what ships, so it must read no configuration.
+
+        It used to resolve through normal discovery. A contributor with
+        CopyDesk installed then had their own verbosity and style baked into
+        three files the repository commits, in a run that looked routine.
+        """
+        import os
+        import shutil
+        import tempfile
+
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home)
+        config_file = home / "copydesk" / "config.json"
+        config_file.parent.mkdir(parents=True)
+        # Every value here differs from what the three styles ship with.
+        config_file.write_text(
+            json.dumps({
+                "version": 1,
+                "channels": {
+                    "chat": {"enabled": True, "style": "editorial", "verbosity": "high"},
+                    "documents": {"enabled": True, "style": "engineer", "verbosity": "low"},
+                },
+            }),
+            encoding="utf-8",
+        )
+
+        environment = dict(os.environ, XDG_CONFIG_HOME=str(home))
+        result = subprocess.run(
+            [sys.executable, str(GENERATOR), "--check"],
+            capture_output=True, text=True, check=False, env=environment,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_that_config_would_have_been_found(self) -> None:
+        """The control for the test above.
+
+        Without it, a fixture written somewhere discovery never looks would
+        make that test pass while proving nothing.
+        """
+        import os
+        import shutil
+        import tempfile
+
+        sys.path.insert(0, str(LIBRARY))
+        import config as config_mod
+
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home)
+        config_file = home / "copydesk" / "config.json"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text(
+            json.dumps({"version": 1, "channels": {"chat": {"enabled": True, "style": "editorial"}}}),
+            encoding="utf-8",
+        )
+
+        previous = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = str(home)
+        try:
+            self.assertEqual(config_mod.user_config_path(), config_file)
+            discovered = config_mod.resolve(REPOSITORY_ROOT / "rules")
+            self.assertEqual(discovered["channels"]["chat"]["style"], "editorial")
+            skipped = config_mod.resolve(
+                REPOSITORY_ROOT / "rules", user_path=None, project_path=None, local_path=None
+            )
+            self.assertNotEqual(skipped["channels"]["chat"]["style"], "editorial")
+        finally:
+            if previous is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = previous
+
     def test_reminder_word_count_agrees_with_the_linter(self) -> None:
         """The precis is re-sent every turn, so its length is a measured cost."""
         instructions_dict = preset()["instructions"]

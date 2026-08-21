@@ -9,3 +9,10 @@ __pycache__/
 
 # Worktrees
 .worktrees/
+
+# Hooks `copydesk setup` installs into this repository. It writes to
+# `core.hooksPath`, so the directory name is whatever the contributor has
+# configured; `my-hooks` and `.githooks` are the common ones. The tracked
+# sources live in `git-hooks/` and are unaffected.
+my-hooks/
+.githooks/

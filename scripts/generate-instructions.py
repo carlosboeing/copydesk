@@ -180,7 +180,12 @@ def main() -> int:
     args = parser.parse_args()
 
     preset = json.loads(PRESET_PATH.read_text(encoding="utf-8"))
-    resolved = config_mod.resolve(BUNDLE_ROOT / "rules")
+    # No discovery. This renders what the package ships, so a contributor
+    # with CopyDesk installed must not have their own settings baked into
+    # files the repository commits.
+    resolved = config_mod.resolve(
+        BUNDLE_ROOT / "rules", user_path=None, project_path=None, local_path=None
+    )
 
     words = len(preset["instructions"]["reminder"].split())
     declared = preset["instructions"]["reminder_word_count"]
