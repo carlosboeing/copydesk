@@ -332,21 +332,32 @@ def _resolved_from(config_body: str) -> dict:
     with tempfile.TemporaryDirectory() as directory:
         staged = Path(directory) / "config.json"
         staged.write_text(config_body, encoding="utf-8")
-        return config_mod.resolve(
-            BUNDLE_ROOT / "rules", None,
-            user_path=staged, project_path=None, local_path=None, channel="chat",
-        )
+        return _resolve_user_config(staged)
 
 
-def _read_config(path: Path) -> dict:
-    """The user's own config, or an empty object when there is none to read."""
+def _resolve_user_config(path: Path) -> dict:
+    """One config file, resolved the way `linter.user_layer()` resolves it."""
+    return config_mod.resolve(
+        BUNDLE_ROOT / "rules", None,
+        user_path=path, project_path=None, local_path=None, channel="chat",
+    )
+
+
+def _read_config(path: Path) -> Optional[dict]:
+    """The user's own config, and which of three cases this is.
+
+    `{}` means there is no file, so there is nothing to preserve. A dict means
+    a file that read, whatever keys it holds. `None` means a file is there and
+    could not be read, which is the case setup must refuse rather than write
+    over: its contents were never understood, so no plan can preserve them.
+    """
     if not path.is_file():
         return {}
     try:
         document = json.loads(jsonc.strip_comments(path.read_text(encoding="utf-8")))
     except (OSError, ValueError):
-        return {}
-    return document if isinstance(document, dict) else {}
+        return None
+    return document if isinstance(document, dict) else None
 
 
 def _build_plan(
@@ -511,13 +522,20 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
     selected_tools = available_tools
 
     existing_config = _read_config(config_file) if args.repair else {}
-    # Repairing an install that has settings preserves them. Repairing one
-    # with no readable config has nothing to preserve, so it falls through to
-    # the defaults below and writes a fresh config.
-    repairing_settings = bool(existing_config.get("channels"))
+    if existing_config is None:
+        out_stream.write(
+            f"error  {config_file} exists and cannot be read. "
+            "Fix it or move it aside, then run setup again.\n"
+        )
+        return 1
+    # Any config that reads is the user's own writing, whatever keys it holds.
+    # Testing for `channels` alone discarded one carrying only rules, paths,
+    # gate or telemetry settings. Repairing with no config at all has nothing
+    # to preserve, so it falls through to the defaults below and writes one.
+    repairing_settings = bool(existing_config)
 
     if repairing_settings:
-        channels_settings = existing_config["channels"]
+        channels_settings = existing_config.get("channels") or {}
         recorded = existing_config.get("agents")
         if isinstance(recorded, list):
             kept = [name for name in recorded if name in adapters.REGISTRY]
@@ -640,7 +658,14 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
     config_body = _format_config(channels_settings, selected_tools)
 
     try:
-        resolved_config = _resolved_from(config_body)
+        # A repair renders from the config on disk, never from a body rebuilt
+        # out of `channels_settings`. Rebuilding drops every key the wizard
+        # does not write — rules, paths, gate, telemetry — so the installed
+        # styles would differ from what doctor resolves out of the same file.
+        resolved_config = (
+            _resolve_user_config(config_file) if repairing_settings
+            else _resolved_from(config_body)
+        )
     except config_mod.ConfigError as error:
         out_stream.write(f"error  {error}\n")
         return 1

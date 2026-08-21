@@ -238,6 +238,36 @@ class FlagTests(unittest.TestCase):
         self._run("--repair", "--yes")
         self.assertTrue((self.home / ".claude" / "hooks" / "copydesk" / "gate.sh").is_file())
 
+    def test_repair_keeps_a_config_that_has_no_channels_block(self) -> None:
+        # A config of rules alone is valid and is the user's own writing. The
+        # preserve test used to read `channels` specifically, so this file was
+        # treated as nothing to preserve and overwritten with defaults.
+        config_path = self.home / "config" / "copydesk" / "config.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(
+            '{\n  "version": 1,\n'
+            '  "rules": {"banned-word": {"add": ["synergy"]}}\n}\n',
+            encoding="utf-8",
+        )
+        before = config_path.read_text(encoding="utf-8")
+        result = self._run("--repair", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(config_path.read_text(encoding="utf-8"), before)
+
+    def test_repair_refuses_a_config_it_cannot_read(self) -> None:
+        # Unreadable is not the same as absent. Reading them as one wrote
+        # defaults over a file whose contents were never understood.
+        config_path = self.home / "config" / "copydesk" / "config.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text("{ not json", encoding="utf-8")
+        result = self._run("--repair", "--yes")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(config_path.read_text(encoding="utf-8"), "{ not json")
+        self.assertFalse(
+            (self.home / ".claude" / "hooks" / "copydesk").exists(),
+            "setup wrote before refusing",
+        )
+
     def test_repair_with_no_config_writes_one(self) -> None:
         # The control. Repair has nothing to preserve on a fresh machine, so
         # there it behaves as a first install rather than skipping the config.
