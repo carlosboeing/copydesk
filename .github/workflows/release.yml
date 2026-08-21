@@ -2,18 +2,25 @@ name: release
 
 # Publishes to npm when a version tag is pushed.
 #
-# Authentication, in order of preference:
+# Authentication is trusted publishing, and nothing else. GitHub mints a
+# short-lived OIDC credential that npm verifies against a publisher configured
+# on the package. There is no npm token in this repository and none on
+# anybody's laptop, which is the point: a stored publish credential is the
+# thing worth not having. CrossRev publishes the same way.
 #
-#   1. Trusted publishing (OIDC). No secret at all. npm mints a short-lived,
-#      workflow-specific credential that cannot be exfiltrated or reused.
-#      Configure it at npmjs.com under the package's Settings, Trusted Publisher.
+# Configure the publisher once, against this file:
 #
-#   2. An NPM_TOKEN repository secret. Needed for the FIRST publish only,
-#      because npm requires a package to exist before a trusted publisher can
-#      be added to it. See https://github.com/npm/cli/issues/8544.
+#   npm trust github copydesk --file release.yml \
+#     --repo carlosboeing/copydesk --allow-publish
 #
-# After the first release, delete the NPM_TOKEN secret and this workflow keeps
-# working through OIDC.
+# 0.1.0 went out on an NPM_TOKEN secret, because npm needs a package to exist
+# before a publisher can be added to it (npm/cli#8544). That secret is gone.
+# 0.2.0 failed with ENEEDAUTH because the publisher was never added in its
+# place, and because an absent NPM_TOKEN still made setup-node write an
+# .npmrc declaring an empty _authToken.
+#
+# No `environment:` on the publish job. npm matches the environment as an OIDC
+# claim, so a block here must be mirrored by --env there or the exchange fails.
 
 on:
   push:
@@ -37,7 +44,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v5
         with:
@@ -121,19 +128,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: github.event_name == 'push' || inputs.dry_run == false
-    environment:
-      name: npm
-      url: https://www.npmjs.com/package/copydesk
     permissions:
       contents: write   # to create the GitHub Release
       id-token: write   # to mint the OIDC credential for trusted publishing
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false   # never cache in a release build
 
       - name: Trusted publishing needs npm 11.5.1 or later
         run: |
@@ -141,10 +146,10 @@ jobs:
           npm --version
 
       - name: Publish
-        # NODE_AUTH_TOKEN is consumed only when the NPM_TOKEN secret exists.
-        # With trusted publishing configured, it is empty and npm uses OIDC.
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # No NODE_AUTH_TOKEN. With the secret absent it resolves to an empty
+        # string, and setup-node still writes an .npmrc declaring _authToken=,
+        # which reads as auth that is configured and wrong rather than absent.
+        # OIDC is the only credential, which is the point of trusted publishing.
         run: npm publish --access public --provenance
 
       - name: Create the GitHub Release
@@ -170,7 +175,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
       - uses: actions/setup-python@v5
