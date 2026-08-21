@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import NamedTuple, Optional, Sequence, TextIO
+from typing import Callable, NamedTuple, Optional, Sequence, TextIO
 
 BUNDLE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BUNDLE_ROOT / "lib"))
@@ -114,6 +114,14 @@ COPY = {
         "It configures plain style instructions and installs gate hooks."
     ),
     "tools": "Which AI tools should CopyDesk configure?",
+    # Git is asked separately. It is not an AI tool, and it is the only
+    # question whose answer touches the current directory rather than the
+    # home directory, which is worth saying rather than implying.
+    "git": "Check your commit messages in this repository too?",
+    "git_yes": "Install a commit-msg hook here",
+    "git_yes_because": "git rejects a message that breaks a rule, so you fix it and retry.",
+    "git_no": "Leave this repository alone",
+    "git_no_because": "nothing is written outside your home directory, and nothing here changes.",
     "where": "Where should CopyDesk apply your writing rules?",
     "review": "These files will change:",
     "confirm": "Apply these changes?",
@@ -562,28 +570,53 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
         out_stream.write(COPY["intro"] + "\n\n")
         out_stream.flush()
 
-        # Tools multiselect. Git is on the list whenever this directory is a
-        # repository, because that is where its hook goes.
-        tool_options = [
-            prompt.Option(
-                adapters.REGISTRY[name].label,
-                adapters.REGISTRY[name].installs if name in available_tools else _missing(name),
-                name in available_tools,
-            )
-            for name in adapters.REGISTRY
-        ]
-        tool_names = list(adapters.REGISTRY)
-        preselected_tools = [i for i, name in enumerate(tool_names) if name in available_tools]
-        try:
-            chosen_tool_indices = prompt.multiselect(
-                COPY["tools"], tool_options, preselected_tools, stdin=in_stream, stdout=out_stream
-            )
-            selected_tools = [tool_names[i] for i in chosen_tool_indices]
-        except prompt.Cancelled:
-            out_stream.write(COPY["outro_cancelled"] + "\n")
-            return 0
+        # Every question below is a step. `prompt.ask_in_order` runs a list of
+        # them and sends Escape back to the one before, and a step that is
+        # itself a list nests: Escape at its first question re-raises, which
+        # lands the user on the question that opened the group. Escape at the
+        # very first question has nothing behind it, so it cancels.
+        #
+        # Each step reads its own last answer for its default, so going back
+        # and forward again shows what was chosen rather than resetting.
+        answers: dict = {}
 
-        # Channels selection
+        # Git is asked on its own. It is not an AI tool, and its hook goes
+        # into this repository rather than the home directory.
+        harness_names = [name for name in adapters.REGISTRY if name != "git"]
+
+        def ask_tools() -> None:
+            options = [
+                prompt.Option(
+                    adapters.REGISTRY[name].label,
+                    adapters.REGISTRY[name].installs if name in available_tools else _missing(name),
+                    name in available_tools,
+                )
+                for name in harness_names
+            ]
+            default = answers.get(
+                "tool_indices",
+                [i for i, name in enumerate(harness_names) if name in available_tools],
+            )
+            chosen = prompt.multiselect(
+                COPY["tools"], options, default, stdin=in_stream, stdout=out_stream
+            )
+            answers["tool_indices"] = chosen
+            answers["tools"] = [harness_names[i] for i in chosen]
+
+        def ask_git() -> None:
+            if not in_repository:
+                answers["git"] = False
+                return
+            options = [
+                prompt.Option(COPY["git_yes"], COPY["git_yes_because"], True),
+                prompt.Option(COPY["git_no"], COPY["git_no_because"], True),
+            ]
+            chosen = prompt.select(
+                COPY["git"], options, answers.get("git_index", 0), stdin=in_stream, stdout=out_stream
+            )
+            answers["git_index"] = chosen
+            answers["git"] = chosen == 0
+
         channel_names = ["chat", "documents", "commits", "reviews"]
         channel_labels = {
             "chat": ("Chat replies", "conversation with coding assistants"),
@@ -591,73 +624,96 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
             "commits": ("Commit messages", "git commit subjects and bodies"),
             "reviews": ("Pull request reviews", "review comments and summaries"),
         }
-        channel_options = [
-            prompt.Option(channel_labels[ch][0], channel_labels[ch][1], True)
-            for ch in channel_names
-        ]
-        preselected_channels = [i for i, ch in enumerate(channel_names) if CHANNEL_PRESELECTED[ch]]
-        try:
-            chosen_channel_indices = prompt.multiselect(
-                COPY["where"], channel_options, preselected_channels, stdin=in_stream, stdout=out_stream
+
+        def ask_channels() -> None:
+            options = [
+                prompt.Option(channel_labels[ch][0], channel_labels[ch][1], True)
+                for ch in channel_names
+            ]
+            default = answers.get(
+                "channel_indices",
+                [i for i, ch in enumerate(channel_names) if CHANNEL_PRESELECTED[ch]],
             )
-        except prompt.Cancelled:
-            out_stream.write(COPY["outro_cancelled"] + "\n")
-            return 0
+            chosen = prompt.multiselect(
+                COPY["where"], options, default, stdin=in_stream, stdout=out_stream
+            )
+            answers["channel_indices"] = chosen
+            answers["channels"] = [channel_names[i] for i in chosen]
 
-        selected_channels = [channel_names[i] for i in chosen_channel_indices]
+        def channel_step(ch: str) -> Callable[[], None]:
+            """One channel's questions, as a step in the list above.
 
-        # Per channel configuration
-        for ch in channel_names:
-            enabled = ch in selected_channels
-            if not enabled:
-                channels_settings[ch] = {"enabled": False}
-                continue
-
+            The preset question and the Customize sub-questions are their own
+            group, so Escape inside Customize returns to the preset question
+            rather than to the channel before this one.
+            """
             presets = PRESETS[ch]
-            preset_options = [prompt.Option(p.label, p.consequence, True) for p in presets]
-            try:
-                chosen_preset_idx = prompt.select(
+
+            def ask_preset() -> None:
+                options = [prompt.Option(pre.label, pre.consequence, True) for pre in presets]
+                chosen = prompt.select(
                     f"{channel_labels[ch][0]} - how should they read?",
-                    preset_options,
-                    0,
+                    options,
+                    answers.get(f"{ch}.preset", 0),
                     stdin=in_stream,
                     stdout=out_stream,
                 )
-            except prompt.Cancelled:
-                out_stream.write(COPY["outro_cancelled"] + "\n")
-                return 0
+                answers[f"{ch}.preset"] = chosen
 
-            chosen_preset = presets[chosen_preset_idx]
-            if chosen_preset.label == "Customize…":
-                style_opts = [prompt.Option(s, styles.DESCRIPTIONS.get(s, "")) for s in styles.STYLE_NAMES]
-                style_idx = prompt.select(
-                    f"Which style? (channels.{ch}.style)", style_opts, 0, stdin=in_stream, stdout=out_stream
+            def ask_style() -> None:
+                options = [
+                    prompt.Option(name, styles.DESCRIPTIONS.get(name, ""))
+                    for name in styles.STYLE_NAMES
+                ]
+                answers[f"{ch}.style"] = prompt.select(
+                    f"Which style? (channels.{ch}.style)",
+                    options,
+                    answers.get(f"{ch}.style", 0),
+                    stdin=in_stream,
+                    stdout=out_stream,
                 )
-                sel_style = styles.STYLE_NAMES[style_idx]
 
-                verb_opts = [prompt.Option(v, "") for v in instructions.VERBOSITY_LEVELS]
-                verb_idx = prompt.select(
-                    f"How much detail? (channels.{ch}.verbosity)", verb_opts, 0, stdin=in_stream, stdout=out_stream
+            def ask_verbosity() -> None:
+                options = [prompt.Option(v, "") for v in instructions.VERBOSITY_LEVELS]
+                answers[f"{ch}.verbosity"] = prompt.select(
+                    f"How much detail? (channels.{ch}.verbosity)",
+                    options,
+                    answers.get(f"{ch}.verbosity", 0),
+                    stdin=in_stream,
+                    stdout=out_stream,
                 )
-                sel_verb = instructions.VERBOSITY_LEVELS[verb_idx]
 
-                guidance_ids = list(guidance.IDS)
-                guid_opts = [prompt.Option(gid, guidance.SNIPPETS.get(gid, "")) for gid in guidance_ids]
-                guid_indices = prompt.multiselect(
+            def ask_guidance() -> None:
+                ids = list(guidance.IDS)
+                options = [prompt.Option(gid, guidance.SNIPPETS.get(gid, "")) for gid in ids]
+                answers[f"{ch}.guidance"] = prompt.multiselect(
                     f"Guidance deliverables (channels.{ch}.guidance)",
-                    guid_opts,
-                    [],
+                    options,
+                    answers.get(f"{ch}.guidance", []),
                     stdin=in_stream,
                     stdout=out_stream,
                 )
-                guid_dict = {guidance_ids[i]: True for i in guid_indices}
-                channels_settings[ch] = {
-                    "enabled": True,
-                    "style": sel_style,
-                    "verbosity": sel_verb,
-                    "guidance": guid_dict,
-                }
-            else:
+
+            def ask_customize() -> None:
+                if presets[answers[f"{ch}.preset"]].label != "Customize\u2026":
+                    return
+                prompt.ask_in_order([ask_style, ask_verbosity, ask_guidance])
+
+            def run() -> None:
+                if ch not in answers["channels"]:
+                    channels_settings[ch] = {"enabled": False}
+                    return
+                prompt.ask_in_order([ask_preset, ask_customize])
+                chosen_preset = presets[answers[f"{ch}.preset"]]
+                if chosen_preset.label == "Customize\u2026":
+                    ids = list(guidance.IDS)
+                    channels_settings[ch] = {
+                        "enabled": True,
+                        "style": styles.STYLE_NAMES[answers[f"{ch}.style"]],
+                        "verbosity": instructions.VERBOSITY_LEVELS[answers[f"{ch}.verbosity"]],
+                        "guidance": {ids[i]: True for i in answers[f"{ch}.guidance"]},
+                    }
+                    return
                 # `enabled` is written out rather than implied. Reviews ship
                 # off, so a channel the user ticked would come back off when
                 # the config is read against the defaults.
@@ -669,6 +725,21 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
                 if chosen_preset.guidance:
                     ch_dict["guidance"] = {g: True for g in chosen_preset.guidance}
                 channels_settings[ch] = ch_dict
+
+            return run
+
+        def ask_every_channel() -> None:
+            prompt.ask_in_order([channel_step(ch) for ch in channel_names])
+
+        try:
+            prompt.ask_in_order([ask_tools, ask_git, ask_channels, ask_every_channel])
+        except prompt.Cancelled:
+            out_stream.write(COPY["outro_cancelled"] + "\n")
+            return 0
+
+        selected_tools = list(answers["tools"])
+        if answers.get("git"):
+            selected_tools.append("git")
     else:
         channels_settings = _default_channels()
 
