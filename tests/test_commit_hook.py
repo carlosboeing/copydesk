@@ -92,6 +92,30 @@ class CommitMessageTests(unittest.TestCase):
         result = self._commit("fix(auth): expire reset tokens after first use")
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_a_banned_word_in_the_subject_is_refused(self) -> None:
+        # The subject is the line every reader sees, so the prose rules reach
+        # it. "Add" is imperative and the line is short, so banned-word is the
+        # only rule that can refuse this.
+        result = self._commit("Add a robust retry to the gate")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("banned-word", result.stderr + result.stdout)
+
+    def test_the_same_subject_without_the_banned_word_commits(self) -> None:
+        # The control. Without it the test above could pass by refusing every
+        # subject that opens with "Add".
+        result = self._commit("Add a retry to the gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_banned_word_in_the_body_is_refused_at_its_own_line(self) -> None:
+        result = self._commit(
+            "Expire reset tokens after first use\n\nA used token was really valid for an hour."
+        )
+        self.assertNotEqual(result.returncode, 0)
+        # Line 3 of the message, not line 2 of the body. The subject and the
+        # blank line after it are counted, so the number names the line the
+        # author is looking at.
+        self.assertIn("3:banned-word", result.stderr + result.stdout)
+
     def test_a_subject_over_72_characters_is_refused(self) -> None:
         long_subject = "Expire the password reset tokens after their very first successful use here"
         result = self._commit(long_subject)

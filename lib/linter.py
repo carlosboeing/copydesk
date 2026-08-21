@@ -2141,7 +2141,7 @@ def run_commit_msg(path: str) -> int:
             lines.pop(0)
         if not lines:
             return 0  # an empty message is git's business
-        subject, rest = lines[0], "\n".join(lines[1:])
+        subject, message = lines[0], "\n".join(lines)
 
         findings = []
         if len(subject) > SUBJECT_MAX:
@@ -2154,7 +2154,10 @@ def run_commit_msg(path: str) -> int:
                 f'1:imperative-subject:"{opener}" is not imperative. '
                 "Write the subject as an instruction."
             )
-        findings.extend(f.render() for f in lint(rest, path=path) if f.severity == "error")
+        # The whole message, subject included. Linting the body alone let a
+        # blocking word through in the one line every reader sees, and it
+        # reported body findings one line short of where they sit.
+        findings.extend(f.render() for f in lint(message, path=path) if f.severity == "error")
 
         for finding in findings:
             print(finding, file=sys.stderr)
