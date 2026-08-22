@@ -408,6 +408,9 @@ class StalenessNoticeTests(unittest.TestCase):
         os.environ["XDG_STATE_HOME"] = str(self.home / "state")
         try:
             cfg = linter.user_layer()
+            fresh = instructions.render_output_style(
+                cfg, "low", writer=instructions.SETUP_WRITER
+            )
         finally:
             if env_prev is None:
                 os.environ.pop("XDG_CONFIG_HOME", None)
@@ -417,14 +420,9 @@ class StalenessNoticeTests(unittest.TestCase):
                 os.environ.pop("XDG_STATE_HOME", None)
             else:
                 os.environ["XDG_STATE_HOME"] = state_prev
-        fresh = instructions.render_output_style_body(cfg, "low")
-        marker = instructions.fingerprint(fresh)
         style_path = self.home / ".claude" / "output-styles" / "copydesk-low.md"
         style_path.parent.mkdir(parents=True, exist_ok=True)
-        style_path.write_text(
-            f"---\nname: CopyDesk low\n---\n<!-- copydesk-build:{marker} -->\n{fresh}\n",
-            encoding="utf-8",
-        )
+        style_path.write_text(fresh, encoding="utf-8")
 
     def test_a_changed_user_config_makes_the_installed_style_stale(self) -> None:
         self._install_style_matching_current_config()
@@ -462,6 +460,101 @@ class StalenessNoticeTests(unittest.TestCase):
                 os.environ.pop("XDG_STATE_HOME", None)
             else:
                 os.environ["XDG_STATE_HOME"] = state_prev
+
+
+class StaleOutputStyleTests(unittest.TestCase):
+    """What the stamp covers decides which drift is visible.
+
+    The stamp used to cover the rules body alone, so a frontmatter fix
+    could never make an older install read as stale: the body matched, the
+    marker matched, and every check called the file fresh while it
+    advertised another style.
+    """
+
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+        self.config_path = self.home / ".config" / "copydesk" / "config.json"
+        self.config_path.parent.mkdir(parents=True)
+        self._set_chat_style("engineer")
+        previous = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = str(self.home / ".config")
+
+        def restore() -> None:
+            if previous is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = previous
+
+        self.addCleanup(restore)
+
+    def _set_chat_style(self, style: str) -> None:
+        self.config_path.write_text(
+            json.dumps({"version": 1, "channels": {"chat": {"style": style}}}),
+            encoding="utf-8",
+        )
+
+    def _install(self, text: str) -> Path:
+        path = self.home / ".claude" / "output-styles" / "copydesk-low.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def _pre_040_install(self) -> str:
+        """What 0.3.x wrote: the preset's description, the generator named
+        as writer, and a stamp over the rules body alone."""
+        layer = linter.user_layer()
+        body = instructions.render_output_style_body(layer, "low")
+        old = PRESET["instructions"]["output_style"]
+        return (
+            "---\n"
+            "name: CopyDesk low\n"
+            f"description: {old['description']}\n"
+            f"keep-coding-instructions: {str(old['keep_coding_instructions']).lower()}\n"
+            "---\n\n"
+            f"<!-- Generated from rules/{layer.get('id', 'plain')}.json"
+            " by scripts/generate-instructions.py. Do not edit by hand. -->\n"
+            f"<!-- copydesk-build:{instructions.fingerprint(body)} -->\n\n"
+            f"{instructions.RULES_START}\n{body}\n{instructions.RULES_END}\n"
+        )
+
+    def _current_render(self) -> str:
+        layer = linter.user_layer()
+        return instructions.render_output_style(
+            layer, "low", writer=instructions.SETUP_WRITER
+        )
+
+    def test_a_pre_040_body_only_stamp_reads_as_stale(self) -> None:
+        # Config and body are current; only the frontmatter predates 0.4.0.
+        # That is exactly what an install upgraded across 0.4.0 looks like,
+        # and it must be told to repair rather than be called fresh.
+        installed = self._install(self._pre_040_install())
+        self.assertIn(styles.DESCRIPTIONS["plain"], installed.read_text(encoding="utf-8"))
+        self.assertEqual(linter.stale_output_styles(self.home), ["copydesk-low.md"])
+
+    def test_a_frontmatter_description_from_another_style_reads_as_stale(self) -> None:
+        # Installed while the config picked plain, then the config moved to
+        # engineer: the installed frontmatter no longer names the configured
+        # style, and the check must see that in the frontmatter itself.
+        self._set_chat_style("plain")
+        installed = self._install(self._current_render())
+        self.assertIn(styles.DESCRIPTIONS["plain"], installed.read_text(encoding="utf-8"))
+        self._set_chat_style("engineer")
+        fresh = self._current_render()
+        installed_description = [
+            line for line in installed.read_text(encoding="utf-8").splitlines()
+            if line.startswith("description:")
+        ]
+        fresh_description = [
+            line for line in fresh.splitlines() if line.startswith("description:")
+        ]
+        self.assertNotEqual(installed_description, fresh_description)
+        self.assertEqual(linter.stale_output_styles(self.home), ["copydesk-low.md"])
+
+    def test_a_file_rendered_at_this_commit_reads_as_fresh(self) -> None:
+        # The control for both tests above.
+        self._install(self._current_render())
+        self.assertEqual(linter.stale_output_styles(self.home), [])
 
 
 class ChannelBlockTests(unittest.TestCase):
