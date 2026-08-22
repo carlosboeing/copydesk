@@ -149,7 +149,7 @@ USAGE = """usage: copydesk setup [--defaults] [--yes] [--dry-run] [--repair]
        copydesk doctor [<file>] [--rules]
        copydesk stats [--since <window>] [--json]
        copydesk report [--since <window>] [--out <path>]
-       copydesk hook add [<path>...] [--scan <dir>] [--yes]
+       copydesk hook add [<path>...] [--scan <dir>] [--all] [--yes]
        copydesk hook remove [<path>...] [--all] [--yes]
        copydesk hook list
        copydesk --version

@@ -46,19 +46,29 @@ MARKER_PHRASE = "CopyDesk commits gate"
 # for those words and a chained entry lives inside a script CopyDesk did not
 # write. A block marked any other way would read as missing, and every chained
 # entry would be pruned the first time anything looked.
+#
+# The block is appended last, so its own last command sets the hook's exit
+# status. It captures the foreign script's status first — the line above it
+# is a comment, and comments do not run — and exits with it, so a foreign
+# refusal survives chaining and a passing check exits 0.
 BLOCK_START = "# >>> CopyDesk commits gate >>>"
 BLOCK_END = "# <<< CopyDesk commits gate <<<"
 
 CHAINED_BLOCK = """# >>> CopyDesk commits gate >>>
+foreign=$?
 COPYDESK="${COPYDESK_BIN:-copydesk}"
 "$COPYDESK" check --commit-msg "$1"; status=$?
-[ "$status" -eq 1 ] && exit 1
-[ "$status" -gt 1 ] && echo "copydesk: exit $status; commit allowed" >&2
+if [ "$status" -eq 1 ]; then exit 1; fi
+if [ "$status" -gt 1 ]; then echo "copydesk: exit $status; commit allowed" >&2; fi
+exit "$foreign"
 # <<< CopyDesk commits gate <<<
 """
 
+# Both marker lines tolerate leading whitespace: _chain_instructions prints
+# the block indented, and a verbatim paste must still strip cleanly.
 _BLOCK_REGION = re.compile(
-    r"^" + re.escape(BLOCK_START) + r"\n.*?" + re.escape(BLOCK_END) + r"\n?",
+    r"^[ \t]*" + re.escape(BLOCK_START) + r"\n.*?"
+    r"^[ \t]*" + re.escape(BLOCK_END) + r"\n?",
     re.DOTALL | re.MULTILINE,
 )
 
@@ -372,10 +382,14 @@ def remove_entry(
         return True
     if BLOCK_START in content:
         stripped = strip_block(content)
-        if stripped is not None:
-            hook_file.write_text(stripped, encoding="utf-8")
-            stdout.write(f"stripped  {hook_file} (the rest of the script is untouched)\n")
-            return True
+        if stripped is None:
+            # The start marker is there but the block does not match. Deleting
+            # would take a script CopyDesk did not write with it.
+            stdout.write(f"left  {hook_file} (the marker is present but the block could not be located)\n")
+            return False
+        hook_file.write_text(stripped, encoding="utf-8")
+        stdout.write(f"stripped  {hook_file} (the rest of the script is untouched)\n")
+        return True
     hook_file.unlink()
     stdout.write(f"removed  {hook_file}\n")
     return True
@@ -452,7 +466,7 @@ def _cmd_add_one(cwd: Path, *, yes: bool, stdin: TextIO, stdout: TextIO) -> int:
         except OSError as error:
             stdout.write(f"error  cannot write {hook_file}: {error}\n")
             return 1
-        record_repository(cwd, "ours")
+        record_repository(cwd, "installed")
         stdout.write(f"installed  {hook_file}\n")
         return 0
 
@@ -471,10 +485,10 @@ def _cmd_add_one(cwd: Path, *, yes: bool, stdin: TextIO, stdout: TextIO) -> int:
         if content != canonical:
             hook_file.write_text(canonical, encoding="utf-8")
             hook_file.chmod(0o755)
-            record_repository(cwd, "ours")
+            record_repository(cwd, "installed")
             stdout.write(f"updated  {hook_file}\n")
             return 0
-        record_repository(cwd, "ours")
+        record_repository(cwd, "installed")
         stdout.write(f"already installed  {hook_file}\n")
         return 0
 
@@ -503,7 +517,7 @@ def _cmd_add_one(cwd: Path, *, yes: bool, stdin: TextIO, stdout: TextIO) -> int:
         record_repository(cwd, "chained")
         stdout.write(f"chained  {hook_file} (verified: the block runs)\n")
         return 0
-    record_repository(cwd, "chained-unverified")
+    record_repository(cwd, "unreachable")
     stdout.write(
         f"appended  {hook_file}, but a test run never reached the block -\n"
         f"          the script exits above it, so the commits gate is not live.\n"
@@ -515,8 +529,11 @@ def _cmd_add(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     if args.scan is not None and args.paths:
         print("error: --scan takes a directory instead of paths", file=sys.stderr)
         return 64
+    if args.all and args.scan is None:
+        print("error: --all needs --scan", file=sys.stderr)
+        return 64
     if args.scan is not None:
-        return _cmd_add_scan(Path(args.scan), args.yes, stdin, stdout)
+        return _cmd_add_scan(Path(args.scan), args.all, args.yes, stdin, stdout)
     paths = [Path(p) for p in args.paths] or [Path.cwd()]
     result = 0
     for path in paths:
@@ -524,7 +541,7 @@ def _cmd_add(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     return result
 
 
-def _cmd_add_scan(scan_dir: Path, yes: bool, stdin: TextIO, stdout: TextIO) -> int:
+def _cmd_add_scan(scan_dir: Path, take_all: bool, yes: bool, stdin: TextIO, stdout: TextIO) -> int:
     """Offer the repositories one level under `scan_dir`. Nothing is a default."""
     if not scan_dir.is_dir():
         print(f"error: {scan_dir} is not a directory", file=sys.stderr)
@@ -536,7 +553,7 @@ def _cmd_add_scan(scan_dir: Path, yes: bool, stdin: TextIO, stdout: TextIO) -> i
     if not candidates:
         stdout.write(f"No git repositories found under {scan_dir}.\n")
         return 0
-    if yes:
+    if take_all:
         chosen = candidates
     else:
         options = []
@@ -624,7 +641,8 @@ def run(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[TextIO
     add_parser = subcommands.add_parser("add", help="install the hook and record the repository")
     add_parser.add_argument("paths", nargs="*", help="repositories to add (default: here)")
     add_parser.add_argument("--scan", metavar="DIR", help="offer the repositories one level under DIR")
-    add_parser.add_argument("--yes", "-y", action="store_true", help="chain foreign hooks without asking")
+    add_parser.add_argument("--all", action="store_true", help="with --scan, take every repository found without asking")
+    add_parser.add_argument("--yes", "-y", action="store_true", help="skip the chaining question for foreign hooks")
 
     remove_parser = subcommands.add_parser("remove", help="remove the hook and forget the repository")
     remove_parser.add_argument("paths", nargs="*", help="repositories to remove (default: here)")

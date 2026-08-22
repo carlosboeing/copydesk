@@ -819,7 +819,7 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
         # Setup wrote every hook currently on disk, and the registry starts
         # empty on upgrade. Recording here is what lets `copydesk hook list`
         # name this repository without `hook add` ever running.
-        hook.record_repository(repository, "ours")
+        hook.record_repository(repository, "installed")
         out_stream.write(COPY["outro_hook_next"] + "\n")
     elif hook_plan is not None:
         # A hook someone else wrote stayed in place. Recording the skip makes

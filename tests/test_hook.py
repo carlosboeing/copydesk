@@ -145,7 +145,7 @@ class AddTests(HookCommandCase):
         entries = self._entries()
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["git_dir"], str((repo / ".git").resolve()))
-        self.assertEqual(entries[0]["state"], "ours")
+        self.assertEqual(entries[0]["state"], "installed")
 
     def test_add_in_a_plain_directory_says_so(self) -> None:
         plain = self.tmp / "plain"
@@ -180,7 +180,7 @@ class ListTests(HookCommandCase):
         self._cli("hook", "add", cwd=repo)
         result = self._cli("hook", "list")
         self.assertIn(str(repo), result.stdout)
-        self.assertIn("ours", result.stdout)
+        self.assertIn("installed", result.stdout)
 
         shutil.rmtree(repo)
         result = self._cli("hook", "list")
@@ -340,7 +340,7 @@ class ChainingTests(HookCommandCase):
         result = self._cli("hook", "add", "--yes", cwd=repo)
         self.assertEqual(result.returncode, 1)
         self.assertIn("never reached", result.stdout)
-        self.assertEqual(self._entries()[0]["state"], "chained-unverified")
+        self.assertEqual(self._entries()[0]["state"], "unreachable")
 
     def test_a_hook_that_refuses_every_message_is_also_unverified(self) -> None:
         # The control for the probe's shape: it proves reachability rather
@@ -350,7 +350,7 @@ class ChainingTests(HookCommandCase):
         self._write_foreign_hook(repo, "#!/bin/sh\necho no >&2\nexit 1\n")
         result = self._cli("hook", "add", "--yes", cwd=repo)
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(self._entries()[0]["state"], "chained-unverified")
+        self.assertEqual(self._entries()[0]["state"], "unreachable")
 
     def test_a_reachable_chain_is_verified(self) -> None:
         # The control for both tests above: without them, a probe that always
@@ -371,6 +371,87 @@ class ChainingTests(HookCommandCase):
         self.assertEqual(self._entries()[0]["state"], "skipped")
 
 
+class ChainedBlockExecutionTests(HookCommandCase):
+    """The appended block is the hook's last word, so it sets the exit status.
+
+    A passing CopyDesk must exit 0 and preserve the foreign script's own
+    status; only exit 1 from CopyDesk refuses the commit.
+    """
+
+    def _run_chained(self, foreign_body: str, stub_exit: int) -> subprocess.CompletedProcess:
+        scratch = self.tmp / "run"
+        scratch.mkdir(exist_ok=True)
+        stub = scratch / f"stub{stub_exit}"
+        stub.write_text(f"#!/bin/sh\nexit {stub_exit}\n", encoding="utf-8")
+        stub.chmod(0o755)
+        message = scratch / "message"
+        message.write_text("fix: expire reset tokens after first use\n", encoding="utf-8")
+        chained = scratch / f"chained-{stub_exit}-{abs(hash(foreign_body))}"
+        chained.write_text(foreign_body + hook.CHAINED_BLOCK, encoding="utf-8")
+        chained.chmod(0o755)
+        return subprocess.run(
+            [str(chained), str(message)],
+            capture_output=True, text=True,
+            env=dict(CLEAN_ENV, COPYDESK_BIN=str(stub)),
+        )
+
+    def test_a_passing_copydesk_lets_the_commit_through(self) -> None:
+        result = self._run_chained("#!/bin/sh\necho theirs\n", stub_exit=0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_refusal_still_refuses(self) -> None:
+        result = self._run_chained("#!/bin/sh\necho theirs\n", stub_exit=1)
+        self.assertEqual(result.returncode, 1)
+
+    def test_an_internal_error_fails_open_and_says_so(self) -> None:
+        result = self._run_chained("#!/bin/sh\necho theirs\n", stub_exit=3)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("copydesk: exit 3", result.stderr)
+
+    def test_the_foreign_scripts_own_refusal_survives_chaining(self) -> None:
+        # The block reads the foreign script's status before running CopyDesk
+        # and exits with it, so a failing foreign hook still fails.
+        result = self._run_chained("#!/bin/sh\necho theirs\nfalse\n", stub_exit=0)
+        self.assertNotEqual(result.returncode, 0)
+
+
+class StrippedBlockTests(HookCommandCase):
+    """Removal strips the marked region and never deletes a foreign script."""
+
+    def _record_chained(self, repo: Path, content: str) -> Path:
+        hook_file = self._write_foreign_hook(repo, content)
+        # `hook add` records a hook carrying the marker without rewriting it.
+        result = self._cli("hook", "add", "--yes", cwd=repo)
+        self.assertIn("already chained", result.stdout)
+        return hook_file
+
+    def test_an_indented_pasted_block_strips_cleanly(self) -> None:
+        # _chain_instructions prints the block indented. A verbatim paste must
+        # still strip, and the whitespace goes with it.
+        indented = "\n".join(
+            f"             {line}" if line else line
+            for line in hook.CHAINED_BLOCK.rstrip("\n").split("\n")
+        )
+        content = FOREIGN_HOOK + indented + "\n"
+        repo = self._repo("pasted")
+        hook_file = self._record_chained(repo, content)
+        result = self._cli("hook", "remove", "--yes", cwd=repo)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(hook_file.read_text(encoding="utf-8"), FOREIGN_HOOK)
+        self.assertEqual(self._entries(), [])
+
+    def test_a_block_without_its_end_marker_keeps_the_file_and_the_entry(self) -> None:
+        # The start marker is present but the region does not match. Deleting
+        # here would take a script CopyDesk did not write with it.
+        broken = FOREIGN_HOOK + hook.BLOCK_START + "\necho halfway\n"
+        repo = self._repo("broken")
+        hook_file = self._record_chained(repo, broken)
+        result = self._cli("hook", "remove", "--yes", cwd=repo)
+        self.assertIn("could not be located", result.stdout)
+        self.assertEqual(hook_file.read_text(encoding="utf-8"), broken)
+        self.assertEqual(len(self._entries()), 1)
+
+
 class ScanTests(HookCommandCase):
     def test_scan_declined_leaves_no_hook_and_no_entry(self) -> None:
         self._repo("clone-a")
@@ -382,12 +463,13 @@ class ScanTests(HookCommandCase):
         self.assertEqual(self._entries(), [])
         self.assertEqual(list(self.tmp.rglob("commit-msg")), [])
 
-    def test_scan_yes_adds_every_repository_found(self) -> None:
+    def test_scan_all_adds_every_repository_found_without_a_prompt(self) -> None:
         self._repo("clone-a")
         self._repo("clone-b")
         plain = self.tmp / "not-a-repo"
         plain.mkdir()
-        result = self._cli("hook", "add", "--scan", str(self.tmp), "--yes")
+        # No stdin at all: --all must take every candidate without asking.
+        result = self._cli("hook", "add", "--scan", str(self.tmp), "--all")
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertTrue(self._hook(self.tmp / "clone-a").is_file())
         self.assertTrue(self._hook(self.tmp / "clone-b").is_file())
@@ -395,13 +477,32 @@ class ScanTests(HookCommandCase):
         # The scan goes one level deep and offers repositories only.
         self.assertNotIn("not-a-repo", result.stdout)
 
+    def test_scan_yes_alone_still_shows_the_multiselect(self) -> None:
+        # --yes skips the chaining question, never the selection. Declining
+        # leaves no hook and no entry.
+        self._repo("clone-a")
+        self._repo("clone-b")
+        result = self._cli("hook", "add", "--scan", str(self.tmp), "--yes", stdin="\n")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("Add a commit-msg hook to which repositories?", result.stdout)
+        self.assertEqual(self._entries(), [])
+        self.assertEqual(list(self.tmp.rglob("commit-msg")), [])
+
+    def test_all_without_scan_is_a_usage_error_and_writes_nothing(self) -> None:
+        repo = self._repo("clone-a")
+        result = self._cli("hook", "add", "--all", cwd=repo)
+        self.assertEqual(result.returncode, 64)
+        self.assertIn("--all needs --scan", result.stderr)
+        self.assertFalse(self._hook(repo).exists())
+        self.assertEqual(self._entries(), [])
+
     def test_scan_records_a_hook_already_carrying_the_marker(self) -> None:
         repo = self._repo("clone-a")
         canonical = (ROOT / "git-hooks" / "commit-msg").read_text(encoding="utf-8")
         hook_file = self._hook(repo)
         hook_file.parent.mkdir(parents=True, exist_ok=True)
         hook_file.write_text(canonical, encoding="utf-8")
-        result = self._cli("hook", "add", "--scan", str(self.tmp), "--yes")
+        result = self._cli("hook", "add", "--scan", str(self.tmp), "--all")
         self.assertIn("already installed", result.stdout)
         # Recorded, not rewritten: the file is untouched.
         self.assertEqual(hook_file.read_text(encoding="utf-8"), canonical)
