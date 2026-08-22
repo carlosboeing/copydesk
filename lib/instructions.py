@@ -141,9 +141,10 @@ def resolve_verbosity(resolved: dict, environ: dict) -> str:
 def render_output_style_body(resolved: dict, level: str) -> str:
     """The marked rules block of one output style, and nothing around it.
 
-    The generator wraps this in frontmatter; the reminder re-renders it to
-    compare against an installed file's fingerprint. Both must produce the
-    same bytes from the same inputs, so there is one function.
+    `render_output_style` wraps this in frontmatter, and the staleness
+    check re-renders whole installed files through that same function.
+    Both must produce the same bytes from the same inputs, so there is
+    one function.
     """
     return render_chat(with_verbosity(resolved, level))
 
@@ -159,11 +160,16 @@ def render_output_style(resolved: dict, level: str, writer: str) -> str:
     The description follows the configured chat style rather than the
     preset's own block: Claude Code's style picker reads this line, so it
     has to describe the body below it.
+
+    The stamp covers the whole rendered file, its own line excepted, so
+    frontmatter and provenance sit under the same hash as the rules body.
+    A body-only stamp waved every frontmatter change through: fixes to it
+    reached new installs while existing ones read as fresh forever.
     """
     chat_style = ((resolved.get("channels") or {}).get("chat") or {}).get("style", "plain")
     style = (resolved.get("instructions") or {})["output_style"]
     body = render_output_style_body(resolved, level)
-    return (
+    head = (
         "---\n"
         f"name: CopyDesk {level}\n"
         f"description: {styles.DESCRIPTIONS[styles.preset_for(chat_style)]}\n"
@@ -171,9 +177,12 @@ def render_output_style(resolved: dict, level: str, writer: str) -> str:
         "---\n\n"
         f"<!-- Generated from rules/{resolved.get('id', 'plain')}.json"
         f" by {writer}. Do not edit by hand. -->\n"
-        f"<!-- {FINGERPRINT_MARKER}{fingerprint(body)} -->\n\n"
-        f"{RULES_START}\n{body}\n{RULES_END}\n"
+        f"<!-- {FINGERPRINT_MARKER}"
     )
+    tail = f" -->\n\n{RULES_START}\n{body}\n{RULES_END}\n"
+    # The placeholder sits on the marker line, which fingerprint drops, so
+    # hashing this build hashes the finished file.
+    return head + fingerprint(head + "0" * 12 + tail) + tail
 
 
 def with_verbosity(resolved: dict, level: str) -> dict:

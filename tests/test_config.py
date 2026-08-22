@@ -62,17 +62,23 @@ class DiscoveryTests(unittest.TestCase):
         self.assertIsNone(config.project_config_path(document))
 
     def test_user_config_follows_xdg_then_home(self) -> None:
-        saved = os.environ.get("XDG_CONFIG_HOME")
+        saved_config = os.environ.get("XDG_CONFIG_HOME")
+        saved_state = os.environ.get("XDG_STATE_HOME")
         os.environ["XDG_CONFIG_HOME"] = str(self.root)
+        os.environ["XDG_STATE_HOME"] = str(self.root / "state")
         try:
             self.assertIsNone(config.user_config_path())
             written = write_json(self.root / "copydesk" / "config.json", {"version": 1})
             self.assertEqual(config.user_config_path(), written)
         finally:
-            if saved is None:
+            if saved_config is None:
                 os.environ.pop("XDG_CONFIG_HOME", None)
             else:
-                os.environ["XDG_CONFIG_HOME"] = saved
+                os.environ["XDG_CONFIG_HOME"] = saved_config
+            if saved_state is None:
+                os.environ.pop("XDG_STATE_HOME", None)
+            else:
+                os.environ["XDG_STATE_HOME"] = saved_state
 
 
 class ErrorPathTests(unittest.TestCase):
