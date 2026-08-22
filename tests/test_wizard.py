@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -9,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -64,9 +66,14 @@ class CopyRuleTests(unittest.TestCase):
 
     def test_the_wizard_strings_pass_copydesk_check(self) -> None:
         joined = "\n\n".join(every_string())
+        # A state redirection: the CLI linter records what it sees, and this
+        # run is not the developer's own linting.
+        state = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, state)
         result = subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), "check", "-"],
             input=joined, capture_output=True, text=True,
+            env=dict(os.environ, XDG_STATE_HOME=state, COPYDESK_STATE_DIR=state),
         )
         self.assertEqual(result.returncode, 0, result.stdout)
 
@@ -149,6 +156,7 @@ class FlagTests(unittest.TestCase):
             os.environ,
             COPYDESK_HOME=str(self.home),
             XDG_CONFIG_HOME=str(self.home / "config"),
+            XDG_STATE_HOME=str(self.home / "state"),
             PATH=str(self.home / "nothing"),
         )
         return subprocess.run(
@@ -199,6 +207,7 @@ class FlagTests(unittest.TestCase):
             os.environ,
             COPYDESK_HOME=str(empty),
             XDG_CONFIG_HOME=str(empty / "config"),
+            XDG_STATE_HOME=str(empty / "state"),
             PATH=str(empty / "nothing"),
         )
         result = subprocess.run(
@@ -279,6 +288,119 @@ class FlagTests(unittest.TestCase):
         self.assertTrue((self.home / "config" / "copydesk" / "config.json").is_file())
 
 
+class ProofRunTests(unittest.TestCase):
+    """Every proof starts with no history behind it.
+
+    The proof reuses one session id across setups, so its retry state
+    outlived any single run. The third consecutive proof then tripped the
+    gate's identical-content escape valve, and a healthy install reported a
+    failed proof.
+    """
+
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+        (self.home / ".claude").mkdir()
+        self.state = self.home / "state"
+        # Pinned in-process as well as in subprocesses: prove runs gate.sh
+        # from this interpreter's environment, so an unpinned variable would
+        # resolve to the developer's real state directory.
+        self._saved_env = {
+            name: os.environ.get(name)
+            for name in ("COPYDESK_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "COPYDESK_STATE_DIR")
+        }
+        os.environ["COPYDESK_HOME"] = str(self.home)
+        os.environ["XDG_CONFIG_HOME"] = str(self.home / "config")
+        os.environ["XDG_STATE_HOME"] = str(self.state)
+        os.environ.pop("COPYDESK_STATE_DIR", None)
+        self.addCleanup(self._restore_env)
+        env = dict(os.environ, PATH=str(self.home / "nothing"))
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", "--defaults", "--yes"],
+            cwd=self.home, capture_output=True, text=True, env=env, input="",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def _restore_env(self) -> None:
+        for name, value in self._saved_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    def _entries(self) -> dict:
+        state_file = self.state / "copydesk" / "copydesk-setup-proof.json"
+        return json.loads(state_file.read_text(encoding="utf-8"))["files"]
+
+    def test_three_proofs_in_a_row_each_block_and_leave_at_most_one_entry(self) -> None:
+        for attempt in range(1, 4):
+            blocked, reason = wizard.prove(self.home)
+            self.assertTrue(blocked, f"proof {attempt}: {reason}")
+            self.assertLessEqual(len(self._entries()), 1)
+
+    def test_a_proof_clears_entries_left_behind_by_earlier_runs(self) -> None:
+        state_file = self.state / "copydesk" / "copydesk-setup-proof.json"
+        stale = "/an/earlier/temporary/home/copydesk-sample.md"
+        state_file.write_text(json.dumps({"files": {
+            stale: {
+                "content_hash": "stale",
+                "hashes": ["stale"],
+                "streak": 2,
+                "updated_at": time.time(),
+            },
+        }}), encoding="utf-8")
+        blocked, reason = wizard.prove(self.home)
+        self.assertTrue(blocked, reason)
+        self.assertNotIn(stale, self._entries())
+
+
+class RealStateDirectoryTests(unittest.TestCase):
+    """A suite run must leave the developer's own state directory alone.
+
+    The tests once redirected XDG_CONFIG_HOME only, so every gate subprocess
+    resolved the default state path and wrote temporary-home paths into the
+    developer's real proof session file and telemetry log.
+    """
+
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+        (self.home / ".claude").mkdir()
+
+    @staticmethod
+    def _snapshot() -> list:
+        base = Path.home() / ".local" / "state" / "copydesk"
+        if not base.is_dir():
+            return []
+        return sorted(
+            (str(path.relative_to(base)), hashlib.sha256(path.read_bytes()).hexdigest())
+            for path in base.rglob("*")
+            if path.is_file()
+        )
+
+    def test_a_setup_run_touches_only_the_redirected_state(self) -> None:
+        before = self._snapshot()
+        env = dict(
+            os.environ,
+            COPYDESK_HOME=str(self.home),
+            XDG_CONFIG_HOME=str(self.home / "config"),
+            XDG_STATE_HOME=str(self.home / "state"),
+            PATH=str(self.home / "nothing"),
+        )
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", "--defaults", "--yes"],
+            cwd=self.home, capture_output=True, text=True, env=env, input="",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # Control: this run exercised the state path at all. Without a file
+        # under the redirection, the equality below could pass because the
+        # run wrote no state anywhere.
+        self.assertTrue(
+            (self.home / "state" / "copydesk" / "copydesk-setup-proof.json").is_file()
+        )
+        self.assertEqual(self._snapshot(), before)
+
+
 class UninstallTests(unittest.TestCase):
     def setUp(self) -> None:
         self.home = Path(tempfile.mkdtemp())
@@ -299,6 +421,7 @@ class UninstallTests(unittest.TestCase):
             os.environ,
             COPYDESK_HOME=str(self.home),
             XDG_CONFIG_HOME=str(self.home / "config"),
+            XDG_STATE_HOME=str(self.home / "state"),
         )
         # A temporary directory rather than the caller's, so a run of the
         # suite never installs a commit-msg hook into the repository it is
@@ -380,6 +503,7 @@ class CommitHookSetupTests(unittest.TestCase):
             CLEAN_ENV,
             COPYDESK_HOME=str(self.home),
             XDG_CONFIG_HOME=str(self.home / "config"),
+            XDG_STATE_HOME=str(self.home / "state"),
         )
         return subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), *args],
@@ -407,6 +531,7 @@ class CommitHookSetupTests(unittest.TestCase):
             CLEAN_ENV,
             COPYDESK_HOME=str(self.home),
             XDG_CONFIG_HOME=str(self.home / "config"),
+            XDG_STATE_HOME=str(self.home / "state"),
         )
         result = subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", "--defaults", "--yes"],
@@ -469,6 +594,7 @@ class InstalledStyleTests(unittest.TestCase):
             os.environ,
             COPYDESK_HOME=str(self.home),
             XDG_CONFIG_HOME=str(self.home / "config"),
+            XDG_STATE_HOME=str(self.home / "state"),
             PATH=str(self.home / "nothing"),
         )
         return subprocess.run(
@@ -555,6 +681,7 @@ class ExistingSettingsTests(unittest.TestCase):
             os.environ,
             COPYDESK_HOME=str(self.home),
             XDG_CONFIG_HOME=str(self.home / "config"),
+            XDG_STATE_HOME=str(self.home / "state"),
             PATH=str(self.home / "nothing"),
         )
         return subprocess.run(

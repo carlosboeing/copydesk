@@ -37,6 +37,7 @@ class DoctorTests(unittest.TestCase):
             os.environ,
             COPYDESK_HOME=str(self.home),
             XDG_CONFIG_HOME=str(self.home / "config"),
+            XDG_STATE_HOME=str(self.home / "state"),
             PATH=str(self.home / "nothing"),
         )
         return subprocess.run(
@@ -90,15 +91,21 @@ class DoctorTests(unittest.TestCase):
 
     def _fresh_body(self, level: str) -> str:
         """The body the generator would stamp, under this test's config home."""
-        previous = os.environ.get("XDG_CONFIG_HOME")
+        previous_config = os.environ.get("XDG_CONFIG_HOME")
+        previous_state = os.environ.get("XDG_STATE_HOME")
         os.environ["XDG_CONFIG_HOME"] = str(self.home / "config")
+        os.environ["XDG_STATE_HOME"] = str(self.home / "state")
         try:
             return instructions.render_output_style_body(linter.user_layer(), level)
         finally:
-            if previous is None:
+            if previous_config is None:
                 os.environ.pop("XDG_CONFIG_HOME", None)
             else:
-                os.environ["XDG_CONFIG_HOME"] = previous
+                os.environ["XDG_CONFIG_HOME"] = previous_config
+            if previous_state is None:
+                os.environ.pop("XDG_STATE_HOME", None)
+            else:
+                os.environ["XDG_STATE_HOME"] = previous_state
 
     def test_a_current_fingerprint_reports_no_drift(self) -> None:
         # The control. Without it the assertion above cannot tell a working

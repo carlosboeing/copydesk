@@ -133,7 +133,7 @@ class GeneratedInstructionTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        environment = dict(os.environ, XDG_CONFIG_HOME=str(home))
+        environment = dict(os.environ, XDG_CONFIG_HOME=str(home), XDG_STATE_HOME=str(home / "state"))
         result = subprocess.run(
             [sys.executable, str(GENERATOR), "--check"],
             capture_output=True, text=True, check=False, env=environment,
@@ -162,8 +162,10 @@ class GeneratedInstructionTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        previous = os.environ.get("XDG_CONFIG_HOME")
+        previous_config = os.environ.get("XDG_CONFIG_HOME")
+        previous_state = os.environ.get("XDG_STATE_HOME")
         os.environ["XDG_CONFIG_HOME"] = str(home)
+        os.environ["XDG_STATE_HOME"] = str(home / "state")
         try:
             self.assertEqual(config_mod.user_config_path(), config_file)
             discovered = config_mod.resolve(REPOSITORY_ROOT / "rules")
@@ -173,16 +175,32 @@ class GeneratedInstructionTests(unittest.TestCase):
             )
             self.assertNotEqual(skipped["channels"]["chat"]["style"], "editorial")
         finally:
-            if previous is None:
+            if previous_config is None:
                 os.environ.pop("XDG_CONFIG_HOME", None)
             else:
-                os.environ["XDG_CONFIG_HOME"] = previous
+                os.environ["XDG_CONFIG_HOME"] = previous_config
+            if previous_state is None:
+                os.environ.pop("XDG_STATE_HOME", None)
+            else:
+                os.environ["XDG_STATE_HOME"] = previous_state
 
     def test_reminder_word_count_agrees_with_the_linter(self) -> None:
         """The precis is re-sent every turn, so its length is a measured cost."""
         instructions_dict = preset()["instructions"]
         self.assertEqual(len(instructions_dict["reminder"].split()), instructions_dict["reminder_word_count"])
         self.assertEqual(instructions_dict["reminder_word_count"], linter.REMINDER_WORD_COUNT)
+
+    def test_reminder_fallback_matches_the_preset_text(self) -> None:
+        """The fallback heredoc carries the preset reminder verbatim.
+
+        Word counts alone cannot hold the two together: two different
+        49-word strings pass both length pins. This reminder is the only
+        CopyDesk text that enters the model context on every turn, so the
+        primary path and its fallback must be one string.
+        """
+        script = (REPOSITORY_ROOT / "hooks" / "reminder.sh").read_text(encoding="utf-8")
+        body = script.split("cat << 'EOF'\n", 1)[1].split("\nEOF", 1)[0]
+        self.assertEqual(body, preset()["instructions"]["reminder"])
 
     def test_output_styles_carry_correct_names_and_markers(self) -> None:
         for level in ("low", "medium", "high"):

@@ -244,18 +244,18 @@ class SetCommandTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.home)
 
     def test_set_writes_the_user_config(self) -> None:
-        env = {"XDG_CONFIG_HOME": str(self.home)}
+        env = {"XDG_CONFIG_HOME": str(self.home), "XDG_STATE_HOME": str(self.home / "state")}
         code = run_cli(["set", "channels.chat.verbosity=medium"], env=env)
         self.assertEqual(code, 0)
         body = json.loads((self.home / "copydesk" / "config.json").read_text(encoding="utf-8"))
         self.assertEqual(body["channels"]["chat"]["verbosity"], "medium")
 
     def test_set_refuses_a_key_it_does_not_own(self) -> None:
-        env = {"XDG_CONFIG_HOME": str(self.home)}
+        env = {"XDG_CONFIG_HOME": str(self.home), "XDG_STATE_HOME": str(self.home / "state")}
         self.assertEqual(run_cli(["set", "gate.retries=5"], env=env), 64)
 
     def test_set_refuses_an_invalid_value(self) -> None:
-        env = {"XDG_CONFIG_HOME": str(self.home)}
+        env = {"XDG_CONFIG_HOME": str(self.home), "XDG_STATE_HOME": str(self.home / "state")}
         self.assertEqual(run_cli(["set", "channels.chat.verbosity=loud"], env=env), 64)
 
     def test_set_keeps_the_comments_the_wizard_wrote(self) -> None:
@@ -267,7 +267,7 @@ class SetCommandTests(unittest.TestCase):
             '    "documents": { "verbosity": "high" }\n  }\n}\n',
             encoding="utf-8",
         )
-        run_cli(["set", "channels.chat.verbosity=medium"], env={"XDG_CONFIG_HOME": str(self.home)})
+        run_cli(["set", "channels.chat.verbosity=medium"], env={"XDG_CONFIG_HOME": str(self.home), "XDG_STATE_HOME": str(self.home / "state")})
         body = path.read_text(encoding="utf-8")
         self.assertIn("// how much chat says", body)
         self.assertIn('"verbosity": "medium"', body)
@@ -284,7 +284,7 @@ class SetCommandTests(unittest.TestCase):
             '    "chat": { "verbosity": "low" }\n  }\n}\n',
             encoding="utf-8",
         )
-        run_cli(["set", "channels.chat.verbosity=high"], env={"XDG_CONFIG_HOME": str(self.home)})
+        run_cli(["set", "channels.chat.verbosity=high"], env={"XDG_CONFIG_HOME": str(self.home), "XDG_STATE_HOME": str(self.home / "state")})
         body = json.loads(path.read_text(encoding="utf-8"))["channels"]
         self.assertEqual(body["chat"]["verbosity"], "high")
         self.assertEqual(body["documents"]["verbosity"], "high")
@@ -299,7 +299,7 @@ class SetCommandTests(unittest.TestCase):
             '{"guidance": {"verbosity": true}, "verbosity": "low"}}}',
             encoding="utf-8",
         )
-        run_cli(["set", "channels.chat.verbosity=high"], env={"XDG_CONFIG_HOME": str(self.home)})
+        run_cli(["set", "channels.chat.verbosity=high"], env={"XDG_CONFIG_HOME": str(self.home), "XDG_STATE_HOME": str(self.home / "state")})
         chat = json.loads(path.read_text(encoding="utf-8"))["channels"]["chat"]
         self.assertEqual(chat["verbosity"], "high")
         self.assertIs(chat["guidance"]["verbosity"], True)
@@ -311,7 +311,7 @@ class SetCommandTests(unittest.TestCase):
         path.write_text(original, encoding="utf-8")
         os.chmod(path.parent, 0o500)
         self.addCleanup(os.chmod, path.parent, 0o700)
-        run_cli(["set", "channels.chat.verbosity=medium"], env={"XDG_CONFIG_HOME": str(self.home)})
+        run_cli(["set", "channels.chat.verbosity=medium"], env={"XDG_CONFIG_HOME": str(self.home), "XDG_STATE_HOME": str(self.home / "state")})
         self.assertEqual(path.read_text(encoding="utf-8"), original)
 
 
@@ -401,7 +401,9 @@ class StalenessNoticeTests(unittest.TestCase):
 
     def _install_style_matching_current_config(self) -> None:
         env_prev = os.environ.get("XDG_CONFIG_HOME")
+        state_prev = os.environ.get("XDG_STATE_HOME")
         os.environ["XDG_CONFIG_HOME"] = str(self.home / ".config")
+        os.environ["XDG_STATE_HOME"] = str(self.home / "state")
         try:
             cfg = linter.user_layer()
         finally:
@@ -409,6 +411,10 @@ class StalenessNoticeTests(unittest.TestCase):
                 os.environ.pop("XDG_CONFIG_HOME", None)
             else:
                 os.environ["XDG_CONFIG_HOME"] = env_prev
+            if state_prev is None:
+                os.environ.pop("XDG_STATE_HOME", None)
+            else:
+                os.environ["XDG_STATE_HOME"] = state_prev
         fresh = instructions.render_output_style_body(cfg, "low")
         marker = instructions.fingerprint(fresh)
         style_path = self.home / ".claude" / "output-styles" / "copydesk-low.md"
@@ -422,7 +428,9 @@ class StalenessNoticeTests(unittest.TestCase):
         self._install_style_matching_current_config()
         self._write_user_config('{"version": 1, "channels": {"chat": {"style": "editorial"}}}')
         env_prev = os.environ.get("XDG_CONFIG_HOME")
+        state_prev = os.environ.get("XDG_STATE_HOME")
         os.environ["XDG_CONFIG_HOME"] = str(self.home / ".config")
+        os.environ["XDG_STATE_HOME"] = str(self.home / "state")
         try:
             self.assertIn("out of date", linter._fingerprint_notice(self.home) or "")
         finally:
@@ -430,11 +438,17 @@ class StalenessNoticeTests(unittest.TestCase):
                 os.environ.pop("XDG_CONFIG_HOME", None)
             else:
                 os.environ["XDG_CONFIG_HOME"] = env_prev
+            if state_prev is None:
+                os.environ.pop("XDG_STATE_HOME", None)
+            else:
+                os.environ["XDG_STATE_HOME"] = state_prev
 
     def test_an_unchanged_config_reports_nothing(self) -> None:
         self._install_style_matching_current_config()
         env_prev = os.environ.get("XDG_CONFIG_HOME")
+        state_prev = os.environ.get("XDG_STATE_HOME")
         os.environ["XDG_CONFIG_HOME"] = str(self.home / ".config")
+        os.environ["XDG_STATE_HOME"] = str(self.home / "state")
         try:
             self.assertIsNone(linter._fingerprint_notice(self.home))
         finally:
@@ -442,6 +456,10 @@ class StalenessNoticeTests(unittest.TestCase):
                 os.environ.pop("XDG_CONFIG_HOME", None)
             else:
                 os.environ["XDG_CONFIG_HOME"] = env_prev
+            if state_prev is None:
+                os.environ.pop("XDG_STATE_HOME", None)
+            else:
+                os.environ["XDG_STATE_HOME"] = state_prev
 
 
 class ChannelBlockTests(unittest.TestCase):
