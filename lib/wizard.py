@@ -443,30 +443,30 @@ def _build_plan(
 
         writes.append(apply.Write(settings_path, json.dumps(settings_doc, indent=2) + "\n"))
 
-    # Instruction files for other tools
-    parts = [
-        instructions.render_documents(resolved_config),
-        instructions.render_commits(resolved_config),
-        instructions.render_reviews(resolved_config),
-    ]
-    non_empty = [part for part in parts if part]
-    if non_empty:
-        agents_body = "\n\n".join(non_empty)
-        target_paths = []
-        for tool in selected_tools:
-            if tool == "claude-code" or tool == "git":
-                continue
-            adapter = adapters.REGISTRY.get(tool)
-            if not adapter:
-                continue
-            target_file = home / adapter.home.replace("~/", "") / "AGENTS.md"
-            target_paths.append(target_file)
+    # One instruction file per harness. Which channels a file carries is
+    # decided per real file, after symlinks resolve: where two harnesses
+    # share one file through a symlink, one write lands and carries what
+    # both read, chat included. A file only Claude Code reads leaves chat
+    # out here rather than delivering it twice — the output style has it.
+    chat_by_real: dict[Path, bool] = {}
+    for tool in selected_tools:
+        if tool == "git":
+            continue
+        adapter = adapters.REGISTRY.get(tool)
+        if not adapter or not adapter.instruction_file:
+            continue
+        target_file = home / adapter.home.replace("~/", "") / adapter.instruction_file
+        real = target_file.resolve()
+        chat_by_real[real] = chat_by_real.get(real, False) or tool != "claude-code"
 
-        for target in apply.plan_targets(target_paths, agents_body):
-            orig = ""
-            if target.real.is_file():
-                orig = target.real.read_text(encoding="utf-8")
-            writes.append(apply.Write(target.real, apply.splice_marked_block(orig, agents_body)))
+    for real, wants_chat in chat_by_real.items():
+        block = instructions.render_agents_block(resolved_config, include_chat=wants_chat)
+        if not block:
+            continue
+        orig = ""
+        if real.is_file():
+            orig = real.read_text(encoding="utf-8")
+        writes.append(apply.Write(real, apply.splice_marked_block(orig, block)))
 
     return apply.Plan(writes=writes)
 
@@ -864,9 +864,9 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
 
     # 1. Instruction files with marked blocks
     for name, adapter in adapters.REGISTRY.items():
-        if name == "git":
+        if name == "git" or not adapter.instruction_file:
             continue
-        inst_file = copydesk_home / adapter.home.replace("~/", "") / "AGENTS.md"
+        inst_file = copydesk_home / adapter.home.replace("~/", "") / adapter.instruction_file
         if inst_file.is_file():
             try:
                 text = inst_file.read_text(encoding="utf-8")

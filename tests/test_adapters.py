@@ -51,6 +51,21 @@ class AdapterTests(unittest.TestCase):
             self.assertTrue(adapter.installs)
             self.assertTrue(adapter.home)
 
+    def test_every_harness_names_its_instruction_file_and_git_names_none(self) -> None:
+        expected = {
+            "claude-code": "CLAUDE.md",
+            "codex": "AGENTS.md",
+            "cursor": "AGENTS.md",
+            "kimi": "AGENTS.md",
+            "opencode": "AGENTS.md",
+            "antigravity": "AGENTS.md",
+            "grok": "AGENTS.md",
+            "git": "",
+        }
+        self.assertEqual(set(adapters.REGISTRY), set(expected))
+        for name, adapter in adapters.REGISTRY.items():
+            self.assertEqual(adapter.instruction_file, expected[name], name)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -464,15 +464,53 @@ class ChannelBlockTests(unittest.TestCase):
         self.assertIn("72", rendered)
         self.assertIn("why", rendered)
 
-    def test_the_agents_block_is_marked(self) -> None:
-        rendered = instructions.render_agents_block(resolved())
-        self.assertTrue(rendered.startswith("<!-- copydesk:start -->"))
-        self.assertTrue(rendered.rstrip().endswith("<!-- copydesk:end -->"))
+    def test_the_block_orders_chat_documents_commits(self) -> None:
+        # The markers around this body are applied where the block is
+        # spliced, and are asserted against the installed file by the
+        # setup and uninstall tests.
+        body = instructions.render_agents_block(resolved(), include_chat=True)
+        self.assertLess(
+            body.index(instructions.style_line("chat", "plain")),
+            body.index("problem before the solution"),
+        )
+        self.assertLess(
+            body.index("problem before the solution"), body.index("imperative subject")
+        )
 
     def test_a_disabled_channel_contributes_nothing(self) -> None:
         config = resolved()
         config["channels"]["commits"] = {"enabled": False}
         self.assertNotIn("commit", instructions.render_agents_block(config).lower())
+
+    def test_disabled_chat_contributes_nothing_even_when_the_block_asks(self) -> None:
+        # render_chat itself has no enabled check: the output style calls it
+        # for its rules region. The join is where the flag has to bite.
+        config = resolved()
+        config["channels"]["chat"]["enabled"] = False
+        self.assertNotIn(
+            "answer first",
+            instructions.render_agents_block(config, include_chat=True).lower(),
+        )
+        for name in ("documents", "commits", "reviews"):
+            config["channels"][name] = {"enabled": False}
+        self.assertEqual(
+            instructions.render_agents_block(config, include_chat=True),
+            "",
+        )
+
+    def test_the_chat_channel_joins_when_the_flag_asks(self) -> None:
+        rendered = instructions.render_agents_block(resolved(), include_chat=True).lower()
+        self.assertIn("answer first", rendered)
+        self.assertIn("closing block appears only when", rendered)
+        self.assertIn("say a thing once", rendered)
+        self.assertIn(instructions.style_line("chat", "plain").lower(), rendered)
+
+    def test_without_the_flag_the_block_still_leaves_chat_out(self) -> None:
+        # The control for the test above. Claude Code reads chat through the
+        # output style, so a file only Claude Code reads must not carry it
+        # a second time.
+        rendered = instructions.render_agents_block(resolved()).lower()
+        self.assertNotIn("answer first", rendered)
 
 
 class RepeatCloserTests(unittest.TestCase):
