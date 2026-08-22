@@ -326,6 +326,9 @@ _HEADING = re.compile(r"(?m)^[ \t]*#{1,6}[ \t]+.*(?:\n|$)")
 _LIST_MARKER = re.compile(r"^\s*(?:[-*]|\d+\.)\s+", re.MULTILINE)
 _LIST_LINE = re.compile(r"^\s*(?:[-*]|\d+\.)\s+")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?:])\s+")
+# A git trailer: `Token: value`, as `git interpret-trailers` reads the final
+# block. Token is alphanumeric plus hyphen; the value must be non-empty.
+_TRAILER_LINE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*:\s+\S")
 
 
 def _mask(match: re.Match[str]) -> str:
@@ -366,29 +369,77 @@ def strip_code(text: str) -> str:
 
 
 def sentences(text: str) -> list[str]:
-    """Use SimpleEnglish's list handling and sentence splitter unchanged."""
-    text = _LIST_MARKER.sub("", text)
-    parts = _SENTENCE_SPLIT.split(text)
-    return [part.strip() for part in parts if len(part.strip().split()) >= 2]
+    """The splitter's sentences as bare strings."""
+    return [record.text for record in _sentence_records(text)]
 
 
-def _sentence_records(text: str) -> list[Sentence]:
-    """Apply the same splitter while retaining a source line for each sentence."""
-    normalized = _LIST_MARKER.sub(lambda match: " " * len(match.group(0)), text)
-    parts = _SENTENCE_SPLIT.split(normalized)
+def _unit_start_lines(lines: list[str], subject_is_own_unit: bool) -> list[int]:
+    """The line indexes where a structural unit begins.
+
+    A line opening with a list marker begins one, and so does the first
+    dedented line after list content — an item never continues into what
+    follows. The commit subject is a unit when the caller says so, because
+    Conventional Commit subjects carry no full stop by convention.
+    """
+    starts = {0}
+    if subject_is_own_unit:
+        starts.add(1)
+    in_list = False
+    for index, line in enumerate(lines):
+        if _LIST_LINE.match(line):
+            starts.add(index)
+            in_list = True
+            continue
+        if not line.strip():
+            continue
+        if in_list and not line[:1].isspace():
+            starts.add(index)
+            in_list = False
+    return sorted(starts)
+
+
+def _list_item_lines(lines: list[str]) -> set[int]:
+    """One-based numbers of the lines a list item owns, marker line included.
+
+    A wrapped continuation shares its item's unit, so its sentences belong to
+    the item, not to the paragraph's prose.
+    """
+    owned: set[int] = set()
+    starts = _unit_start_lines(lines, False)
+    for position, start in enumerate(starts):
+        if not _LIST_LINE.match(lines[start]):
+            continue
+        end = starts[position + 1] if position + 1 < len(starts) else len(lines)
+        owned.update(range(start + 1, end + 1))
+    return owned
+
+
+def _sentence_records(text: str, *, subject_is_own_unit: bool = False) -> list[Sentence]:
+    """Apply the punctuation splitter within structural units, with source lines.
+
+    Issue 22: splitting on terminal punctuation alone concatenated an
+    unpunctuated commit subject and every bullet after it into one sentence.
+    Punctuation now splits inside a unit; structure splits between units.
+    """
+    lines = text.split("\n")
+    ordered = _unit_start_lines(lines, subject_is_own_unit)
     records: list[Sentence] = []
-    cursor = 0
-    for part in parts:
-        position = normalized.find(part, cursor)
-        if position < 0:
-            continue
-        cursor = position + len(part)
-        stripped = part.strip()
-        if len(stripped.split()) < 2:
-            continue
-        leading = len(part) - len(part.lstrip())
-        line = normalized.count("\n", 0, position + leading) + 1
-        records.append(Sentence(stripped, line))
+    for position, start in enumerate(ordered):
+        end = ordered[position + 1] if position + 1 < len(ordered) else len(lines)
+        segment = "\n".join(lines[start:end])
+        normalized = _LIST_MARKER.sub(lambda match: " " * len(match.group(0)), segment)
+        cursor = 0
+        for part in _SENTENCE_SPLIT.split(normalized):
+            offset = normalized.find(part, cursor)
+            if offset < 0:
+                continue
+            cursor = offset + len(part)
+            stripped = part.strip()
+            if len(stripped.split()) < 2:
+                continue
+            leading = len(part) - len(part.lstrip())
+            line = start + normalized.count("\n", 0, offset + leading) + 1
+            records.append(Sentence(stripped, line))
     return records
 
 
@@ -431,7 +482,14 @@ def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error", max
         cursor = max(cursor, position + len(paragraph))
         if not paragraph.strip() or all(_LIST_LINE.match(line) for line in paragraph.splitlines() if line.strip()):
             continue
-        paragraph_sentences = _sentence_records(paragraph)
+        # List items are structure, not the paragraph's prose: their density
+        # has its own rule, and counting them padded every intro-plus-bullets
+        # block past the cap once items became units of their own.
+        item_lines = _list_item_lines(paragraph.split("\n"))
+        paragraph_sentences = [
+            record for record in _sentence_records(paragraph)
+            if record.line not in item_lines
+        ]
         if len(paragraph_sentences) > max_sentences:
             line = _line_number(text, max(0, position))
             findings.append(Finding(line, "paragraph-length", _excerpt(paragraph), severity))
@@ -584,7 +642,12 @@ def _nested_table_findings(text: str) -> Iterable[Finding]:
     return findings
 
 
-def lint(text: str, path: Optional[Union[str, Path]] = None) -> list[Finding]:
+def lint(
+    text: str,
+    path: Optional[Union[str, Path]] = None,
+    *,
+    subject_is_own_unit: bool = False,
+) -> list[Finding]:
     """Return deterministic checks for one Markdown document.
 
     The function is deliberately dependency-free so the CLI, hook, and future
@@ -592,7 +655,7 @@ def lint(text: str, path: Optional[Union[str, Path]] = None) -> list[Finding]:
     """
     preset, patterns = effective_preset(path)
     body = exclude_markdown(text)
-    records = _sentence_records(body)
+    records = _sentence_records(body, subject_is_own_unit=subject_is_own_unit)
 
     warn_words = _rule_number(preset, "sentence-length", "max", LONG_SENTENCE_WARNING_WORDS)
     error_words = _rule_number(preset, "sentence-length", "hardMax", LONG_SENTENCE_ERROR_WORDS)
@@ -2131,6 +2194,29 @@ def _non_imperative_opener(subject: str) -> Optional[str]:
     return first.group(0) if first.group(0).lower() in NON_IMPERATIVE_OPENERS else None
 
 
+def _mask_trailers(text: str) -> str:
+    """Space out the message's trailer block so metadata never reads as prose.
+
+    A `Crossrev-pr:` style line is git plumbing, not a sentence: counting it
+    toward a word total measures nothing, and rules fire on it as if it were.
+    Masking rather than deleting keeps every later line number where it was.
+    """
+    lines = text.split("\n")
+    end = len(lines)
+    while end and not lines[end - 1].strip():
+        end -= 1
+    start = end
+    while start and _TRAILER_LINE.match(lines[start - 1]):
+        start -= 1
+    # git interpret-trailers reads a trailing paragraph, never the subject
+    # and never a Token: value line that still sits inside prose.
+    if start == end or start == 0 or lines[start - 1].strip():
+        return text
+    for index in range(start, end):
+        lines[index] = "".join(" " if character != "\n" else "\n" for character in lines[index])
+    return "\n".join(lines)
+
+
 def run_commit_msg(path: str) -> int:
     """Check one commit message. 0 clean, 1 refused, 70 internal error."""
     try:
@@ -2168,8 +2254,14 @@ def run_commit_msg(path: str) -> int:
             )
         # The whole message, subject included. Linting the body alone let a
         # blocking word through in the one line every reader sees, and it
-        # reported body findings one line short of where they sit.
-        findings.extend(f.render() for f in lint(message, path=path) if f.severity == "error")
+        # reported body findings one line short of where they sit. The subject
+        # is still its own unit — it carries no full stop by convention — and
+        # the trailer block is masked before any rule reads it.
+        findings.extend(
+            f.render()
+            for f in lint(_mask_trailers(message), path=path, subject_is_own_unit=True)
+            if f.severity == "error"
+        )
 
         for finding in findings:
             print(finding, file=sys.stderr)
