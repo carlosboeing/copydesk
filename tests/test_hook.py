@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -22,12 +23,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 
 import hook  # noqa: E402
+import linter  # noqa: E402
 
 # A suite run from inside a worktree inherits GIT_DIR and its siblings, which
 # would point a temporary repository back at the real one.
 CLEAN_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
 FOREIGN_HOOK = "#!/bin/sh\necho theirs\n"
+
+# A hook whose author set errexit. The appended block runs under it.
+STRICT_HOOK = "#!/bin/sh\nset -e\necho theirs\n"
 
 
 class HookCommandCase(unittest.TestCase):
@@ -378,7 +383,9 @@ class ChainedBlockExecutionTests(HookCommandCase):
     status; only exit 1 from CopyDesk refuses the commit.
     """
 
-    def _run_chained(self, foreign_body: str, stub_exit: int) -> subprocess.CompletedProcess:
+    def _run_chained(
+        self, foreign_body: str, stub_exit: int, copydesk: str | None = None
+    ) -> subprocess.CompletedProcess:
         scratch = self.tmp / "run"
         scratch.mkdir(exist_ok=True)
         stub = scratch / f"stub{stub_exit}"
@@ -392,7 +399,7 @@ class ChainedBlockExecutionTests(HookCommandCase):
         return subprocess.run(
             [str(chained), str(message)],
             capture_output=True, text=True,
-            env=dict(CLEAN_ENV, COPYDESK_BIN=str(stub)),
+            env=dict(CLEAN_ENV, COPYDESK_BIN=copydesk or str(stub)),
         )
 
     def test_a_passing_copydesk_lets_the_commit_through(self) -> None:
@@ -413,6 +420,26 @@ class ChainedBlockExecutionTests(HookCommandCase):
         # and exits with it, so a failing foreign hook still fails.
         result = self._run_chained("#!/bin/sh\necho theirs\nfalse\n", stub_exit=0)
         self.assertNotEqual(result.returncode, 0)
+
+    def test_an_internal_error_fails_open_under_set_e(self) -> None:
+        # `set -e` in the host script ends it at the first failing command, and
+        # the block inherits that. A status the block means to swallow would
+        # refuse the commit instead, which is the opposite of failing open.
+        result = self._run_chained(STRICT_HOOK, stub_exit=3)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("copydesk: exit 3", result.stderr)
+
+    def test_a_refusal_under_set_e_still_refuses(self) -> None:
+        # The control: errexit safety must not cost the one refusal.
+        result = self._run_chained(STRICT_HOOK, stub_exit=1)
+        self.assertEqual(result.returncode, 1)
+
+    def test_a_missing_copydesk_lets_the_commit_through(self) -> None:
+        # No CopyDesk on the machine is not a reason to refuse a commit, and
+        # the guard runs before the call so errexit sees nothing to exit on.
+        absent = str(self.tmp / "run" / "absent-copydesk")
+        result = self._run_chained(STRICT_HOOK, stub_exit=0, copydesk=absent)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class StrippedBlockTests(HookCommandCase):
@@ -581,6 +608,21 @@ class UninstallTests(HookCommandCase):
         self.assertFalse(self._hook(self.one).exists())
         self.assertFalse(self._hook(self.two).exists())
 
+    def test_uninstall_reports_a_block_it_could_not_strip(self) -> None:
+        # The start marker is present but the region does not match, so the
+        # script is left alone. Claiming the uninstall is complete over lines
+        # still in someone else's hook is the failure this guards.
+        three = self._repo("three")
+        hook_file = self._write_foreign_hook(
+            three, FOREIGN_HOOK + hook.BLOCK_START + "\necho halfway\n"
+        )
+        broken = hook_file.read_text(encoding="utf-8")
+        result = self._cli("uninstall", "--yes", cwd=three)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("could not be located", result.stdout)
+        self.assertNotIn("Uninstall complete", result.stdout)
+        self.assertEqual(hook_file.read_text(encoding="utf-8"), broken)
+
     def test_uninstall_never_deletes_the_registry(self) -> None:
         # The registry must survive uninstall: `copydesk hook remove` still
         # works afterwards, which is what makes the printed paths optional.
@@ -608,6 +650,29 @@ class DeletedRepoTests(HookCommandCase):
         (self.home / ".claude").mkdir()
         result = self._cli("uninstall", "--yes", cwd=other)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+
+class RegistrySweepTests(HookCommandCase):
+    def test_the_session_sweeper_leaves_the_registry(self) -> None:
+        # The registry shares a directory with retry session state, which a
+        # blocking gate run sweeps by glob once it passes the TTL. Sweeping the
+        # registry with it would empty `hook list` while the hooks stayed on
+        # disk.
+        repo = self._repo("one")
+        self._cli("hook", "add", cwd=repo)
+        registry = self.state / "hooks.json"
+        session = self.state / "a-session-id.json"
+        session.write_text('{"files": {}}\n', encoding="utf-8")
+        stale = time.time() - linter.STATE_TTL_SECONDS - 60
+        for path in (registry, session):
+            os.utime(path, (stale, stale))
+
+        linter._sweep_state(self.state, time.time())
+
+        self.assertTrue(registry.is_file(), "the registry is not session state")
+        self.assertFalse(session.exists(), "stale session state still goes")
+        self.assertEqual(len(self._entries()), 1)
+        self.assertIn(str(repo), self._cli("hook", "list").stdout)
 
 
 class BrokenRegistryTests(HookCommandCase):

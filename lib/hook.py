@@ -51,15 +51,25 @@ MARKER_PHRASE = "CopyDesk commits gate"
 # status. It captures the foreign script's status first — the line above it
 # is a comment, and comments do not run — and exits with it, so a foreign
 # refusal survives chaining and a passing check exits 0.
+#
+# The host script may run under `set -e`, which the block inherits. So the
+# check's status is captured through `|| status=$?` rather than `; status=$?`:
+# errexit ends the script at a failing simple command, and an internal error
+# would refuse the commit instead of failing open. A missing CopyDesk is
+# guarded before the call for the same reason, as git-hooks/commit-msg does.
+# The test is POSIX, because the host script may be #!/bin/sh.
 BLOCK_START = "# >>> CopyDesk commits gate >>>"
 BLOCK_END = "# <<< CopyDesk commits gate <<<"
 
 CHAINED_BLOCK = """# >>> CopyDesk commits gate >>>
 foreign=$?
 COPYDESK="${COPYDESK_BIN:-copydesk}"
-"$COPYDESK" check --commit-msg "$1"; status=$?
-if [ "$status" -eq 1 ]; then exit 1; fi
-if [ "$status" -gt 1 ]; then echo "copydesk: exit $status; commit allowed" >&2; fi
+if command -v "$COPYDESK" >/dev/null 2>&1 || [ -x "$COPYDESK" ]; then
+  status=0
+  "$COPYDESK" check --commit-msg "$1" || status=$?
+  if [ "$status" -eq 1 ]; then exit 1; fi
+  if [ "$status" -gt 1 ]; then echo "copydesk: exit $status; commit allowed" >&2; fi
+fi
 exit "$foreign"
 # <<< CopyDesk commits gate <<<
 """
@@ -123,7 +133,10 @@ def repo_root(cwd: Path) -> Optional[Path]:
 
 
 def registry_path() -> Path:
-    return linter._state_directory() / "hooks.json"
+    # The name comes from linter, which sweeps stale *.json out of this
+    # directory and skips the registry by that name. Spelling it here as well
+    # would let the two drift, and the drift deletes the registry.
+    return linter._state_directory() / linter.HOOK_REGISTRY_NAME
 
 
 def _load_entries() -> list[dict]:

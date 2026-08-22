@@ -965,12 +965,20 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
         out_stream.write(f"error  {res.message}\n")
         return 1
 
+    # A start marker whose region does not match leaves the script alone, the
+    # rule `copydesk hook remove` follows. Uninstall must not report success
+    # over it: the lines are still in a hook someone else wrote.
+    block_stripped = True
     if strip_hook is not None:
         try:
-            hook.strip_file(strip_hook)
+            block_stripped = hook.strip_file(strip_hook)
         except OSError as error:
             out_stream.write(f"error  cannot strip {strip_hook}: {error}\n")
             return 1
+        if not block_stripped:
+            out_stream.write(
+                f"left  {strip_hook} (the marker is present but the block could not be located)\n"
+            )
 
     # Other recorded repositories. Verifying after the removal prunes this
     # repository's own entry, because its hook just left the disk. The
@@ -1002,6 +1010,14 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
                 # matters once no CopyDesk command is left to do it.
                 out_stream.write(f"  {Path(entry['hooks_dir']) / entry['hook']}\n")
             out_stream.write("Remove them with `copydesk hook remove --all`, or delete the files above.\n")
+
+    if not block_stripped:
+        out_stream.write(
+            f"Everything else is gone, but CopyDesk's block is still in {strip_hook}.\n"
+            f"Delete the marked lines by hand.\n"
+        )
+        out_stream.flush()
+        return 1
 
     out_stream.write("Uninstall complete.\n")
     out_stream.flush()
