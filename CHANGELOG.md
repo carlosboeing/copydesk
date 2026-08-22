@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.1]
+
 ### Fixed
 
 - **The instruction block contradicted itself about commit bodies.** A channel line, a style line and a verbosity line were joined unconditionally, so `commits` at style `engineer` and verbosity `medium` asked for bullets and a paragraph at once, and verbosity `high` asked for what changed after the channel line had said not to. Verbosity lines now speak about extent alone.
