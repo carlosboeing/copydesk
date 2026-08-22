@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.1]
+
 ### Fixed
 
 - **Every third `copydesk setup` reported a proof failure that was not one.** The proof sends one known-bad sample under one fixed session id, and the gate lets identical content through on the third consecutive submission — the retry escape valve working as designed. The proof's retry state outlived each run, so the third consecutive setup tripped the valve against a healthy install and ended with `Setup complete, but proof run failed`. The proof now deletes its own session state before it runs, so every proof starts with no history behind it; the session file also stops accumulating one entry per sample path across setups. The gate itself is unchanged.
