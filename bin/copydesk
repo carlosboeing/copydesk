@@ -18,6 +18,7 @@ import channels  # noqa: E402
 import config  # noqa: E402
 import config_writer  # noqa: E402
 import guidance  # noqa: E402
+import hook  # noqa: E402
 import linter  # noqa: E402
 import styles  # noqa: E402
 import wizard  # noqa: E402
@@ -138,7 +139,7 @@ def _handle_report(args: list[str]) -> int:
 # file that does not exist.
 RESERVED_SUBCOMMANDS = ("install", "learn", "fix", "import")
 
-SUBCOMMANDS = ("check", "doctor", "stats", "report", "set", "setup", "uninstall")
+SUBCOMMANDS = ("check", "doctor", "stats", "report", "set", "setup", "uninstall", "hook")
 
 USAGE = """usage: copydesk setup [--defaults] [--yes] [--dry-run] [--repair]
        copydesk uninstall [--yes] [--dry-run] [--purge]
@@ -148,6 +149,9 @@ USAGE = """usage: copydesk setup [--defaults] [--yes] [--dry-run] [--repair]
        copydesk doctor [<file>] [--rules]
        copydesk stats [--since <window>] [--json]
        copydesk report [--since <window>] [--out <path>]
+       copydesk hook add [<path>...] [--scan <dir>] [--yes]
+       copydesk hook remove [<path>...] [--all] [--yes]
+       copydesk hook list
        copydesk --version
 
 CopyDesk is a prose gate for AI agents. Run `copydesk doctor` to see which
@@ -305,7 +309,7 @@ def _doctor_bare() -> int:
             has_commit_hook = False
             if hooks_dir:
                 hook_file = hooks_dir / "commit-msg"
-                if hook_file.is_file() and wizard.HOOK_MARKER in hook_file.read_text(encoding="utf-8", errors="ignore"):
+                if hook_file.is_file() and hook.MARKER_PHRASE in hook_file.read_text(encoding="utf-8", errors="ignore"):
                     has_commit_hook = True
             if not has_commit_hook:
                 print("  commits is prevention-only (no commit-msg hook installed in this repository).")
@@ -492,6 +496,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_doctor(args[1:])
     if command == "set":
         return _handle_set(args[1:])
+    if command == "hook":
+        return hook.run(args[1:])
     if command == "check":
         return _handle_check(args[1:])
 

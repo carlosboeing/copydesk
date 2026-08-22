@@ -21,6 +21,7 @@ import adapters
 import apply
 import config as config_mod
 import guidance
+import hook
 import instructions
 import jsonc
 import prompt
@@ -131,6 +132,7 @@ COPY = {
         "Undo anytime with: copydesk uninstall"
     ),
     "outro_cancelled": "Cancelled. Nothing was written.",
+    "outro_hook_next": "Other repositories: run `copydesk hook add` inside each one.",
     "outro_no_tools": (
         "No supported tools were found on this machine.\n"
         "Install one first, then run copydesk setup again."
@@ -188,37 +190,17 @@ def prove(home: Path) -> tuple[bool, str]:
     return blocked, reason[0] if reason else "no finding reported"
 
 
-# The line that says a commit-msg hook is CopyDesk's. Setup replaces a hook
-# carrying it and uninstall removes one; anything else belongs to the
-# repository and is left alone.
-HOOK_MARKER = "# CopyDesk commits gate"
+# The marker and the git directory answers live in hook.py, which owns hook
+# management across repositories. These aliases keep the names existing
+# callers and tests import from here.
+HOOK_MARKER = hook.HOOK_MARKER
+
+hooks_directory = hook.hooks_directory
 
 
 class HookResult(NamedTuple):
     installed: bool
     message: str
-
-
-def _clean_git_env() -> dict[str, str]:
-    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-
-
-def hooks_directory(cwd: Path) -> Optional[Path]:
-    """Git's own answer, which honours worktrees and core.hooksPath."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--path-format=absolute", "--git-path", "hooks"],
-            cwd=str(cwd), capture_output=True, text=True, env=_clean_git_env(),
-        )
-        if result.returncode != 0:
-            return None
-        out = result.stdout.strip()
-        if not out:
-            return None
-        p = Path(out)
-        return p.resolve() if p.is_absolute() else (cwd / p).resolve()
-    except OSError:
-        return None
 
 
 class HookPlan(NamedTuple):
@@ -230,10 +212,7 @@ class HookPlan(NamedTuple):
 def _foreign_hook_message(target: Path) -> str:
     return (
         f"skipped  {target} already exists\n"
-        f"         To chain CopyDesk into it, add these lines at the end:\n"
-        f'             copydesk check --commit-msg "$1"; status=$?\n'
-        f'             [ "$status" -eq 1 ] && exit 1\n'
-        f'             [ "$status" -gt 1 ] && echo "copydesk: exit $status; commit allowed" >&2'
+        f"         Run `copydesk hook add` in this repository to chain CopyDesk into it."
     )
 
 
@@ -837,6 +816,15 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
             out_stream.write(f"error  cannot make {hook_plan.write.path} executable: {error}\n")
             return 1
         out_stream.write(hook_plan.message + "\n")
+        # Setup wrote every hook currently on disk, and the registry starts
+        # empty on upgrade. Recording here is what lets `copydesk hook list`
+        # name this repository without `hook add` ever running.
+        hook.record_repository(repository, "ours")
+        out_stream.write(COPY["outro_hook_next"] + "\n")
+    elif hook_plan is not None:
+        # A hook someone else wrote stayed in place. Recording the skip makes
+        # it visible to `copydesk hook list` rather than silently absent.
+        hook.record_repository(repository, "skipped")
 
     if "claude-code" in selected_tools:
         gate_path = copydesk_home / ".claude" / "hooks" / "copydesk" / "gate.sh"
@@ -905,12 +893,18 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
         targets.append(apply.Target(real=settings_path, kind="hook-keys"))
 
     # 5. This repository's commit-msg hook, when CopyDesk is what wrote it.
-    # The marker is the test, so a hook someone else wrote survives.
+    # The marker is the test, so a hook someone else wrote survives. A foreign
+    # script carrying CopyDesk's appended block is stripped, never deleted.
+    strip_hook: Optional[Path] = None
     repository_hooks = hooks_directory(Path.cwd())
     commit_hook = repository_hooks / "commit-msg" if repository_hooks else None
     if commit_hook is not None and commit_hook.is_file():
         try:
-            if HOOK_MARKER in commit_hook.read_text(encoding="utf-8"):
+            hook_content = commit_hook.read_text(encoding="utf-8")
+            if hook.BLOCK_START in hook_content:
+                strip_hook = commit_hook
+                commit_hook = None
+            elif HOOK_MARKER in hook_content:
                 targets.append(apply.Target(real=commit_hook, kind="created"))
             else:
                 commit_hook = None
@@ -926,6 +920,16 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
     out_stream.write("These files will be modified or removed:\n")
     for t in targets:
         out_stream.write(f"  {t.real}\n")
+    if strip_hook is not None:
+        out_stream.write(f"  {strip_hook} (CopyDesk's block stripped, the script stays)\n")
+    others_preview = hook.other_entries(Path.cwd())
+    if others_preview:
+        out_stream.write(
+            f"\n{len(others_preview)} other "
+            f"{'repository holds' if len(others_preview) == 1 else 'repositories hold'} a CopyDesk hook:\n"
+        )
+        for entry in others_preview:
+            out_stream.write(f"  {Path(entry['hooks_dir']) / entry['hook']}\n")
     out_stream.flush()
 
     if args.dry_run:
@@ -960,6 +964,44 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
     if not res.ok:
         out_stream.write(f"error  {res.message}\n")
         return 1
+
+    if strip_hook is not None:
+        try:
+            hook.strip_file(strip_hook)
+        except OSError as error:
+            out_stream.write(f"error  cannot strip {strip_hook}: {error}\n")
+            return 1
+
+    # Other recorded repositories. Verifying after the removal prunes this
+    # repository's own entry, because its hook just left the disk. The
+    # question defaults to yes: the closing line has always promised the
+    # whole installation can be reversed, and leaving hooks behind is the
+    # behaviour being fixed. --yes takes them all without asking.
+    others = hook.other_entries(Path.cwd())
+    if others:
+        take_others = args.yes
+        if not take_others:
+            try:
+                take_others = prompt.confirm(
+                    f"Remove the CopyDesk hook from "
+                    f"{'this other recorded repository' if len(others) == 1 else f'these {len(others)} other recorded repositories'}?",
+                    default=True, stdin=in_stream, stdout=out_stream,
+                )
+            except prompt.Cancelled:
+                take_others = False
+        if take_others:
+            hook.remove_entries(others, yes=args.yes, stdin=in_stream, stdout=out_stream)
+            others = hook.other_entries(Path.cwd())
+        if others:
+            out_stream.write(
+                f"\n{len(others)} "
+                f"{'repository still holds' if len(others) == 1 else 'repositories still hold'} a CopyDesk hook:\n"
+            )
+            for entry in others:
+                # The path alone is enough to remove the hook by hand, which
+                # matters once no CopyDesk command is left to do it.
+                out_stream.write(f"  {Path(entry['hooks_dir']) / entry['hook']}\n")
+            out_stream.write("Remove them with `copydesk hook remove --all`, or delete the files above.\n")
 
     out_stream.write("Uninstall complete.\n")
     out_stream.flush()
