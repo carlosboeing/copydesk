@@ -22,6 +22,13 @@ FINGERPRINT_MARKER = "copydesk-build:"
 RULES_START = "<!-- plain-english-rules:start -->"
 RULES_END = "<!-- plain-english-rules:end -->"
 
+# Who wrote a rendered copy, named in its provenance comment. Setup points
+# at --repair because the way to regenerate an installed copy is to run it,
+# and naming the repository's generator would send the reader to the wrong
+# machine's files.
+GENERATOR_WRITER = "scripts/generate-instructions.py"
+SETUP_WRITER = "copydesk setup; regenerate with copydesk setup --repair"
+
 # The $id the schema declares, and where SchemaStore will serve it.
 SCHEMA_ID = "https://json.schemastore.org/copydesk.config.json"
 
@@ -141,23 +148,29 @@ def render_output_style_body(resolved: dict, level: str) -> str:
     return render_chat(with_verbosity(resolved, level))
 
 
-def render_output_style(resolved: dict, level: str) -> str:
+def render_output_style(resolved: dict, level: str, writer: str) -> str:
     """One whole output style file: frontmatter, fingerprint marker, rules.
 
     The generator writes the shipped copies and the wizard writes the
-    installed ones, so both call this. Two wrappers is how an installed file
-    came to be compared against a body nothing had produced.
+    installed ones, so both call this and `writer` says which. Two wrappers
+    is how an installed file came to be compared against a body nothing had
+    produced.
+
+    The description follows the configured chat style rather than the
+    preset's own block: Claude Code's style picker reads this line, so it
+    has to describe the body below it.
     """
+    chat_style = ((resolved.get("channels") or {}).get("chat") or {}).get("style", "plain")
     style = (resolved.get("instructions") or {})["output_style"]
     body = render_output_style_body(resolved, level)
     return (
         "---\n"
         f"name: CopyDesk {level}\n"
-        f"description: {style['description']}\n"
+        f"description: {styles.DESCRIPTIONS[styles.preset_for(chat_style)]}\n"
         f"keep-coding-instructions: {str(style['keep_coding_instructions']).lower()}\n"
         "---\n\n"
         f"<!-- Generated from rules/{resolved.get('id', 'plain')}.json"
-        " by scripts/generate-instructions.py. Do not edit by hand. -->\n"
+        f" by {writer}. Do not edit by hand. -->\n"
         f"<!-- {FINGERPRINT_MARKER}{fingerprint(body)} -->\n\n"
         f"{RULES_START}\n{body}\n{RULES_END}\n"
     )

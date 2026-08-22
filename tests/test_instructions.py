@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 import config  # noqa: E402
 import instructions  # noqa: E402
 import linter  # noqa: E402
+import styles  # noqa: E402
 
 PRESET = json.loads((ROOT / "rules" / "plain.json").read_text(encoding="utf-8"))
 
@@ -189,6 +190,52 @@ class VerbosityTests(unittest.TestCase):
             self.assertIn(
                 instructions._VERBOSITY_LINES[level], instructions.render_chat(config)
             )
+
+
+class OutputStyleFrontmatterTests(unittest.TestCase):
+    """The frontmatter must describe the style the config picked, and the
+    provenance comment must name whoever wrote this copy of the file.
+
+    The description used to come from the preset's `output_style` block, so
+    an install with a different chat style advertised plain in Claude Code's
+    style picker while the body rendered something else. The provenance line
+    used to hard-code the generator, so files the setup wizard wrote claimed
+    a writer that had never run on that machine.
+    """
+
+    GENERATOR = "scripts/generate-instructions.py"
+    WIZARD = "copydesk setup; regenerate with copydesk setup --repair"
+
+    def _config(self, chat_style: str = "plain") -> dict:
+        config = resolved()
+        # `config.resolve()` grafts the preset onto the resolved document;
+        # the shared fixture still nests it under `preset`.
+        config.update(config.pop("preset"))
+        config["channels"]["chat"]["style"] = chat_style
+        return config
+
+    def _render(self, chat_style: str, level: str = "low") -> str:
+        return instructions.render_output_style(self._config(chat_style), level, writer=self.GENERATOR)
+
+    def test_the_description_matches_the_chat_style(self) -> None:
+        for style in ("plain", "general", "engineer", "editorial"):
+            self.assertIn(
+                f"description: {styles.DESCRIPTIONS[style]}", self._render(style), style
+            )
+
+    def test_the_preset_description_is_absent_when_the_style_differs(self) -> None:
+        preset_description = PRESET["instructions"]["output_style"]["description"]
+        for style in ("general", "engineer", "editorial"):
+            self.assertNotIn(preset_description, self._render(style), style)
+
+    def test_a_file_rendered_through_the_generator_names_the_script(self) -> None:
+        self.assertIn(f"by {self.GENERATOR}.", self._render("plain"))
+
+    def test_a_file_rendered_through_the_wizard_names_setup_and_repair(self) -> None:
+        rendered = instructions.render_output_style(self._config(), "low", writer=self.WIZARD)
+        self.assertIn("by copydesk setup", rendered)
+        self.assertIn("copydesk setup --repair", rendered)
+        self.assertNotIn(self.GENERATOR, rendered)
 
 
 class SetCommandTests(unittest.TestCase):

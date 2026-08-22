@@ -197,7 +197,9 @@ def main() -> int:
 
     targets = {
         **{
-            OUTPUT_STYLES_DIR / f"copydesk-{level}.md": instructions.render_output_style(resolved, level)
+            OUTPUT_STYLES_DIR / f"copydesk-{level}.md": instructions.render_output_style(
+                resolved, level, writer=instructions.GENERATOR_WRITER
+            )
             for level in instructions.VERBOSITY_LEVELS
         },
         REMINDER: render_reminder(preset, REMINDER.read_text(encoding="utf-8")),

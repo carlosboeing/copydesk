@@ -411,7 +411,7 @@ def _build_plan(
         for level in instructions.VERBOSITY_LEVELS:
             writes.append(apply.Write(
                 out_styles_dir / f"copydesk-{level}.md",
-                instructions.render_output_style(resolved_config, level),
+                instructions.render_output_style(resolved_config, level, writer=instructions.SETUP_WRITER),
             ))
 
         # The document is read once, by the caller, so that a settings file
