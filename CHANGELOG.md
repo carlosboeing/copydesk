@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **A commit subject and its bullet list read as one sentence.** The splitter broke only after terminal punctuation, so the unpunctuated subject every Conventional Commit carries ran into each bullet that carried none either, and three bullets pushed one forty-five-word unit past the hard cap on a message whose longest real sentence was eight words. Segmentation now breaks on structure as well as punctuation: a line opening with a list marker is its own unit, its indented continuations stay with it, list content never continues into what follows, and the commit subject never continues into its body. The 25-word cap is unchanged. Trailer lines are masked before any rule reads them — git metadata such as `Signed-off-by:` measures nothing as prose.
+
 ## [0.4.0]
 
 ### Fixed
