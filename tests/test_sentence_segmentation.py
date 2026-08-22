@@ -155,6 +155,22 @@ class CommitMessageTests(unittest.TestCase):
         code, stderr = self.run_commit_msg(message)
         self.assertEqual(code, 0, stderr)
 
+    def test_a_scopeless_subject_is_not_masked_as_a_trailer(self) -> None:
+        message = "docs: add a comprehensive guide\n"
+        code, stderr = self.run_commit_msg(message)
+        self.assertEqual(code, 1, stderr)
+        self.assertIn("banned-word", stderr)
+
+    def test_a_trailer_shaped_line_inside_prose_is_not_masked(self) -> None:
+        message = (
+            "fix(hook): x\n\n"
+            "Some prose here explains it.\n"
+            "Note: the fallback hides a comprehensive failure\n"
+        )
+        code, stderr = self.run_commit_msg(message)
+        self.assertEqual(code, 1, stderr)
+        self.assertIn("banned-word", stderr)
+
     def test_a_subject_with_five_short_bullets_passes(self) -> None:
         bullets = [
             "- The registry survives the session-state sweeper",

@@ -2208,7 +2208,9 @@ def _mask_trailers(text: str) -> str:
     start = end
     while start and _TRAILER_LINE.match(lines[start - 1]):
         start -= 1
-    if start == end:
+    # git interpret-trailers reads a trailing paragraph, never the subject
+    # and never a Token: value line that still sits inside prose.
+    if start == end or start == 0 or lines[start - 1].strip():
         return text
     for index in range(start, end):
         lines[index] = "".join(" " if character != "\n" else "\n" for character in lines[index])
