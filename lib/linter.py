@@ -59,6 +59,11 @@ PARAGRAPH_MAX_SENTENCES = 4
 LIST_EXEMPTION_RATIO = 0.5
 RETRY_LIMIT = 3
 STATE_TTL_SECONDS = 24 * 60 * 60
+# The hook registry shares the state directory with retry session state, and
+# the sweeper below takes stale *.json files. The registry outlives every
+# session, so the sweeper skips this name. hook.py reads it from here rather
+# than naming the file itself, because a second spelling is a deletion.
+HOOK_REGISTRY_NAME = "hooks.json"
 ROTATION_SIZE_BYTES = 8 * 1024 * 1024  # 8 MB
 MAX_STORED_FINDINGS = 20
 # Whitespace-delimited words emitted by hooks/reminder.sh on every user prompt.
@@ -793,6 +798,8 @@ def _state_path(state_dir: Path, session_id: str) -> Path:
 
 def _sweep_state(state_dir: Path, now: float) -> None:
     for candidate in state_dir.glob("*.json"):
+        if candidate.name == HOOK_REGISTRY_NAME:
+            continue  # the hook registry is not session state
         try:
             if now - candidate.stat().st_mtime > STATE_TTL_SECONDS:
                 candidate.unlink()

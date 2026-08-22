@@ -6,6 +6,7 @@ Direction and sequencing. What shipped lives in the [changelog](../CHANGELOG.md)
 
 - **`0.1.0`** — extraction, the rules as data, the preset and config schema, `unglossed-term`, and the retry scope narrowed to the edited region.
 - **`0.2.0`** — prevention system: four channels, the styles shelf, guidance deliverables, the setup wizard, uninstaller, commit-msg hook, and doctor.
+- **`0.3.0`** — the `hook` subcommand: the commit-msg hook managed across repositories, with a state-directory registry, chaining into foreign hooks, and uninstall covering every recorded repository.
 
 ## Next — `1.0.0`
 

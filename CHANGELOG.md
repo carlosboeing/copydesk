@@ -6,8 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0]
+
+### Added
+
+- **`copydesk hook add|remove|list`.** The commit-msg hook is the one thing CopyDesk installs outside the home directory, and setup only ever touched the repository it ran from. The new subcommand manages the hook across repositories: `hook add` installs into the current or named repositories, `hook add --scan <dir>` offers every repository one level under a directory, `hook list` reports each recorded repository, and `hook remove [--all]` takes them back.
+- **A registry of hooked repositories** at `$XDG_STATE_HOME/copydesk/hooks.json`. It is a hint, never the truth: every read opens the hook file and looks for the marker, and an entry whose repository or hook is gone is pruned. Writes go through a temporary file and a rename under the state directory's lock.
+- **Chaining into a foreign commit-msg hook.** A hook someone else wrote is never overwritten. `hook add` offers to append a marked block instead, verifies with a test run that the block is reached — a hook ending in `exit 0` swallows whatever follows it — and records the outcome as `chained`, `unreachable`, or `skipped`. Removal strips the marked region and leaves the rest of the script untouched.
+- **Setup and uninstall join the registry.** `copydesk setup` records the repository it installs into and names `copydesk hook add` for the others. `copydesk uninstall` asks once about the other recorded repositories, defaults to yes, and prints their hook paths when declined — enough to remove each hook by hand once no CopyDesk command is available.
+
 ### Fixed
 
+- **The state sweeper deleted the hook registry.** `hooks.json` sits beside the retry session files, and a blocking gate run unlinks every `*.json` there that is a day old. The registry went with them, so `hook list` and uninstall's other-repository cleanup read empty while the hooks stayed on disk. The sweeper now skips that one name, and `hook.py` builds its path from the same constant.
+- **The chained block refused commits inside a hook that sets `-e`.** Errexit ends the script at the failing command, so `"$COPYDESK" check …; status=$?` never reached the line reading the status. An internal error or a missing CopyDesk then refused the commit instead of failing open. The block now captures the status through `|| status=$?`, and guards a missing binary before calling it, as `git-hooks/commit-msg` does.
+- **Uninstall claimed success over a block it could not strip.** A start marker whose region does not match leaves the script alone, which `hook remove` reports. Uninstall ignored that answer and printed `Uninstall complete.` anyway. It now names the file, says the lines are still there, and exits non-zero.
+- **The chained block aborted commits that CopyDesk passed.** The block is appended last, so its final `[ "$status" -gt 1 ] && echo …` line set the hook's exit status, and an AND-OR list whose tests are false returns 1. The block now uses explicit `if` statements, captures the foreign script's own exit status first, and exits with it.
+- **`hook remove` could delete a foreign hook whole.** A block pasted with indentation matched the start marker but not the stripping region, and control fell through to unlinking the file. The region now tolerates leading whitespace, and removal never deletes a file whose start marker it cannot strip.
 - **`resolve()` ignored a caller that asked for no user configuration.** `user_path=None` meant "go and find it" rather than "read none", so twenty-six call sites that opted out were handed the file anyway. `None` now skips that layer and a `DISCOVER` sentinel is the default.
 - **The instruction generator read the contributor's own configuration.** On a machine with CopyDesk installed, `scripts/generate-instructions.py --check` failed, and running the generator would have written personal settings into the three committed output styles. It now resolves the preset alone.
 

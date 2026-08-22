@@ -136,6 +136,20 @@ To remove all CopyDesk hooks and configurations:
 copydesk uninstall
 ```
 
+## Managing the commit-msg hook
+
+`copydesk setup` installs the commit-msg hook into the repository you run it from. The `hook` subcommand manages it across every repository:
+
+```bash
+copydesk hook add                 # install into the current repository
+copydesk hook add ~/projects/foo  # or a named one
+copydesk hook add --scan ~/src    # offer every repository one level under ~/src
+copydesk hook list                # every recorded repository and its state
+copydesk hook remove --all        # remove them all
+```
+
+A repository whose commit-msg hook already exists is never overwritten: `hook add` offers to append CopyDesk's block instead, and verifies by a test run that the block is reached. Every install is recorded in `$XDG_STATE_HOME/copydesk/hooks.json`, so `uninstall` can offer to remove the hooks in your other repositories too.
+
 ## Channels
 
 CopyDesk divides agent writing into four channels:
