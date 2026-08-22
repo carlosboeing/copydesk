@@ -233,17 +233,25 @@ def render_reviews(resolved: dict) -> str:
     return "\n\n".join(part for part in parts if part)
 
 
-def render_agents_block(resolved: dict) -> str:
-    parts = [
+def render_agents_block(resolved: dict, include_chat: bool = False) -> str:
+    """The body an instruction file carries between CopyDesk's markers.
+
+    Chat joins only where no other surface delivers it: Claude Code reads
+    chat through the output style, so a file only Claude Code reads omits it
+    here. Including chat brings the behavioural clauses with it — the chat
+    renderer emits all three — which is why one flag covers both.
+
+    The markers themselves are not added here. Splicing and removal live in
+    the module that owns the region pattern, so what this returns is exactly
+    what goes between the markers.
+    """
+    parts = [render_chat(resolved)] if include_chat else []
+    parts.extend([
         render_documents(resolved),
         render_commits(resolved),
         render_reviews(resolved),
-    ]
-    non_empty = [part for part in parts if part]
-    if not non_empty:
-        return ""
-    body = "\n\n".join(non_empty)
-    return f"<!-- copydesk:start -->\n{body}\n<!-- copydesk:end -->"
+    ])
+    return "\n\n".join(part for part in parts if part)
 
 
 def fingerprint(rendered: str) -> str:

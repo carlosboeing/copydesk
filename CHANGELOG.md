@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **Every harness was missing channels the others got.** The instruction block joined documents, commits and reviews, so the six non-Claude harnesses never saw the chat channel or the behavioural clauses no style choice can remove — while Claude Code, whose file the wizard skipped outright, never saw documents, commits or reviews at all. A machine could look correct only by accident, when a symlink from another harness landed their block inside Claude Code's file. The registry now names each harness's instruction file, one function renders the block with a flag for whether chat belongs in it, and what a file carries is decided per real file after symlinks resolve: where two harnesses share one file, one write lands carrying all four channels, at the cost of about 340 duplicated words against the output style. Uninstall follows the same registry field, so Claude Code's file is taken back too.
+
 ## [0.3.1]
 
 ### Fixed

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 
 import adapters  # noqa: E402
+import config  # noqa: E402
 import instructions  # noqa: E402
 import wizard  # noqa: E402
 
@@ -585,6 +587,146 @@ class ExistingSettingsTests(unittest.TestCase):
         result = self._cli("setup", "--defaults", "--yes")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(self.settings.read_text(encoding="utf-8"))["model"], "opus")
+
+
+class InstructionAudienceTests(unittest.TestCase):
+    """Which channels reach which harness is decided per real file.
+
+    Claude Code used to receive no instruction file at all, and every other
+    harness received a block missing chat and the floor clauses.
+    """
+
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+
+    def _plan(self, tools: list[str]) -> object:
+        return wizard._build_plan(
+            self.home,
+            self.home / "config" / "copydesk" / "config.json",
+            '{"version": 1}',
+            tools,
+            config.resolve(ROOT / "rules"),
+            {},
+            write_config=False,
+        )
+
+    @staticmethod
+    def _instruction_writes(plan: object) -> list:
+        return [w for w in plan.writes if w.path.name in ("AGENTS.md", "CLAUDE.md")]
+
+    def _write_all_channels_config(self, agents: list[str]) -> None:
+        path = self.home / "config" / "copydesk" / "config.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({
+            "version": 1,
+            "agents": agents,
+            "channels": {
+                "chat": {"enabled": True},
+                "documents": {"enabled": True},
+                "commits": {"enabled": True},
+                "reviews": {"enabled": True},
+            },
+        }), encoding="utf-8")
+
+    def _cli(self, command: str, *args: str) -> subprocess.CompletedProcess:
+        env = dict(
+            os.environ,
+            COPYDESK_HOME=str(self.home),
+            XDG_CONFIG_HOME=str(self.home / "config"),
+            XDG_STATE_HOME=str(self.home / "state"),
+            PATH=str(self.home / "nothing"),
+        )
+        return subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "copydesk"), command, *args],
+            cwd=self.home, capture_output=True, text=True, env=env, input="",
+        )
+
+    def test_setup_for_claude_code_alone_writes_its_instruction_file(self) -> None:
+        (self.home / ".claude").mkdir()
+        self._write_all_channels_config(["claude-code"])
+        result = self._cli("setup", "--repair", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = (self.home / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("problem before the solution", body)
+        self.assertIn("72 characters", body)
+        self.assertIn("name the file and line", body)
+
+    def test_claude_code_s_file_carries_no_chat_line(self) -> None:
+        # Chat stays in the output style, where Claude Code already reads it.
+        (self.home / ".claude").mkdir()
+        self._write_all_channels_config(["claude-code"])
+        result = self._cli("setup", "--repair", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = (self.home / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertNotIn("answer first", body.lower())
+        self.assertNotIn(instructions.style_line("chat", "plain").lower(), body.lower())
+
+    def test_setup_for_grok_writes_chat_and_the_floor_into_its_block(self) -> None:
+        (self.home / ".grok").mkdir()
+        self._write_all_channels_config(["grok"])
+        result = self._cli("setup", "--repair", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = (self.home / ".grok" / "AGENTS.md").read_text(encoding="utf-8").lower()
+        self.assertIn("answer first", body)
+        self.assertIn("closing block appears only when", body)
+        self.assertIn("say a thing once", body)
+        self.assertIn(instructions.style_line("chat", "plain").lower(), body)
+        self.assertIn("problem before the solution", body)
+
+    def test_a_file_two_harnesses_share_gets_one_write_carrying_chat(self) -> None:
+        claude_dir = self.home / ".claude"
+        codex_dir = self.home / ".codex"
+        claude_dir.mkdir()
+        codex_dir.mkdir()
+        real = claude_dir / "CLAUDE.md"
+        (codex_dir / "AGENTS.md").symlink_to(real)
+        writes = self._instruction_writes(self._plan(["claude-code", "codex"]))
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0].path, real.resolve())
+        body = writes[0].content.lower()
+        self.assertIn("answer first", body)
+        self.assertIn("problem before the solution", body)
+
+    def test_without_the_symlink_each_harness_gets_its_own_block(self) -> None:
+        # The control for the shared-file test above: separate files keep
+        # chat out of the copy only Claude Code reads.
+        (self.home / ".claude").mkdir()
+        (self.home / ".codex").mkdir()
+        writes = self._instruction_writes(self._plan(["claude-code", "codex"]))
+        self.assertEqual(len(writes), 2)
+        by_file = {w.path.name: w for w in writes}
+        self.assertNotIn("answer first", by_file["CLAUDE.md"].content.lower())
+        self.assertIn("answer first", by_file["AGENTS.md"].content.lower())
+
+    def test_render_agents_block_has_exactly_one_caller_under_lib(self) -> None:
+        # Two assemblies of one block is how the two copies came to disagree.
+        counts = {}
+        for py in sorted((ROOT / "lib").glob("*.py")):
+            found = len(re.findall(r"\brender_agents_block\s*\(", py.read_text()))
+            if found:
+                counts[py.name] = found
+        self.assertEqual(counts, {"instructions.py": 1, "wizard.py": 1})
+
+    def test_the_wizard_no_longer_renders_channel_parts_inline(self) -> None:
+        source = (ROOT / "lib" / "wizard.py").read_text()
+        for part in ("render_documents(", "render_commits(", "render_reviews("):
+            self.assertNotIn(part, source)
+
+    def test_uninstall_takes_back_claude_code_s_instruction_file(self) -> None:
+        (self.home / ".claude").mkdir()
+        self._write_all_channels_config(["claude-code"])
+        setup_result = self._cli("setup", "--repair", "--yes")
+        self.assertEqual(setup_result.returncode, 0, setup_result.stderr)
+        claude_md = self.home / ".claude" / "CLAUDE.md"
+        text = claude_md.read_text(encoding="utf-8")
+        self.assertIn("<!-- copydesk:start -->", text)
+        claude_md.write_text(text + "\n# Added after setup\n", encoding="utf-8")
+        uninstall_result = self._cli("uninstall", "--yes")
+        self.assertEqual(uninstall_result.returncode, 0, uninstall_result.stderr)
+        body = claude_md.read_text(encoding="utf-8")
+        self.assertNotIn("copydesk:start", body)
+        self.assertIn("# Added after setup", body)
 
 
 class GitIsNotAnAIToolTests(unittest.TestCase):

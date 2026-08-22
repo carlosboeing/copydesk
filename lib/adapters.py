@@ -20,20 +20,50 @@ class Adapter(NamedTuple):
     gate_verified: bool
     repeat_closer: bool
     home: str
+    instruction_file: str  # "" names nothing: git takes a hook, not instructions
 
 
 REGISTRY = {
     "claude-code": Adapter(
-        "claude-code", "Claude Code",
-        "adds output styles and two hooks", True, True, "~/.claude",
+        name="claude-code", label="Claude Code",
+        installs="adds output styles and two hooks", gate_verified=True,
+        repeat_closer=True, home="~/.claude", instruction_file="CLAUDE.md",
     ),
-    "codex": Adapter("codex", "Codex", "adds a block to AGENTS.md", False, False, "~/.codex"),
-    "cursor": Adapter("cursor", "Cursor", "adds a block to AGENTS.md", False, False, "~/.cursor"),
-    "kimi": Adapter("kimi", "Kimi Code", "adds a block to AGENTS.md", False, False, "~/.agents"),
-    "opencode": Adapter("opencode", "OpenCode", "adds a block to AGENTS.md", False, False, "~/.config/opencode"),
-    "antigravity": Adapter("antigravity", "Antigravity CLI", "adds a block to AGENTS.md", False, False, "~/.agents"),
-    "grok": Adapter("grok", "Grok Build", "adds a block to shared instructions", False, False, "~/.grok"),
-    "git": Adapter("git", "Git commit messages", "adds a commit-msg hook to this repository", False, False, "."),
+    "codex": Adapter(
+        name="codex", label="Codex",
+        installs="adds a block to AGENTS.md", gate_verified=False,
+        repeat_closer=False, home="~/.codex", instruction_file="AGENTS.md",
+    ),
+    "cursor": Adapter(
+        name="cursor", label="Cursor",
+        installs="adds a block to AGENTS.md", gate_verified=False,
+        repeat_closer=False, home="~/.cursor", instruction_file="AGENTS.md",
+    ),
+    "kimi": Adapter(
+        name="kimi", label="Kimi Code",
+        installs="adds a block to AGENTS.md", gate_verified=False,
+        repeat_closer=False, home="~/.agents", instruction_file="AGENTS.md",
+    ),
+    "opencode": Adapter(
+        name="opencode", label="OpenCode",
+        installs="adds a block to AGENTS.md", gate_verified=False,
+        repeat_closer=False, home="~/.config/opencode", instruction_file="AGENTS.md",
+    ),
+    "antigravity": Adapter(
+        name="antigravity", label="Antigravity CLI",
+        installs="adds a block to AGENTS.md", gate_verified=False,
+        repeat_closer=False, home="~/.agents", instruction_file="AGENTS.md",
+    ),
+    "grok": Adapter(
+        name="grok", label="Grok Build",
+        installs="adds a block to shared instructions", gate_verified=False,
+        repeat_closer=False, home="~/.grok", instruction_file="AGENTS.md",
+    ),
+    "git": Adapter(
+        name="git", label="Git commit messages",
+        installs="adds a commit-msg hook to this repository", gate_verified=False,
+        repeat_closer=False, home=".", instruction_file="",
+    ),
 }
 
 
