@@ -491,6 +491,26 @@ class InstalledStyleTests(unittest.TestCase):
         self.assertIn(instructions.style_line("chat", "editorial"), body)
         self.assertNotIn(instructions.style_line("chat", "plain"), body)
 
+    def test_the_installed_description_matches_the_chosen_style(self) -> None:
+        # The picker in Claude Code reads the frontmatter, so a plain
+        # description on an engineer install advertises a style the file
+        # does not contain.
+        import styles
+
+        self._write_config("engineer")
+        result = self._cli("setup", "--repair", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = self.installed.read_text(encoding="utf-8")
+        self.assertIn(f"description: {styles.DESCRIPTIONS['engineer']}", body)
+
+    def test_an_installed_style_names_setup_as_its_writer(self) -> None:
+        # The wizard wrote this copy from the user's config; naming the
+        # repository's generator sends a reader to regenerate the wrong file.
+        self._cli("setup", "--defaults", "--yes")
+        body = self.installed.read_text(encoding="utf-8")
+        self.assertIn("by copydesk setup", body)
+        self.assertIn("copydesk setup --repair", body)
+
     def test_the_default_install_carries_the_default_style(self) -> None:
         # The control. Without it the test above could pass on a wizard that
         # writes editorial into every install whatever the config says.
