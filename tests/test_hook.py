@@ -54,6 +54,7 @@ class HookCommandCase(unittest.TestCase):
             CLEAN_ENV,
             COPYDESK_HOME=str(self.home),
             XDG_CONFIG_HOME=str(self.tmp / "config"),
+            XDG_STATE_HOME=str(self.state),
             COPYDESK_STATE_DIR=str(self.state),
         )
         return subprocess.run(
@@ -76,6 +77,7 @@ class HookCommandCase(unittest.TestCase):
             CLEAN_ENV,
             COPYDESK_HOME=str(self.home),
             XDG_CONFIG_HOME=str(self.tmp / "config"),
+            XDG_STATE_HOME=str(self.state),
             COPYDESK_STATE_DIR=str(self.state),
         )
         master, slave = pty.openpty()

@@ -30,6 +30,11 @@ class CommitMessageTests(unittest.TestCase):
         shutil.copy(ROOT / "git-hooks" / "commit-msg", hooks / "commit-msg")
         os.chmod(hooks / "commit-msg", 0o755)
         (self.repo / "copydesk.config.json").write_text('{"version": 1}', encoding="utf-8")
+        # The commit-msg hook invokes bin/copydesk, whose linter records what
+        # it sees. Without this redirection every commit here wrote into the
+        # developer's own telemetry.
+        self.state = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.state)
 
     def test_the_control_commit_succeeds_without_the_hook(self) -> None:
         (self.repo / ".git" / "hooks" / "commit-msg").unlink()
@@ -40,7 +45,8 @@ class CommitMessageTests(unittest.TestCase):
         subprocess.run(["git", "add", "-A"], cwd=self.repo, check=True, env=CLEAN_ENV)
         return subprocess.run(
             ["git", "commit", "-m", message], cwd=self.repo, capture_output=True, text=True,
-            env=dict(CLEAN_ENV, COPYDESK_BIN=str(ROOT / "bin" / "copydesk")),
+            env=dict(CLEAN_ENV, COPYDESK_BIN=str(ROOT / "bin" / "copydesk"),
+                     XDG_STATE_HOME=str(self.state), COPYDESK_STATE_DIR=str(self.state)),
         )
 
     def _commit_with_stub(self, exit_code: int) -> subprocess.CompletedProcess:

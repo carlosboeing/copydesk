@@ -24,6 +24,7 @@ import guidance
 import hook
 import instructions
 import jsonc
+import linter
 import prompt
 import styles
 
@@ -156,6 +157,8 @@ def tool_line(name: str, available: bool) -> str:
 
 _SAMPLE = "Great question - let me walk you through this robust and comprehensive change.\n"
 
+PROOF_SESSION_ID = "copydesk-setup-proof"
+
 
 def prove(home: Path) -> tuple[bool, str]:
     """Lint a known-bad sample through the installed gate.
@@ -167,8 +170,18 @@ def prove(home: Path) -> tuple[bool, str]:
     if not hook.is_file():
         return False, "the gate hook is not installed"
 
+    # The proof reuses one session id, so its retry state outlives any single
+    # setup run. Deleting it first makes every proof a first attempt: the
+    # gate's identical-content escape valve never fires on a healthy install,
+    # and entries from earlier homes cannot pile up behind the session. The
+    # path comes from the linter so both sides resolve one location.
+    try:
+        linter._state_path(linter._state_directory(), PROOF_SESSION_ID).unlink()
+    except OSError:
+        pass
+
     payload = json.dumps({
-        "session_id": "copydesk-setup-proof",
+        "session_id": PROOF_SESSION_ID,
         "tool_name": "Write",
         "tool_input": {"file_path": str(home / "copydesk-sample.md"), "content": _SAMPLE},
     })
