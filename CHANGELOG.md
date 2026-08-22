@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.2]
+
+### Fixed
+
+- **An installed output style advertised the wrong style.** The frontmatter description came from the preset's own block whatever the config chose, so an install set to `engineer` told Claude Code's style picker it was plain while the body below rendered terse engineer prose. The description now follows the configured chat style, read from the same shelf the picker text comes from.
+- **Every installed output style named the repository's generator as its writer.** Setup writes those copies from the user's config, and they differ from what the repository ships. The provenance comment now takes a writer: the generator names itself on shipped copies, and an installed copy names `copydesk setup` and points at `copydesk setup --repair` as the way to regenerate it.
+
 ## [0.3.1]
 
 ### Fixed
