@@ -1883,11 +1883,14 @@ def user_layer() -> dict:
 def stale_output_styles(home: Path) -> list[str]:
     """The installed output styles that no longer match their inputs.
 
-    The marker holds the fingerprint of the body as rendered at build time, so
-    the comparison re-renders that body now. Hashing the installed bytes
-    instead would compare the file with itself, and a changed config would
-    never show up. The reminder and doctor both call this, so neither can
-    hash a different payload from the generator.
+    The marker holds the fingerprint of the whole file as rendered at build
+    time, so the comparison re-renders that file now. Hashing the installed
+    bytes instead would compare the file with itself, and a changed config
+    would never show up. SETUP_WRITER is the only writer files under
+    ~/.claude/output-styles can carry — shipped copies never install there
+    — so re-rendering through it reproduces what setup wrote. The reminder
+    and doctor both call this, so neither can hash a different payload from
+    the wizard.
     """
     directory = home / ".claude" / "output-styles"
     if instructions is None or not directory.is_dir():
@@ -1911,7 +1914,9 @@ def stale_output_styles(home: Path) -> list[str]:
         if marker is None:
             continue
         try:
-            fresh = instructions.render_output_style_body(layer, level)
+            fresh = instructions.render_output_style(
+                layer, level, writer=instructions.SETUP_WRITER
+            )
         except Exception:
             continue
         if marker.group(1) != instructions.fingerprint(fresh):

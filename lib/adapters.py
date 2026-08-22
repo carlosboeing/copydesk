@@ -26,7 +26,8 @@ class Adapter(NamedTuple):
 REGISTRY = {
     "claude-code": Adapter(
         name="claude-code", label="Claude Code",
-        installs="adds output styles and two hooks", gate_verified=True,
+        installs="adds output styles, two hooks and a CLAUDE.md block",
+        gate_verified=True,
         repeat_closer=True, home="~/.claude", instruction_file="CLAUDE.md",
     ),
     "codex": Adapter(

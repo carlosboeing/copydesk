@@ -66,6 +66,12 @@ class AdapterTests(unittest.TestCase):
         for name, adapter in adapters.REGISTRY.items():
             self.assertEqual(adapter.instruction_file, expected[name], name)
 
+    def test_the_claude_code_installs_string_names_the_instruction_file(self) -> None:
+        # The wizard prints this line beside each harness while the user
+        # picks what to configure, so it must name everything setup writes.
+        adapter = adapters.REGISTRY["claude-code"]
+        self.assertIn(adapter.instruction_file, adapter.installs)
+
 
 if __name__ == "__main__":
     unittest.main()
