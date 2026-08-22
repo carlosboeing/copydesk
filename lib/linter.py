@@ -398,6 +398,22 @@ def _unit_start_lines(lines: list[str], subject_is_own_unit: bool) -> list[int]:
     return sorted(starts)
 
 
+def _list_item_lines(lines: list[str]) -> set[int]:
+    """One-based numbers of the lines a list item owns, marker line included.
+
+    A wrapped continuation shares its item's unit, so its sentences belong to
+    the item, not to the paragraph's prose.
+    """
+    owned: set[int] = set()
+    starts = _unit_start_lines(lines, False)
+    for position, start in enumerate(starts):
+        if not _LIST_LINE.match(lines[start]):
+            continue
+        end = starts[position + 1] if position + 1 < len(starts) else len(lines)
+        owned.update(range(start + 1, end + 1))
+    return owned
+
+
 def _sentence_records(text: str, *, subject_is_own_unit: bool = False) -> list[Sentence]:
     """Apply the punctuation splitter within structural units, with source lines.
 
@@ -466,7 +482,14 @@ def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error", max
         cursor = max(cursor, position + len(paragraph))
         if not paragraph.strip() or all(_LIST_LINE.match(line) for line in paragraph.splitlines() if line.strip()):
             continue
-        paragraph_sentences = _sentence_records(paragraph)
+        # List items are structure, not the paragraph's prose: their density
+        # has its own rule, and counting them padded every intro-plus-bullets
+        # block past the cap once items became units of their own.
+        item_lines = _list_item_lines(paragraph.split("\n"))
+        paragraph_sentences = [
+            record for record in _sentence_records(paragraph)
+            if record.line not in item_lines
+        ]
         if len(paragraph_sentences) > max_sentences:
             line = _line_number(text, max(0, position))
             findings.append(Finding(line, "paragraph-length", _excerpt(paragraph), severity))

@@ -240,5 +240,37 @@ class WordCountingTests(unittest.TestCase):
         self.assertEqual(len(records[0].text.split()), 5)
 
 
+class ParagraphLengthTests(unittest.TestCase):
+    """List items are structure, so they do not pad a paragraph's sentence count."""
+
+    def test_an_intro_plus_bullets_paragraph_does_not_trip_paragraph_length(self) -> None:
+        filler = "\n\n".join(
+            f"Paragraph {number} carries enough words to hold the ratio down."
+            for number in range(8)
+        )
+        text = (
+            filler + "\n\n"
+            "Intro line for the items follows right here:\n"
+            "- alpha beta gamma delta epsilon\n"
+            "- zeta eta theta iota kappa\n"
+            "- lambda mu nu xi omicron\n"
+            "- pi rho sigma tau upsilon\n"
+        )
+        findings = [f.check for f in linter.lint(text)]
+        self.assertNotIn("paragraph-length", findings)
+
+    def test_six_prose_sentences_in_one_paragraph_still_trip_paragraph_length(self) -> None:
+        # The control. Without it the test above could pass by never counting.
+        text = (
+            " ".join(
+                f"Sentence number {number} says something plain and short."
+                for number in range(1, 7)
+            )
+            + "\n"
+        )
+        findings = [f.check for f in linter.lint(text)]
+        self.assertIn("paragraph-length", findings)
+
+
 if __name__ == "__main__":
     unittest.main()
