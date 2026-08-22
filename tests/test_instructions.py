@@ -435,6 +435,22 @@ class ChannelBlockTests(unittest.TestCase):
         config["channels"]["commits"] = {"enabled": False}
         self.assertNotIn("commit", instructions.render_agents_block(config).lower())
 
+    def test_disabled_chat_contributes_nothing_even_when_the_block_asks(self) -> None:
+        # render_chat itself has no enabled check: the output style calls it
+        # for its rules region. The join is where the flag has to bite.
+        config = resolved()
+        config["channels"]["chat"]["enabled"] = False
+        self.assertNotIn(
+            "answer first",
+            instructions.render_agents_block(config, include_chat=True).lower(),
+        )
+        for name in ("documents", "commits", "reviews"):
+            config["channels"][name] = {"enabled": False}
+        self.assertEqual(
+            instructions.render_agents_block(config, include_chat=True),
+            "",
+        )
+
     def test_the_chat_channel_joins_when_the_flag_asks(self) -> None:
         rendered = instructions.render_agents_block(resolved(), include_chat=True).lower()
         self.assertIn("answer first", rendered)

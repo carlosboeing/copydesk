@@ -241,11 +241,20 @@ def render_agents_block(resolved: dict, include_chat: bool = False) -> str:
     here. Including chat brings the behavioural clauses with it — the chat
     renderer emits all three — which is why one flag covers both.
 
+    `channels.chat.enabled` still applies. The check lives here, not in
+    `render_chat`, because the output style calls that renderer for its
+    rules region and must keep producing the same bytes.
+
     The markers themselves are not added here. Splicing and removal live in
     the module that owns the region pattern, so what this returns is exactly
     what goes between the markers.
     """
-    parts = [render_chat(resolved)] if include_chat else []
+    chat = (resolved.get("channels") or {}).get("chat") or {}
+    parts = (
+        [render_chat(resolved)]
+        if include_chat and chat.get("enabled", True)
+        else []
+    )
     parts.extend([
         render_documents(resolved),
         render_commits(resolved),
