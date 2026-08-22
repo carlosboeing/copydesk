@@ -76,15 +76,20 @@ _REVIEWS = (
     "In a review comment: name the file and line, then say the fix."
 )
 
+# Extent only. The channel line already says what the body carries and the
+# style line says what shape it takes, so a verbosity line that names a
+# paragraph or a bullet list either repeats one of them or argues with it.
 _COMMITS_VERBOSITY = {
     "low": "",
-    "medium": "One paragraph saying why, not what the diff shows.",
-    "high": "Why in body, then a short bullet list of what changed.",
+    "medium": "Keep the body to a few lines.",
+    "high": "Let the body cover the reasoning in full.",
 }
 
 # The design's Part 4 table, one line per style per channel. Without these the
 # style shelf changes only the gate's thresholds, and the model is never told
-# how the user wants to be written to.
+# how the user wants to be written to. Each line says what its channel line
+# does not: the channel names the parts of the message, the style names their
+# shape. Restating the channel line spends a word budget on nothing.
 STYLE_LINES = {
     ("chat", "plain"): "Short sentences. Structure where it helps, prose where it does not.",
     ("chat", "general"): "Short sentences. Gloss every term the reader may not know.",
@@ -98,10 +103,10 @@ STYLE_LINES = {
     ("commits", "plain"): "Body as prose.",
     ("commits", "general"): "Body as prose, every term glossed.",
     ("commits", "editorial"): "Body as prose.",
-    ("reviews", "plain"): "Name the file and line, then the fix, in prose.",
-    ("reviews", "general"): "Name the file and line, then the fix. Gloss every term.",
-    ("reviews", "engineer"): "Name the file and line, then the fix. One line each.",
-    ("reviews", "editorial"): "Name the file and line, then the fix, in prose.",
+    ("reviews", "plain"): "Write the fix as prose.",
+    ("reviews", "general"): "Write the fix as prose, glossing every term.",
+    ("reviews", "engineer"): "One line each.",
+    ("reviews", "editorial"): "Write the fix as prose.",
 }
 
 
