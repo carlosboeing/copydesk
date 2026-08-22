@@ -453,6 +453,16 @@ class UninstallTests(unittest.TestCase):
         self._cli("uninstall", "--yes")
         self.assertFalse(hooks.exists())
 
+    def test_uninstall_takes_the_style_file_and_any_retired_leftovers(self) -> None:
+        styles_dir = self.home / ".claude" / "output-styles"
+        self._cli("setup", "--defaults", "--yes")
+        self.assertTrue((styles_dir / "copydesk.md").is_file())
+        # A leftover from the three-file layout an upgrade may not have
+        # migrated yet goes with uninstall too.
+        (styles_dir / "copydesk-high.md").write_text("left over\n", encoding="utf-8")
+        self._cli("uninstall", "--yes")
+        self.assertEqual(list(styles_dir.glob("copydesk*")), [])
+
     def test_uninstall_names_every_path_before_touching_one(self) -> None:
         self._cli("setup", "--defaults", "--yes")
         result = self._cli("uninstall", "--dry-run")
@@ -598,7 +608,7 @@ class InstalledStyleTests(unittest.TestCase):
         self.home = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.home)
         (self.home / ".claude").mkdir()
-        self.installed = self.home / ".claude" / "output-styles" / "copydesk-low.md"
+        self.installed = self.home / ".claude" / "output-styles" / "copydesk.md"
 
     def _cli(self, *args) -> subprocess.CompletedProcess:
         env = dict(
@@ -669,14 +679,271 @@ class InstalledStyleTests(unittest.TestCase):
         self._cli("setup", "--defaults", "--yes")
         self.assertNotIn("out of date", self._cli("doctor").stdout.lower())
 
-    def test_every_verbosity_level_is_installed(self) -> None:
+    def test_the_installed_style_carries_the_configured_verbosity(self) -> None:
+        # One style file renders at whatever the config says, replacing the
+        # three per-level files the picker was never wired to switch between.
+        path = self.home / "config" / "copydesk" / "config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            '{"version": 1, "channels": {"chat": {"verbosity": "high"}}}',
+            encoding="utf-8",
+        )
+        result = self._cli("setup", "--repair", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = self.installed.read_text(encoding="utf-8")
+        self.assertIn(instructions._VERBOSITY_LINES["high"], body)
+        self.assertNotIn(instructions._VERBOSITY_LINES["low"], body)
+
+    def test_setup_installs_exactly_one_style_file(self) -> None:
         self._cli("setup", "--defaults", "--yes")
-        for level in instructions.VERBOSITY_LEVELS:
-            style = self.home / ".claude" / "output-styles" / f"copydesk-{level}.md"
-            self.assertTrue(style.is_file(), level)
-            self.assertIn(
-                instructions._VERBOSITY_LINES[level], style.read_text(encoding="utf-8")
+        installed = sorted(
+            p.name for p in (self.home / ".claude" / "output-styles").glob("*")
+        )
+        self.assertEqual(installed, ["copydesk.md"])
+
+
+class MigrationTests(unittest.TestCase):
+    """An install upgraded from the three-style layout ends with one.
+
+    Setup must remove copydesk-low.md, copydesk-medium.md and
+    copydesk-high.md, repoint an `outputStyle` naming any of them, and
+    leave every other value alone.
+    """
+
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+        (self.home / ".claude").mkdir()
+        self.styles_dir = self.home / ".claude" / "output-styles"
+        self.styles_dir.mkdir(parents=True)
+        for level in ("low", "medium", "high"):
+            (self.styles_dir / f"copydesk-{level}.md").write_text(
+                f"---\nname: CopyDesk {level}\n---\nold body {level}\n",
+                encoding="utf-8",
             )
+        self.settings = self.home / ".claude" / "settings.json"
+        config_path = self.home / "config" / "copydesk" / "config.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text('{"version": 1}', encoding="utf-8")
+
+    def _cli(self, *args) -> subprocess.CompletedProcess:
+        env = dict(
+            os.environ,
+            COPYDESK_HOME=str(self.home),
+            XDG_CONFIG_HOME=str(self.home / "config"),
+            XDG_STATE_HOME=str(self.home / "state"),
+            PATH=str(self.home / "nothing"),
+        )
+        env.pop("COPYDESK_STATE_DIR", None)
+        return subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "copydesk"), *args],
+            cwd=self.home, capture_output=True, text=True, env=env, input="",
+        )
+
+    def _seed_settings(self, output_style: str) -> None:
+        self.settings.write_text(
+            json.dumps({"model": "opus", "outputStyle": output_style}),
+            encoding="utf-8",
+        )
+
+    def test_a_selected_retired_style_ends_repointed_at_CopyDesk(self) -> None:
+        # A session running "CopyDesk medium" must not lose its style when
+        # the file it names is deleted. The repoint is migration, not a new
+        # choice, so it happens without asking.
+        self._seed_settings("CopyDesk medium")
+        result = self._cli("setup", "--repair", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        document = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(document["outputStyle"], "CopyDesk")
+
+    def test_the_three_files_are_gone_and_one_remains(self) -> None:
+        self._seed_settings("CopyDesk medium")
+        self._cli("setup", "--repair", "--yes")
+        installed = sorted(p.name for p in self.styles_dir.glob("*"))
+        self.assertEqual(installed, ["copydesk.md"])
+
+    def test_other_settings_keys_survive_the_migration(self) -> None:
+        self._seed_settings("CopyDesk medium")
+        self._cli("setup", "--repair", "--yes")
+        document = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(document["model"], "opus")
+
+    def test_a_foreign_active_style_is_left_alone(self) -> None:
+        # The control for the repoint test above. Only a value naming one of
+        # CopyDesk's own retired files is migrated; anything else belongs to
+        # the user.
+        self._seed_settings("Plain English")
+        result = self._cli("setup", "--repair", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        document = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(document["outputStyle"], "Plain English")
+
+    def test_dry_run_names_the_leftovers_without_touching_them(self) -> None:
+        self._seed_settings("CopyDesk medium")
+        before = sorted(p.name for p in self.styles_dir.glob("*"))
+        result = self._cli("setup", "--repair", "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("copydesk-medium.md", result.stdout)
+        self.assertEqual(sorted(p.name for p in self.styles_dir.glob("*")), before)
+
+
+class ActiveStyleTests(unittest.TestCase):
+    """Setup offers to make CopyDesk the active style; nothing writes the
+    settings key without asking, except the part-1 migration repoint."""
+
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+        (self.home / ".claude").mkdir()
+        self.settings = self.home / ".claude" / "settings.json"
+
+    def _cli(self, *args) -> subprocess.CompletedProcess:
+        env = dict(
+            os.environ,
+            COPYDESK_HOME=str(self.home),
+            XDG_CONFIG_HOME=str(self.home / "config"),
+            XDG_STATE_HOME=str(self.home / "state"),
+            PATH=str(self.home / "nothing"),
+        )
+        env.pop("COPYDESK_STATE_DIR", None)
+        return subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "copydesk"), *args],
+            cwd=self.home, capture_output=True, text=True, env=env, input="",
+        )
+
+    def test_the_prompt_names_whatever_is_being_replaced(self) -> None:
+        text = wizard.active_style_prompt("Plain English")
+        self.assertIn("Make CopyDesk your active output style?", text)
+        self.assertIn("Claude Code currently uses Plain English.", text)
+
+    def test_the_prompt_says_when_nothing_is_set(self) -> None:
+        text = wizard.active_style_prompt(None)
+        self.assertIn("Make CopyDesk your active output style?", text)
+        self.assertNotIn("currently uses", text)
+
+    def test_defaults_activate_the_style(self) -> None:
+        # --defaults answers every question with its default; this one
+        # defaults to yes.
+        result = self._cli("setup", "--defaults", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        document = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(document["outputStyle"], "CopyDesk")
+
+    def test_a_scripted_repair_never_writes_the_key(self) -> None:
+        # No terminal to ask in, no --defaults to answer for the user: the
+        # key stays exactly as found.
+        self.settings.write_text('{"model": "opus"}', encoding="utf-8")
+        result = self._cli("setup", "--repair", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        document = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertNotIn("outputStyle", document)
+        self.assertEqual(document["model"], "opus")
+
+
+class _FdReader:
+    """Minimal stdin over a file descriptor: what the raw-mode prompts touch."""
+
+    def __init__(self, fd: int) -> None:
+        self._fd = fd
+
+    def isatty(self) -> bool:
+        return os.isatty(self._fd)
+
+    def fileno(self) -> int:
+        return self._fd
+
+
+class ActiveStyleInteractiveTests(unittest.TestCase):
+    """The activation question over a real terminal: Enter accepts, Escape
+    leaves the key exactly as it was found.
+
+    Output goes to a StringIO and the answer is offered on a timer until
+    setup consumes it. Entering raw mode flushes whatever is queued ahead
+    of it, so one well-timed write cannot be relied on; a repeat every
+    quarter second always lands inside the blocking key read. The spacing
+    stays outside the 0.05 s window in which two escapes would decode as
+    one sequence.
+    """
+
+    def setUp(self) -> None:
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+        (self.home / ".claude").mkdir()
+        self.settings = self.home / ".claude" / "settings.json"
+        self.settings.write_text('{"model": "opus"}', encoding="utf-8")
+        config_path = self.home / "config" / "copydesk" / "config.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(
+            '{"version": 1, "agents": ["claude-code"]}', encoding="utf-8"
+        )
+        # Pinned in-process: setup runs in this interpreter, so an unpinned
+        # variable would point the proof run at the developer's own state.
+        self._saved_env = {
+            name: os.environ.get(name)
+            for name in ("COPYDESK_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "COPYDESK_STATE_DIR")
+        }
+        os.environ["COPYDESK_HOME"] = str(self.home)
+        os.environ["XDG_CONFIG_HOME"] = str(self.home / "config")
+        os.environ["XDG_STATE_HOME"] = str(self.home / "state")
+        os.environ.pop("COPYDESK_STATE_DIR", None)
+        self.addCleanup(self._restore_env)
+
+    def _restore_env(self) -> None:
+        for name, value in self._saved_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    def _run(self, answer: bytes) -> str:
+        import io
+        import threading
+
+        master, slave = os.openpty()
+        outcome: dict = {}
+
+        def run() -> None:
+            try:
+                outcome["code"] = wizard.run_setup(
+                    ["--repair", "--yes"],
+                    stdin=_FdReader(master),
+                    stdout=io.StringIO(),
+                )
+            except BaseException as error:  # surfaced below, not swallowed
+                outcome["error"] = error
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        try:
+            offered = time.time()
+            while thread.is_alive():
+                if time.time() > offered + 30:
+                    self.fail("setup never reached or answered the activation question")
+                thread.join(timeout=0.25)
+                if thread.is_alive():
+                    try:
+                        os.write(slave, answer)
+                    except OSError:
+                        break
+            thread.join(10)
+        finally:
+            os.close(master)
+            os.close(slave)
+        if "error" in outcome:
+            raise outcome["error"]
+        self.assertEqual(outcome.get("code"), 0)
+        return ""
+
+    def test_enter_accepts_and_sets_the_key(self) -> None:
+        self._run(b"\r")
+        document = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(document["outputStyle"], "CopyDesk")
+
+    def test_escape_declines_and_leaves_the_key_alone(self) -> None:
+        self._run(b"\x1b")
+        document = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertNotIn("outputStyle", document)
+        self.assertEqual(document["model"], "opus")
 
 
 class ExistingSettingsTests(unittest.TestCase):

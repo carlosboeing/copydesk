@@ -166,32 +166,45 @@ class OneInstructionPerFactTests(unittest.TestCase):
                 )
 
 
-class VerbosityTests(unittest.TestCase):
-    def test_the_environment_variable_wins(self) -> None:
+class SingleOutputStyleTests(unittest.TestCase):
+    """One output style file, named CopyDesk, at the configured verbosity.
+
+    Three per-level files existed so Claude Code's style picker could act as
+    a verbosity switch. Nothing ever read the pick back: no caller outside
+    the tests resolved the level from the environment, and nothing read
+    `outputStyle` out of settings.json. One file carries the configured
+    verbosity; the dead resolver and its override stay deleted.
+    """
+
+    def test_one_output_style_is_named_CopyDesk(self) -> None:
+        self.assertEqual(instructions.OUTPUT_STYLE_NAME, "CopyDesk")
+
+    def test_the_retired_per_level_names_are_recorded_for_migration(self) -> None:
         self.assertEqual(
-            instructions.resolve_verbosity(resolved(), {"COPYDESK_VERBOSITY": "high"}), "high"
+            instructions.LEGACY_OUTPUT_STYLE_NAMES,
+            ("CopyDesk low", "CopyDesk medium", "CopyDesk high"),
         )
 
-    def test_the_config_is_the_resting_default(self) -> None:
-        self.assertEqual(instructions.resolve_verbosity(resolved(), {}), "low")
-
-    def test_an_invalid_environment_value_falls_back_to_the_config(self) -> None:
-        self.assertEqual(
-            instructions.resolve_verbosity(resolved(), {"COPYDESK_VERBOSITY": "loud"}), "low"
-        )
-
-    def test_three_output_styles_are_named(self) -> None:
-        self.assertEqual(
-            instructions.OUTPUT_STYLE_NAMES, ("CopyDesk low", "CopyDesk medium", "CopyDesk high")
-        )
-
-    def test_each_output_style_renders_its_own_verbosity_line(self) -> None:
+    def test_the_output_style_renders_at_the_configured_verbosity(self) -> None:
         for level in ("low", "medium", "high"):
             config = resolved()
             config["channels"]["chat"]["verbosity"] = level
-            self.assertIn(
-                instructions._VERBOSITY_LINES[level], instructions.render_chat(config)
-            )
+            rendered = instructions.render_output_style(config, writer="copydesk setup")
+            self.assertIn(instructions._VERBOSITY_LINES[level], rendered, level)
+
+    def test_the_frontmatter_names_the_single_style(self) -> None:
+        rendered = instructions.render_output_style(resolved(), writer="copydesk setup")
+        self.assertIn("name: CopyDesk\n", rendered)
+        self.assertNotIn("name: CopyDesk low\n", rendered)
+
+    def test_the_dead_resolver_and_override_stay_deleted(self) -> None:
+        # A resolver with no callers is a promise the picker wiring never
+        # kept. If either name reappears in lib/, finish the wiring or
+        # delete it again.
+        for py in (ROOT / "lib").glob("*.py"):
+            source = py.read_text(encoding="utf-8")
+            self.assertNotIn("resolve_verbosity", source, py.name)
+            self.assertNotIn("COPYDESK_VERBOSITY", source, py.name)
 
 
 class OutputStyleFrontmatterTests(unittest.TestCase):
@@ -216,8 +229,8 @@ class OutputStyleFrontmatterTests(unittest.TestCase):
         config["channels"]["chat"]["style"] = chat_style
         return config
 
-    def _render(self, chat_style: str, level: str = "low") -> str:
-        return instructions.render_output_style(self._config(chat_style), level, writer=self.GENERATOR)
+    def _render(self, chat_style: str) -> str:
+        return instructions.render_output_style(self._config(chat_style), writer=self.GENERATOR)
 
     def test_the_description_matches_the_chat_style(self) -> None:
         for style in ("plain", "general", "engineer", "editorial"):
@@ -234,7 +247,7 @@ class OutputStyleFrontmatterTests(unittest.TestCase):
         self.assertIn(f"by {self.GENERATOR}.", self._render("plain"))
 
     def test_a_file_rendered_through_the_wizard_names_setup_and_repair(self) -> None:
-        rendered = instructions.render_output_style(self._config(), "low", writer=self.WIZARD)
+        rendered = instructions.render_output_style(self._config(), writer=self.WIZARD)
         self.assertIn("by copydesk setup", rendered)
         self.assertIn("copydesk setup --repair", rendered)
         self.assertNotIn(self.GENERATOR, rendered)
@@ -342,10 +355,9 @@ class FingerprintTests(unittest.TestCase):
             instructions.fingerprint(first), instructions.fingerprint(instructions.render_chat(config))
         )
 
-    def test_every_generated_style_embeds_its_fingerprint(self) -> None:
-        for level in ("low", "medium", "high"):
-            text = (ROOT / "output-styles" / f"copydesk-{level}.md").read_text(encoding="utf-8")
-            self.assertIn(instructions.FINGERPRINT_MARKER, text)
+    def test_the_generated_style_embeds_its_fingerprint(self) -> None:
+        text = (ROOT / "output-styles" / "copydesk.md").read_text(encoding="utf-8")
+        self.assertIn(instructions.FINGERPRINT_MARKER, text)
 
 
 class DeltaTests(unittest.TestCase):
@@ -408,9 +420,7 @@ class StalenessNoticeTests(unittest.TestCase):
         os.environ["XDG_STATE_HOME"] = str(self.home / "state")
         try:
             cfg = linter.user_layer()
-            fresh = instructions.render_output_style(
-                cfg, "low", writer=instructions.SETUP_WRITER
-            )
+            fresh = instructions.render_output_style(cfg, writer=instructions.SETUP_WRITER)
         finally:
             if env_prev is None:
                 os.environ.pop("XDG_CONFIG_HOME", None)
@@ -420,7 +430,7 @@ class StalenessNoticeTests(unittest.TestCase):
                 os.environ.pop("XDG_STATE_HOME", None)
             else:
                 os.environ["XDG_STATE_HOME"] = state_prev
-        style_path = self.home / ".claude" / "output-styles" / "copydesk-low.md"
+        style_path = self.home / ".claude" / "output-styles" / "copydesk.md"
         style_path.parent.mkdir(parents=True, exist_ok=True)
         style_path.write_text(fresh, encoding="utf-8")
 
@@ -494,21 +504,23 @@ class StaleOutputStyleTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _install(self, text: str) -> Path:
-        path = self.home / ".claude" / "output-styles" / "copydesk-low.md"
+    def _install(self, text: str, name: str = "copydesk.md") -> Path:
+        path = self.home / ".claude" / "output-styles" / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         return path
 
-    def _pre_040_install(self) -> str:
+    def _pre_040_install(self, name: str = "copydesk-low.md") -> str:
         """What 0.3.x wrote: the preset's description, the generator named
         as writer, and a stamp over the rules body alone."""
         layer = linter.user_layer()
-        body = instructions.render_output_style_body(layer, "low")
+        pinned = json.loads(json.dumps(layer))
+        pinned.setdefault("channels", {}).setdefault("chat", {})["verbosity"] = "low"
+        body = instructions.render_chat(pinned)
         old = PRESET["instructions"]["output_style"]
         return (
             "---\n"
-            "name: CopyDesk low\n"
+            f"name: CopyDesk {name[len('copydesk-'):-len('.md')]}\n"
             f"description: {old['description']}\n"
             f"keep-coding-instructions: {str(old['keep_coding_instructions']).lower()}\n"
             "---\n\n"
@@ -520,16 +532,13 @@ class StaleOutputStyleTests(unittest.TestCase):
 
     def _current_render(self) -> str:
         layer = linter.user_layer()
-        return instructions.render_output_style(
-            layer, "low", writer=instructions.SETUP_WRITER
-        )
+        return instructions.render_output_style(layer, writer=instructions.SETUP_WRITER)
 
     def test_a_pre_040_body_only_stamp_reads_as_stale(self) -> None:
         # Config and body are current; only the frontmatter predates 0.4.0.
         # That is exactly what an install upgraded across 0.4.0 looks like,
         # and it must be told to repair rather than be called fresh.
-        installed = self._install(self._pre_040_install())
-        self.assertIn(styles.DESCRIPTIONS["plain"], installed.read_text(encoding="utf-8"))
+        self._install(self._pre_040_install("copydesk-low.md"), name="copydesk-low.md")
         self.assertEqual(linter.stale_output_styles(self.home), ["copydesk-low.md"])
 
     def test_a_frontmatter_description_from_another_style_reads_as_stale(self) -> None:
@@ -549,11 +558,45 @@ class StaleOutputStyleTests(unittest.TestCase):
             line for line in fresh.splitlines() if line.startswith("description:")
         ]
         self.assertNotEqual(installed_description, fresh_description)
-        self.assertEqual(linter.stale_output_styles(self.home), ["copydesk-low.md"])
+        self.assertEqual(linter.stale_output_styles(self.home), ["copydesk.md"])
 
     def test_a_file_rendered_at_this_commit_reads_as_fresh(self) -> None:
         # The control for both tests above.
         self._install(self._current_render())
+        self.assertEqual(linter.stale_output_styles(self.home), [])
+
+    def test_a_hand_edited_description_reads_as_stale(self) -> None:
+        # Comparing stamps alone cannot see an edit: the stamp describes
+        # the inputs, not the bytes, so a hand-edited file kept its stamp
+        # and every check called it fresh. The installed bytes are compared
+        # with the re-render, so tampering is visible the same way input
+        # drift is.
+        installed = self._install(self._current_render())
+        edited = installed.read_text(encoding="utf-8").replace(
+            "description: ", "description: Hand-edited. ", 1
+        )
+        installed.write_text(edited, encoding="utf-8")
+        self.assertEqual(linter.stale_output_styles(self.home), ["copydesk.md"])
+
+    def test_a_retired_per_level_file_reads_as_stale(self) -> None:
+        # copydesk.md has no hyphen, so a glob written for the three-file
+        # layout stops matching it and the retired files would drop out of
+        # the check entirely. The check enumerates the known names instead:
+        # a retired file carrying an old-format stamp is flagged until setup
+        # migrates it away.
+        self._install(
+            self._pre_040_install("copydesk-medium.md"), name="copydesk-medium.md"
+        )
+        self.assertEqual(linter.stale_output_styles(self.home), ["copydesk-medium.md"])
+
+    def test_retired_files_are_absent_from_the_check_when_migrated(self) -> None:
+        # The control for the test above: once setup has migrated an install
+        # to one file, nothing left behind keeps reporting drift.
+        self._install(self._current_render())
+        for level in ("low", "medium", "high"):
+            self.assertFalse(
+                (self.home / ".claude" / "output-styles" / f"copydesk-{level}.md").is_file()
+            )
         self.assertEqual(linter.stale_output_styles(self.home), [])
 
 
@@ -696,12 +739,15 @@ class ProductionShapeTests(unittest.TestCase):
 
     def test_every_shipped_output_style_carries_the_categories(self) -> None:
         categories = PRESET["instructions"]["categories"]
-        for level in instructions.VERBOSITY_LEVELS:
-            path = ROOT / "output-styles" / f"copydesk-{level}.md"
-            self.assertIn(
-                categories, path.read_text(encoding="utf-8"),
-                f"{path.name} was generated without the categories paragraph",
-            )
+        path = ROOT / "output-styles" / "copydesk.md"
+        self.assertIn(
+            categories, path.read_text(encoding="utf-8"),
+            f"{path.name} was generated without the categories paragraph",
+        )
+
+    def test_the_repository_ships_exactly_one_output_style(self) -> None:
+        shipped = sorted(p.name for p in (ROOT / "output-styles").glob("*.md"))
+        self.assertEqual(shipped, ["copydesk.md"])
 
     def test_a_style_the_categories_are_absent_from_is_caught(self) -> None:
         # Control: the same assertion against text known not to contain them.

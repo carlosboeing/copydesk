@@ -30,6 +30,7 @@ class Write(NamedTuple):
 
 class Plan(NamedTuple):
     writes: list[Write]
+    removes: "list[Path]" = []  # retired files, deleted once every write lands
 
 
 class Result(NamedTuple):
@@ -90,27 +91,42 @@ def remove_marked_block(path: Path) -> None:
     path.write_text(updated.rstrip("\n") + "\n", encoding="utf-8")
 
 
+def _real_of(p: Path) -> Path:
+    return p.resolve() if not p.is_symlink() else p
+
+
 def execute(plan: Plan) -> Result:
     """Execute a plan atomically.
 
     Holds the original text of every file it touches in memory. If any write
     fails, rolls back all modified files from that text and removes newly
-    created files.
+    created files. Planned removals run last and roll back the same way, so
+    a failed plan leaves an install exactly as it was found — including the
+    files it was about to delete.
 
     The originals stay in memory and never reach disk. A snapshot beside the
-    file would outlive the command that needed it, and these are files such as
-    settings.json that carry credentials: `write_text` creates a copy at the
-    process umask, so the copy can be readable where the original was not.
+    file would outlive the command that needed it, and these are files such
+    as settings.json that carry credentials: `write_text` creates a copy at
+    the process umask, so the copy can be readable where the original was
+    not.
     """
     # 1. Pre-validation: check must_exist
     for write in plan.writes:
         if write.must_exist and not write.path.exists():
             return Result(ok=False, failed=write.path, message=f"{write.path} does not exist")
 
-    # 2. Originals: one read per real file that exists
+    # 2. Originals: one read per real file that exists or is about to go
     original_contents: dict[Path, str] = {}
     created_files: list[Path] = []
     created_dirs: list[Path] = []
+    removed_originals: dict[Path, Optional[str]] = {}
+    for p in plan.removes:
+        real_p = _real_of(p)
+        if real_p.is_file():
+            try:
+                removed_originals[real_p] = real_p.read_text(encoding="utf-8")
+            except OSError:
+                removed_originals[real_p] = None
 
     try:
         for write in plan.writes:
@@ -135,6 +151,14 @@ def execute(plan: Plan) -> Result:
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(write.content, encoding="utf-8")
 
+        # 3. Removals land only after every write succeeded, so a failure
+        # above can never leave an install with neither the old file nor
+        # the new one.
+        for p in plan.removes:
+            target = _real_of(p)
+            if target.is_file():
+                target.unlink()
+
         return Result(ok=True, failed=None, message="Applied successfully")
 
     except Exception as err:
@@ -156,6 +180,15 @@ def execute(plan: Plan) -> Result:
             try:
                 if d.exists() and not list(d.iterdir()):
                     d.rmdir()
+            except OSError:
+                pass
+
+        for real_p, orig_text in removed_originals.items():
+            if orig_text is None:
+                continue
+            try:
+                real_p.parent.mkdir(parents=True, exist_ok=True)
+                real_p.write_text(orig_text, encoding="utf-8")
             except OSError:
                 pass
 

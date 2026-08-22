@@ -141,6 +141,49 @@ class RollbackTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.home.iterdir()), ["settings.json"])
         self.assertNotIn("s3cret", target.read_text(encoding="utf-8"))
 
+    def test_a_planned_removal_happens_after_the_writes_succeed(self) -> None:
+        # The style migration removes the retired per-level files only once
+        # the new single file is on disk, so a failed write never leaves an
+        # install with neither.
+        styles = self.home / "output-styles"
+        styles.mkdir()
+        legacy = styles / "copydesk-medium.md"
+        legacy.write_text("old\n", encoding="utf-8")
+        fresh = styles / "copydesk.md"
+        result = apply.execute(apply.Plan(
+            writes=[apply.Write(fresh, "new")],
+            removes=[legacy],
+        ))
+        self.assertTrue(result.ok, result.message)
+        self.assertTrue(fresh.is_file())
+        self.assertFalse(legacy.exists())
+
+    def test_an_absent_removal_target_is_not_a_failure(self) -> None:
+        # A second repair finds no leftovers; the plan still names them so
+        # the first run's review panel stays honest about intent.
+        styles = self.home / "output-styles"
+        styles.mkdir()
+        result = apply.execute(apply.Plan(
+            writes=[apply.Write(styles / "copydesk.md", "new")],
+            removes=[styles / "copydesk-low.md"],
+        ))
+        self.assertTrue(result.ok, result.message)
+
+    def test_a_failed_write_rolls_the_removal_back(self) -> None:
+        # All-or-nothing covers deletions too: the retired files come back
+        # if the plan fails, leaving the install exactly as it was found.
+        legacy = self.home / "copydesk-low.md"
+        legacy.write_text("old\n", encoding="utf-8")
+        result = apply.execute(apply.Plan(
+            writes=[
+                apply.Write(self.home / "copydesk.md", "new"),
+                apply.Write(self.home / "copydesk.md" / "child", "boom"),
+            ],
+            removes=[legacy],
+        ))
+        self.assertFalse(result.ok)
+        self.assertEqual(legacy.read_text(encoding="utf-8"), "old\n")
+
 
 if __name__ == "__main__":
     unittest.main()

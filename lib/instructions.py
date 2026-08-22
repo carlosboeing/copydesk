@@ -10,14 +10,19 @@ enumerate.
 from __future__ import annotations
 
 import hashlib
-import json
 from typing import Optional
 
 import guidance
 import styles
 
 VERBOSITY_LEVELS = ("low", "medium", "high")
-OUTPUT_STYLE_NAMES = ("CopyDesk low", "CopyDesk medium", "CopyDesk high")
+
+# One installed file carries this name in its frontmatter. Three per-level
+# files existed so Claude Code's style picker could act as a verbosity
+# switch; nothing ever read the pick back, so setup writes the configured
+# verbosity into a single file and migrates the retired names away.
+OUTPUT_STYLE_NAME = "CopyDesk"
+LEGACY_OUTPUT_STYLE_NAMES = ("CopyDesk low", "CopyDesk medium", "CopyDesk high")
 FINGERPRINT_MARKER = "copydesk-build:"
 RULES_START = "<!-- plain-english-rules:start -->"
 RULES_END = "<!-- plain-english-rules:end -->"
@@ -123,39 +128,17 @@ def style_line(channel: str, style: str) -> str:
     return STYLE_LINES.get((channel, styles.preset_for(style)), "")
 
 
-def resolve_verbosity(resolved: dict, environ: dict) -> str:
-    """Environment, then the harness style picker, then the config.
-
-    The style picker's choice reaches this function as the config value,
-    because `copydesk set` writes it there. So two sources are read here and
-    the third is a write that happened earlier.
-    """
-    declared = environ.get("COPYDESK_VERBOSITY")
-    if declared in VERBOSITY_LEVELS:
-        return declared
-    settings = (resolved.get("channels") or {}).get("chat") or {}
-    value = settings.get("verbosity", "low")
-    return value if value in VERBOSITY_LEVELS else "low"
-
-
-def render_output_style_body(resolved: dict, level: str) -> str:
-    """The marked rules block of one output style, and nothing around it.
-
-    `render_output_style` wraps this in frontmatter, and the staleness
-    check re-renders whole installed files through that same function.
-    Both must produce the same bytes from the same inputs, so there is
-    one function.
-    """
-    return render_chat(with_verbosity(resolved, level))
-
-
-def render_output_style(resolved: dict, level: str, writer: str) -> str:
+def render_output_style(resolved: dict, writer: str) -> str:
     """One whole output style file: frontmatter, fingerprint marker, rules.
 
-    The generator writes the shipped copies and the wizard writes the
-    installed ones, so both call this and `writer` says which. Two wrappers
+    The generator writes the shipped copy and the wizard writes the
+    installed one, so both call this and `writer` says which. Two wrappers
     is how an installed file came to be compared against a body nothing had
     produced.
+
+    The body renders at the config's own chat verbosity. The three
+    per-level files this replaces differed by that one sentence, and the
+    picker wiring that would have made the level reachable never existed.
 
     The description follows the configured chat style rather than the
     preset's own block: Claude Code's style picker reads this line, so it
@@ -167,11 +150,14 @@ def render_output_style(resolved: dict, level: str, writer: str) -> str:
     reached new installs while existing ones read as fresh forever.
     """
     chat_style = ((resolved.get("channels") or {}).get("chat") or {}).get("style", "plain")
-    style = (resolved.get("instructions") or {})["output_style"]
-    body = render_output_style_body(resolved, level)
+    # `config.resolve()` grafts its extra keys onto the preset document; the
+    # nested form is what a hand-built fixture produces.
+    inst = resolved.get("instructions") or (resolved.get("preset") or {}).get("instructions") or {}
+    style = inst["output_style"]
+    body = render_chat(resolved)
     head = (
         "---\n"
-        f"name: CopyDesk {level}\n"
+        f"name: {OUTPUT_STYLE_NAME}\n"
         f"description: {styles.DESCRIPTIONS[styles.preset_for(chat_style)]}\n"
         f"keep-coding-instructions: {str(style['keep_coding_instructions']).lower()}\n"
         "---\n\n"
@@ -183,13 +169,6 @@ def render_output_style(resolved: dict, level: str, writer: str) -> str:
     # The placeholder sits on the marker line, which fingerprint drops, so
     # hashing this build hashes the finished file.
     return head + fingerprint(head + "0" * 12 + tail) + tail
-
-
-def with_verbosity(resolved: dict, level: str) -> dict:
-    """A copy of the resolved config with chat's verbosity replaced."""
-    copied = json.loads(json.dumps(resolved))
-    copied.setdefault("channels", {}).setdefault("chat", {})["verbosity"] = level
-    return copied
 
 
 def word_count(text: str) -> int:

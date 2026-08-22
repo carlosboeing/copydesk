@@ -140,7 +140,20 @@ COPY = {
     ),
     "rerun": "CopyDesk is already installed. Choose an action:",
     "non_tty": "Run setup in an interactive terminal, or pass --defaults.",
+    "active_style": "Make CopyDesk your active output style?",
+    "active_style_current": "Claude Code currently uses {name}.",
+    "active_style_none": "Claude Code has no output style set.",
 }
+
+
+def active_style_prompt(current: object) -> str:
+    """The activation question, naming whatever would be replaced."""
+    detail = (
+        COPY["active_style_current"].format(name=current)
+        if isinstance(current, str) and current
+        else COPY["active_style_none"]
+    )
+    return f"{COPY['active_style']} {detail}"
 
 
 def _missing(name: str) -> str:
@@ -385,6 +398,54 @@ def _read_settings(path: Path) -> tuple[Optional[dict], str]:
     return document, ""
 
 
+class InstructionTarget(NamedTuple):
+    real: Path               # the one file on disk after symlinks resolve
+    declared: list[Path]     # every adapter's own path that reaches it
+    tools: list[str]         # the adapters, in the order they were asked
+
+
+def instruction_targets(
+    home: Path,
+    tools: Optional[Sequence[str]] = None,
+    require_existing: bool = False,
+) -> list[InstructionTarget]:
+    """Instruction files after symlinks resolve, with who reaches each.
+
+    Several adapters can name one real file: a setup that keeps one
+    canonical instructions file and symlinks the per-harness names at it.
+    Setup coalesces its writes through this map, so a shared file gets one
+    block carrying what both readers need; doctor reports the grouping,
+    because nothing else tells a reader why their CLAUDE.md carries
+    documents. With `require_existing`, targets whose file is not on disk
+    drop out — doctor reports what exists, while setup plans writes that
+    create files.
+    """
+    names = list(tools) if tools is not None else [
+        name for name in adapters.REGISTRY if name != "git"
+    ]
+    grouped: dict[Path, InstructionTarget] = {}
+    for tool in names:
+        adapter = adapters.REGISTRY.get(tool)
+        if not adapter or not adapter.instruction_file:
+            continue
+        declared = home / adapter.home.replace("~/", "") / adapter.instruction_file
+        try:
+            exists = declared.exists()
+        except OSError:
+            exists = False
+        if require_existing and not exists:
+            continue
+        real = declared.resolve()
+        entry = grouped.get(real)
+        if entry is None:
+            grouped[real] = InstructionTarget(real=real, declared=[declared], tools=[tool])
+        else:
+            grouped[real] = InstructionTarget(
+                real=entry.real, declared=[*entry.declared, declared], tools=[*entry.tools, tool],
+            )
+    return list(grouped.values())
+
+
 def _build_plan(
     home: Path,
     config_path: Path,
@@ -398,6 +459,7 @@ def _build_plan(
     # writing, so repairing leaves it alone rather than restoring defaults
     # over it.
     writes = [apply.Write(config_path, config_body)] if write_config else []
+    removes: list[Path] = []
 
     if "claude-code" in selected_tools:
         hooks_dir = home / ".claude" / "hooks" / "copydesk"
@@ -421,11 +483,26 @@ def _build_plan(
         # user picked, and doctor re-renders from their config, so a fresh
         # install would read as drift the moment it finished.
         out_styles_dir = home / ".claude" / "output-styles"
-        for level in instructions.VERBOSITY_LEVELS:
-            writes.append(apply.Write(
-                out_styles_dir / f"copydesk-{level}.md",
-                instructions.render_output_style(resolved_config, level, writer=instructions.SETUP_WRITER),
-            ))
+        writes.append(apply.Write(
+            out_styles_dir / "copydesk.md",
+            instructions.render_output_style(resolved_config, writer=instructions.SETUP_WRITER),
+        ))
+        # The retired per-level files go once the single file is on disk.
+        # Naming them in the plan keeps removal inside setup's all-or-nothing
+        # apply and puts them in front of the user before anything moves.
+        removes.extend(
+            path for path in (
+                out_styles_dir / f"copydesk-{level}.md"
+                for level in instructions.VERBOSITY_LEVELS
+            ) if path.exists()
+        )
+
+        # Migration: a settings key naming one of the retired files would be
+        # left pointing at a file this plan deletes. Repointing it is not a
+        # new choice — CopyDesk wrote that value — so it needs no question.
+        style_name = settings_doc.get("outputStyle")
+        if isinstance(style_name, str) and style_name in instructions.LEGACY_OUTPUT_STYLE_NAMES:
+            settings_doc["outputStyle"] = instructions.OUTPUT_STYLE_NAME
 
         # The document is read once, by the caller, so that a settings file
         # that will not parse stops setup before the first write rather than
@@ -456,32 +533,23 @@ def _build_plan(
 
         writes.append(apply.Write(settings_path, json.dumps(settings_doc, indent=2) + "\n"))
 
-    # One instruction file per harness. Which channels a file carries is
-    # decided per real file, after symlinks resolve: where two harnesses
-    # share one file through a symlink, one write lands and carries what
-    # both read, chat included. A file only Claude Code reads leaves chat
-    # out here rather than delivering it twice — the output style has it.
-    chat_by_real: dict[Path, bool] = {}
-    for tool in selected_tools:
-        if tool == "git":
-            continue
-        adapter = adapters.REGISTRY.get(tool)
-        if not adapter or not adapter.instruction_file:
-            continue
-        target_file = home / adapter.home.replace("~/", "") / adapter.instruction_file
-        real = target_file.resolve()
-        chat_by_real[real] = chat_by_real.get(real, False) or tool != "claude-code"
-
-    for real, wants_chat in chat_by_real.items():
+    # One instruction file per harness, coalesced by real path. Which
+    # channels a file carries is decided after symlinks resolve: where two
+    # harnesses share one file through a symlink, one write lands and
+    # carries what both read, chat included. A file only Claude Code reads
+    # leaves chat out here rather than delivering it twice — the output
+    # style has it.
+    for target in instruction_targets(home, selected_tools):
+        wants_chat = any(tool != "claude-code" for tool in target.tools)
         block = instructions.render_agents_block(resolved_config, include_chat=wants_chat)
         if not block:
             continue
         orig = ""
-        if real.is_file():
-            orig = real.read_text(encoding="utf-8")
-        writes.append(apply.Write(real, apply.splice_marked_block(orig, block)))
+        if target.real.is_file():
+            orig = target.real.read_text(encoding="utf-8")
+        writes.append(apply.Write(target.real, apply.splice_marked_block(orig, block)))
 
-    return apply.Plan(writes=writes)
+    return apply.Plan(writes=writes, removes=removes)
 
 
 def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> int:
@@ -767,6 +835,27 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
             return 1
         settings_doc = read_settings
 
+        # Installing a style nobody activates left users with CopyDesk on
+        # disk and nothing in effect. Ask once, default yes, and name what
+        # would be replaced. The key is never written without an answer:
+        # --defaults answers for the user, a terminal asks, and anything
+        # else leaves the key exactly as it was found.
+        if settings_doc.get("outputStyle") != instructions.OUTPUT_STYLE_NAME:
+            if args.defaults:
+                settings_doc["outputStyle"] = instructions.OUTPUT_STYLE_NAME
+            elif interactive:
+                try:
+                    accepted = prompt.confirm(
+                        active_style_prompt(settings_doc.get("outputStyle")),
+                        default=True,
+                        stdin=in_stream,
+                        stdout=out_stream,
+                    )
+                except prompt.Cancelled:
+                    accepted = False
+                if accepted:
+                    settings_doc["outputStyle"] = instructions.OUTPUT_STYLE_NAME
+
     plan = _build_plan(
         copydesk_home, config_file, config_body, selected_tools, resolved_config,
         settings_doc, write_config=not repairing_settings,
@@ -793,6 +882,8 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
     out_stream.write(COPY["review"] + "\n")
     for write in plan.writes:
         out_stream.write(f"  {write.path}\n")
+    for path in plan.removes:
+        out_stream.write(f"  {path} (removed)\n")
     if hook_plan is not None and hook_plan.write is None:
         # A hook someone else wrote is named here and left alone, so the
         # commits gate never silently replaces a repository's own check.
@@ -893,10 +984,14 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
     if hooks_dir.exists():
         targets.append(apply.Target(real=hooks_dir, kind="created"))
 
-    # 3. Output styles
+    # 3. Output styles: the one file the current version writes, plus the
+    # retired per-level names an install may still carry.
     out_styles_dir = copydesk_home / ".claude" / "output-styles"
-    for level in ("low", "medium", "high"):
-        st = out_styles_dir / f"copydesk-{level}.md"
+    style_names = ["copydesk.md", *(
+        f"copydesk-{level}.md" for level in instructions.VERBOSITY_LEVELS
+    )]
+    for name in style_names:
+        st = out_styles_dir / name
         if st.is_file():
             targets.append(apply.Target(real=st, kind="created"))
 
