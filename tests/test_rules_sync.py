@@ -191,18 +191,6 @@ class GeneratedInstructionTests(unittest.TestCase):
         self.assertEqual(len(instructions_dict["reminder"].split()), instructions_dict["reminder_word_count"])
         self.assertEqual(instructions_dict["reminder_word_count"], linter.REMINDER_WORD_COUNT)
 
-    def test_reminder_fallback_matches_the_preset_text(self) -> None:
-        """The fallback heredoc carries the preset reminder verbatim.
-
-        Word counts alone cannot hold the two together: two different
-        49-word strings pass both length pins. This reminder is the only
-        CopyDesk text that enters the model context on every turn, so the
-        primary path and its fallback must be one string.
-        """
-        script = (REPOSITORY_ROOT / "hooks" / "reminder.sh").read_text(encoding="utf-8")
-        body = script.split("cat << 'EOF'\n", 1)[1].split("\nEOF", 1)[0]
-        self.assertEqual(body, preset()["instructions"]["reminder"])
-
     def test_output_styles_carry_correct_names_and_markers(self) -> None:
         for level in ("low", "medium", "high"):
             path = REPOSITORY_ROOT / "output-styles" / f"copydesk-{level}.md"
