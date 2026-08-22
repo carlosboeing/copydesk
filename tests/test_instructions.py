@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -116,6 +117,50 @@ class ChatBudgetTests(unittest.TestCase):
             instructions.word_count(instructions.render_chat(off)),
             instructions.word_count(instructions.render_chat(resolved())),
         )
+
+
+class OneInstructionPerFactTests(unittest.TestCase):
+    """The channel line, the style line and the verbosity line say one thing each.
+
+    Two of them saying the same thing spends a budget measured in words on
+    nothing. Two of them saying different things leaves the model to choose,
+    and a commit body cannot be bullets and a paragraph at once.
+    """
+
+    CHANNEL_LINES = {
+        "commits": instructions._COMMITS,
+        "reviews": instructions._REVIEWS,
+    }
+    STYLES = ("plain", "general", "engineer", "editorial")
+
+    @staticmethod
+    def _runs(text: str, size: int = 4) -> set:
+        words = re.findall(r"[a-z0-9]+", text.lower())
+        return {tuple(words[i:i + size]) for i in range(len(words) - size + 1)}
+
+    def test_no_style_line_restates_its_channel_line(self) -> None:
+        for channel, line in self.CHANNEL_LINES.items():
+            for style in self.STYLES:
+                shared = self._runs(line) & self._runs(instructions.style_line(channel, style))
+                self.assertEqual(shared, set(), f"{channel}/{style} repeats {shared}")
+
+    def test_no_verbosity_line_restates_its_channel_line(self) -> None:
+        for level, line in instructions._COMMITS_VERBOSITY.items():
+            shared = self._runs(instructions._COMMITS) & self._runs(line)
+            self.assertEqual(shared, set(), f"commits/{level} repeats {shared}")
+
+    def test_a_commit_body_is_never_asked_for_bullets_and_a_paragraph(self) -> None:
+        for style in self.STYLES:
+            for level in instructions.VERBOSITY_LEVELS:
+                config = resolved()
+                config["channels"]["commits"] = {
+                    "enabled": True, "style": style, "verbosity": level, "guidance": {},
+                }
+                rendered = instructions.render_commits(config).lower()
+                self.assertFalse(
+                    "bullet" in rendered and "paragraph" in rendered,
+                    f"commits/{style}/{level} asks for both forms",
+                )
 
 
 class VerbosityTests(unittest.TestCase):
