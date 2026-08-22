@@ -40,6 +40,7 @@ class DoctorTests(unittest.TestCase):
             XDG_STATE_HOME=str(self.home / "state"),
             PATH=str(self.home / "nothing"),
         )
+        env.pop("COPYDESK_STATE_DIR", None)
         return subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), "doctor", *args],
             cwd=self.root, capture_output=True, text=True, env=env,

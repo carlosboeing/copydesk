@@ -134,6 +134,7 @@ class GeneratedInstructionTests(unittest.TestCase):
         )
 
         environment = dict(os.environ, XDG_CONFIG_HOME=str(home), XDG_STATE_HOME=str(home / "state"))
+        environment.pop("COPYDESK_STATE_DIR", None)
         result = subprocess.run(
             [sys.executable, str(GENERATOR), "--check"],
             capture_output=True, text=True, check=False, env=environment,

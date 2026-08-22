@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 import adapters  # noqa: E402
 import config  # noqa: E402
 import instructions  # noqa: E402
+import linter  # noqa: E402
 import wizard  # noqa: E402
 
 # A suite run from inside a worktree inherits GIT_DIR and its siblings, which
@@ -159,6 +160,7 @@ class FlagTests(unittest.TestCase):
             XDG_STATE_HOME=str(self.home / "state"),
             PATH=str(self.home / "nothing"),
         )
+        env.pop("COPYDESK_STATE_DIR", None)
         return subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", *args],
             cwd=self.home, capture_output=True, text=True, env=env, input="",
@@ -210,6 +212,7 @@ class FlagTests(unittest.TestCase):
             XDG_STATE_HOME=str(empty / "state"),
             PATH=str(empty / "nothing"),
         )
+        env.pop("COPYDESK_STATE_DIR", None)
         result = subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", "--defaults", "--yes"],
             cwd=empty, capture_output=True, text=True, env=env, input="",
@@ -369,7 +372,11 @@ class RealStateDirectoryTests(unittest.TestCase):
 
     @staticmethod
     def _snapshot() -> list:
-        base = Path.home() / ".local" / "state" / "copydesk"
+        # Watch whichever directory this process would actually write to.
+        # Hardcoding ~/.local/state/copydesk misses COPYDESK_STATE_DIR and
+        # a non-default XDG_STATE_HOME, so the equality below would pass
+        # while the suite still wrote into the developer's real state.
+        base = linter._state_directory()
         if not base.is_dir():
             return []
         return sorted(
@@ -387,6 +394,7 @@ class RealStateDirectoryTests(unittest.TestCase):
             XDG_STATE_HOME=str(self.home / "state"),
             PATH=str(self.home / "nothing"),
         )
+        env.pop("COPYDESK_STATE_DIR", None)
         result = subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", "--defaults", "--yes"],
             cwd=self.home, capture_output=True, text=True, env=env, input="",
@@ -423,6 +431,7 @@ class UninstallTests(unittest.TestCase):
             XDG_CONFIG_HOME=str(self.home / "config"),
             XDG_STATE_HOME=str(self.home / "state"),
         )
+        env.pop("COPYDESK_STATE_DIR", None)
         # A temporary directory rather than the caller's, so a run of the
         # suite never installs a commit-msg hook into the repository it is
         # testing.
@@ -505,6 +514,7 @@ class CommitHookSetupTests(unittest.TestCase):
             XDG_CONFIG_HOME=str(self.home / "config"),
             XDG_STATE_HOME=str(self.home / "state"),
         )
+        env.pop("COPYDESK_STATE_DIR", None)
         return subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), *args],
             cwd=self.repo, capture_output=True, text=True, env=env, input="",
@@ -533,6 +543,7 @@ class CommitHookSetupTests(unittest.TestCase):
             XDG_CONFIG_HOME=str(self.home / "config"),
             XDG_STATE_HOME=str(self.home / "state"),
         )
+        env.pop("COPYDESK_STATE_DIR", None)
         result = subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", "--defaults", "--yes"],
             cwd=outside, capture_output=True, text=True, env=env, input="",
@@ -597,6 +608,7 @@ class InstalledStyleTests(unittest.TestCase):
             XDG_STATE_HOME=str(self.home / "state"),
             PATH=str(self.home / "nothing"),
         )
+        env.pop("COPYDESK_STATE_DIR", None)
         return subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), *args],
             cwd=self.home, capture_output=True, text=True, env=env, input="",
@@ -684,6 +696,7 @@ class ExistingSettingsTests(unittest.TestCase):
             XDG_STATE_HOME=str(self.home / "state"),
             PATH=str(self.home / "nothing"),
         )
+        env.pop("COPYDESK_STATE_DIR", None)
         return subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), *args],
             cwd=self.home, capture_output=True, text=True, env=env, input="",
@@ -784,6 +797,7 @@ class InstructionAudienceTests(unittest.TestCase):
             XDG_STATE_HOME=str(self.home / "state"),
             PATH=str(self.home / "nothing"),
         )
+        env.pop("COPYDESK_STATE_DIR", None)
         return subprocess.run(
             [sys.executable, str(ROOT / "bin" / "copydesk"), command, *args],
             cwd=self.home, capture_output=True, text=True, env=env, input="",

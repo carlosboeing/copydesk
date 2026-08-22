@@ -22,6 +22,8 @@ PRESET = json.loads((ROOT / "rules" / "plain.json").read_text(encoding="utf-8"))
 def run_cli(args: list, env: dict) -> int:
     merged = dict(os.environ)
     merged.update(env)
+    if "COPYDESK_STATE_DIR" not in env:
+        merged.pop("COPYDESK_STATE_DIR", None)
     return subprocess.run(
         [sys.executable, str(ROOT / "bin" / "copydesk"), *args],
         capture_output=True, env=merged, text=True,
