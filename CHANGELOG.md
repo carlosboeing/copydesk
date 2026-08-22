@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **An install written before 0.4.0 never received the 0.4.0 frontmatter fix.** The build stamp hashed only the rules body, so the description change and the provenance change could not make an older file read as stale: the body still matched its stamp, and both doctor and the reminder hook reported no drift. The stamp now covers the whole rendered file, its own line excepted, so every byte the renderer produces takes part in the comparison — including a pre-0.4.0 install's own, whose body-only stamp can no longer equal a whole-file hash. Those files read as stale on their own and name `copydesk setup --repair` as the way forward.
+- **Claude Code's line in the setup list understated what setup writes.** The wizard prints an `installs` summary beside each harness while the user picks what to configure, and Claude Code's said output styles and two hooks although setup since 0.4.0 also writes a block into `CLAUDE.md`. The summary now names all three.
+
 ## [0.4.0]
 
 ### Fixed

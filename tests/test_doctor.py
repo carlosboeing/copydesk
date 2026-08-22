@@ -88,12 +88,15 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("out of date", out.lower())
         self.assertIn("copydesk setup --repair", out)
 
-    def _fresh_body(self, level: str) -> str:
-        """The body the generator would stamp, under this test's config home."""
+    def _fresh_install(self, level: str) -> str:
+        """The whole file setup writes today, under this test's config home."""
         previous = os.environ.get("XDG_CONFIG_HOME")
         os.environ["XDG_CONFIG_HOME"] = str(self.home / "config")
         try:
-            return instructions.render_output_style_body(linter.user_layer(), level)
+            layer = linter.user_layer()
+            return instructions.render_output_style(
+                layer, level, writer=instructions.SETUP_WRITER
+            )
         finally:
             if previous is None:
                 os.environ.pop("XDG_CONFIG_HOME", None)
@@ -103,24 +106,23 @@ class DoctorTests(unittest.TestCase):
     def test_a_current_fingerprint_reports_no_drift(self) -> None:
         # The control. Without it the assertion above cannot tell a working
         # check from one that always warns. The marker holds the fingerprint
-        # of a freshly rendered body, which is what the generator stamps and
-        # what doctor must compare against.
+        # of a freshly rendered file, which is what setup stamps and what
+        # doctor must compare against.
         styles_dir = self.home / ".claude" / "output-styles"
         styles_dir.mkdir(parents=True)
-        fresh = self._fresh_body("low")
         (styles_dir / "copydesk-low.md").write_text(
-            "---\nname: CopyDesk low\n---\n\n"
-            f"<!-- copydesk-build:{instructions.fingerprint(fresh)} -->\n\n{fresh}\n",
-            encoding="utf-8",
+            self._fresh_install("low"), encoding="utf-8"
         )
         self.assertNotIn("out of date", self._doctor().stdout.lower())
 
-    def test_a_generated_output_style_is_not_reported_as_stale(self) -> None:
-        """The shipped file carries the generator's own stamp, so a fresh
-        install must read as current rather than as drift."""
+    def test_styles_the_setup_wizard_wrote_are_not_reported_as_stale(self) -> None:
+        """The check re-renders through the writer that produces installed
+        copies. A file carrying that writer's stamp, at every level, must
+        read as current rather than as drift."""
         styles_dir = self.home / ".claude" / "output-styles"
         styles_dir.mkdir(parents=True)
         for level in ("low", "medium", "high"):
-            shutil.copy(ROOT / "output-styles" / f"copydesk-{level}.md",
-                        styles_dir / f"copydesk-{level}.md")
+            (styles_dir / f"copydesk-{level}.md").write_text(
+                self._fresh_install(level), encoding="utf-8"
+            )
         self.assertNotIn("out of date", self._doctor().stdout.lower())
