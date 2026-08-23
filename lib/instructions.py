@@ -54,7 +54,7 @@ SCHEMA_URL = (
 # moved from 220 to 240 when the guidance default grew to four items
 # (+14 words) and the gloss clause arrived (+15): the default render then
 # measured 236 words. The vocabulary clause then absorbed the shorter gloss
-# line and gave the jargon category a test, taking the block to 265. Nothing
+# line and gave the jargon category a test, taking the block to 267. Nothing
 # outside tests reads this table, so a budget below its own default fails
 # test_the_chat_block_fits_its_budget, never an install.
 BUDGETS = {"chat": 269, "documents": 260, "commits": 25, "reviews": 25}
@@ -78,12 +78,14 @@ _CHAT_STRUCTURE = (
 # test and the allowed examples travel together, because the bare category
 # "opaque jargon" gave no way to tell `race condition` from `seam`. The banned
 # side stays a category: a test pins that the token list never reaches the
-# chat block, which is what keeps this text short.
+# chat block, which is what keeps this text short. Four sentences and no colon:
+# the splitter treats a colon as a break, and this paragraph has to pass the
+# same paragraph-length rule it ships.
 VOCABULARY = (
-    "Prefer the word your reader already uses. Never invent one. Common domain "
-    "vocabulary is fine: race condition, idempotent, design pattern. Anything you "
-    "cannot source, say in plain English. A term you must use anyway is glossed on "
-    "first use, meaning in the same sentence."
+    "Prefer the word your reader already uses and never invent one. Common domain "
+    "vocabulary such as race condition or idempotent is fine. Anything you cannot "
+    "source, say in plain English. A term you must use anyway is glossed on first "
+    "use, meaning in the same sentence."
 )
 
 _VERBOSITY_LINES = {

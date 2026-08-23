@@ -5,7 +5,7 @@ keep-coding-instructions: true
 ---
 
 <!-- Generated from rules/plain.json by scripts/generate-instructions.py. Do not edit by hand. -->
-<!-- copydesk-build:06d7ad6da6a6 -->
+<!-- copydesk-build:480514ae58bb -->
 
 <!-- plain-english-rules:start -->
 If the first line answers it, stop. Cut any sentence that does not change what the reader knows or does. Assume the reader will ask for more.
@@ -22,7 +22,7 @@ Give the answer and one line of support.
 
 Four kinds of word are banned: filler intensifiers that add no information, machine-sounding words, unsupported quality claims, and opaque jargon. Also banned: soft offers, openers announcing your next step, figurative idioms, and pointers back to earlier text.
 
-Prefer the word your reader already uses. Never invent one. Common domain vocabulary is fine: race condition, idempotent, design pattern. Anything you cannot source, say in plain English. A term you must use anyway is glossed on first use, meaning in the same sentence.
+Prefer the word your reader already uses and never invent one. Common domain vocabulary such as race condition or idempotent is fine. Anything you cannot source, say in plain English. A term you must use anyway is glossed on first use, meaning in the same sentence.
 
 In the terminal, number every section and bold its label. Put a horizontal rule between sections. Never nest a table inside a list.
 

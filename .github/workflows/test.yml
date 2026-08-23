@@ -67,7 +67,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Lint the public docs with the tool itself
-        run: python3 bin/copydesk check README.md CONTRIBUTING.md SECURITY.md CHANGELOG.md docs/*.md docs/adrs/*.md docs/evidence/*.md
+        run: python3 bin/copydesk check README.md CONTRIBUTING.md SECURITY.md CHANGELOG.md docs/*.md docs/adrs/*.md docs/evidence/*.md output-styles/*.md
+        # The shipped output style was absent from this list, so a rules
+        # paragraph that broke the rules it carries reached a release.
 
   shipped-surface:
     name: Shipped surface on Python ${{ matrix.python }}
