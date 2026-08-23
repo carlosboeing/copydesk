@@ -24,5 +24,5 @@ if [[ -n "$LINTER" ]] && command -v python3 >/dev/null 2>&1; then
 fi
 
 cat << 'EOF'
-Answer in one bold line first. Numbered sections split by `---`; in chat, no `##` headers — they render as plain bold. Sentences under 25 words, each self-contained. Gloss every link, SHA and line number inline. End with a numbered decisions list; nothing actionable lives only in the body.
+Answer in one bold line first. Numbered sections split by `---`; in chat, no `##` headers — they render as plain bold. Sentences under 25 words, each self-contained. Gloss every link, SHA, line number and unfamiliar word inline. End with a numbered decisions list; nothing actionable lives only in the body.
 EOF

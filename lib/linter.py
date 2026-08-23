@@ -68,7 +68,7 @@ ROTATION_SIZE_BYTES = 8 * 1024 * 1024  # 8 MB
 MAX_STORED_FINDINGS = 20
 # Whitespace-delimited words emitted by hooks/reminder.sh on every user prompt.
 # tests/test_telemetry.py reads the hook and fails if this drifts from the text.
-REMINDER_WORD_COUNT = 49
+REMINDER_WORD_COUNT = 51
 
 
 @dataclass(frozen=True)

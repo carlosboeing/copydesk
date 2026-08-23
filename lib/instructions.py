@@ -53,10 +53,11 @@ SCHEMA_URL = (
 # session; a 200-word one did. The budget is tested, not documented. Chat
 # moved from 220 to 240 when the guidance default grew to four items
 # (+14 words) and the gloss clause arrived (+15): the default render then
-# measured 236 words. Nothing outside tests reads this table, so a budget
-# below its own default fails test_the_chat_block_fits_its_budget, never an
-# install.
-BUDGETS = {"chat": 240, "documents": 260, "commits": 25, "reviews": 25}
+# measured 236 words. The vocabulary clause then replaced the unusable
+# "opaque jargon" category and the shorter gloss line, taking the block to
+# 263. Nothing outside tests reads this table, so a budget below its own
+# default fails test_the_chat_block_fits_its_budget, never an install.
+BUDGETS = {"chat": 267, "documents": 260, "commits": 25, "reviews": 25}
 
 _STOPPING_RULES = (
     "If the first line answers it, stop. "
@@ -72,8 +73,15 @@ _CHAT_STRUCTURE = (
 # Chat never reaches the gate, and no shipped word list anticipates the
 # vocabulary a project coins. The one prevention surface that covers both
 # is this clause. Fifteen words, measured.
-GLOSS_TERMS = (
-    "Gloss a term this project coined on its first use, meaning in the same sentence."
+# Prevention before glossing. A banned-word list holds what someone thought to
+# add; it can never hold a word the model invents mid-sentence. The rule, the
+# test and the examples travel together because the bare category "opaque
+# jargon" gave no way to tell `race condition` from `seam`.
+VOCABULARY = (
+    "Prefer the word your reader already uses. Never invent one. Common domain "
+    "vocabulary is fine: race condition, idempotent, design pattern. Anything you "
+    "cannot source, say in plain English. A term you must use anyway is glossed on "
+    "first use, meaning in the same sentence."
 )
 
 _VERBOSITY_LINES = {
@@ -201,7 +209,7 @@ def render_chat(resolved: dict) -> str:
         style_line("chat", settings.get("style", "plain")),
         _VERBOSITY_LINES.get(settings.get("verbosity", "low"), _VERBOSITY_LINES["low"]),
         inst.get("categories", ""),
-        GLOSS_TERMS,
+        VOCABULARY,
         _CHAT_STRUCTURE,
     ]
     parts.extend(guidance.render(settings.get("guidance") or {}))

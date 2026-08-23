@@ -77,7 +77,7 @@ class ChatBudgetTests(unittest.TestCase):
         self.assertLessEqual(words, instructions.BUDGETS["chat"])
 
     def test_the_budget_is_the_designed_one(self) -> None:
-        self.assertEqual(instructions.BUDGETS["chat"], 240)
+        self.assertEqual(instructions.BUDGETS["chat"], 267)
 
     def test_no_banned_word_token_list_reaches_the_chat_block(self) -> None:
         rendered = instructions.render_chat(resolved())
@@ -749,20 +749,45 @@ class SharedGuidanceTests(unittest.TestCase):
         self.assertGreater(second, reviews_at)
 
 
-class GlossTermsTests(unittest.TestCase):
-    def test_the_chat_block_tells_the_agent_to_gloss_coined_terms(self) -> None:
+class VocabularyTests(unittest.TestCase):
+    """Prevention first, glossing as the fallback.
+
+    A banned-word list holds what someone thought to add. It can never hold
+    a word the model invents mid-sentence, so the instruction has to state
+    the rule, the test and both sides of the line.
+    """
+
+    def test_the_chat_block_bans_inventing_a_word(self) -> None:
         rendered = instructions.render_chat(resolved()).lower()
-        self.assertIn("gloss", rendered)
-        self.assertIn("coined", rendered)
-        self.assertIn("first use", rendered)
+        self.assertIn("never invent", rendered)
+
+    def test_the_chat_block_carries_the_sourcing_test(self) -> None:
+        rendered = instructions.render_chat(resolved()).lower()
+        self.assertIn("cannot source", rendered)
+        self.assertIn("plain english", rendered)
+
+    def test_the_chat_block_shows_vocabulary_that_is_allowed(self) -> None:
+        # A category alone gave no way to tell one from the other.
+        rendered = instructions.render_chat(resolved()).lower()
+        self.assertIn("race condition", rendered)
+        self.assertIn("idempotent", rendered)
+
+    def test_glossing_survives_as_the_fallback(self) -> None:
+        rendered = instructions.render_chat(resolved()).lower()
+        self.assertIn("glossed on first use", rendered)
 
     def test_the_clause_rides_into_the_joined_block_with_chat(self) -> None:
         body = instructions.render_agents_block(resolved(), include_chat=True).lower()
         self.assertIn("first use", body)
 
-    def test_the_clause_stays_near_fifteen_words(self) -> None:
-        clause = instructions.GLOSS_TERMS
-        self.assertLessEqual(instructions.word_count(clause), 16)
+    def test_the_unusable_category_is_gone(self) -> None:
+        # "opaque jargon" named a category with no test attached, so it could
+        # not be applied. The clause above replaces the job it failed to do.
+        rendered = instructions.render_chat(resolved()).lower()
+        self.assertNotIn("opaque jargon", rendered)
+
+    def test_the_clause_stays_under_fifty_words(self) -> None:
+        self.assertLessEqual(instructions.word_count(instructions.VOCABULARY), 50)
 
 
 class RepeatCloserTests(unittest.TestCase):
