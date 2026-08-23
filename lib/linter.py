@@ -101,6 +101,11 @@ class Finding:
     origin: str = "new"
     span_start: Optional[int] = None
     span_end: Optional[int] = None
+    # Ranges to test instead of the outer span, for a rule measured over parts
+    # of a paragraph that are not contiguous. paragraph-length excludes list
+    # item lines from its count, so a bullet between two counted sentences sits
+    # inside the outer span and must not own the finding.
+    spans: tuple = ()
 
     def render(self) -> str:
         return f"{self.line}:{self.check}:{self.excerpt}"
@@ -536,11 +541,13 @@ def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error", max
             # the issue 8 symptom, reintroduced one layer down.
             start = max(0, position)
             line = _line_number(text, start)
-            span_start = start + min(record.start for record in paragraph_sentences)
-            span_end = start + max(record.end for record in paragraph_sentences)
+            counted = tuple(
+                (start + record.start, start + record.end)
+                for record in paragraph_sentences
+            )
             findings.append(Finding(
                 line, "paragraph-length", _excerpt(paragraph), severity,
-                span_start=span_start, span_end=span_end,
+                span_start=counted[0][0], span_end=counted[-1][1], spans=counted,
             ))
     return findings
 
@@ -823,7 +830,9 @@ def lint(
 # just written was reported as pre-existing, and the block message named an
 # error it said needed no change. It carries its paragraph's span now and
 # takes the ordinary overlap path.
-DOCUMENT_SCOPED_BLOCKING_RULES = frozenset({"long-sentence-rate"})
+DOCUMENT_SCOPED_BLOCKING_RULES = frozenset({
+    "long-sentence-rate", "avg-sentence-length", "sentence-variation", "list-dominated",
+})
 
 
 def blocking_findings_for_retry(findings: Iterable[Finding]) -> list[Finding]:
@@ -928,7 +937,6 @@ def _compute_edit_origins(
     findings: list[Finding],
     existing: str,
     old_string: str,
-    new_string: str,
     reconstructed: str,
 ) -> list[Finding]:
     """Attribute each finding to the edit or to the pre-existing document.
@@ -969,7 +977,8 @@ def _compute_edit_origins(
         if f.span_start is None or f.span_end is None:
             result.append(Finding(f.line, f.check, f.excerpt, f.severity, origin="existing"))
             continue
-        is_new = _overlaps_changed(f.span_start, f.span_end, owned)
+        tested = f.spans or ((f.span_start, f.span_end),)
+        is_new = any(_overlaps_changed(lo, hi, owned) for lo, hi in tested)
         result.append(Finding(f.line, f.check, f.excerpt, f.severity, origin="new" if is_new else "existing"))
     return result
 
@@ -1253,7 +1262,7 @@ def run_hook(raw_payload: str) -> int:
                 existing = Path(file_path).read_text(encoding="utf-8")
             except OSError:
                 existing = ""
-            findings_with_origin = _compute_edit_origins(findings, existing, old_string, new_string, proposed)
+            findings_with_origin = _compute_edit_origins(findings, existing, old_string, proposed)
             payload_bytes = len(old_string.encode("utf-8")) + len(new_string.encode("utf-8"))
             payload_words = len(old_string.split()) + len(new_string.split())
 

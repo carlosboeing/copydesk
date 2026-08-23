@@ -233,7 +233,12 @@ class GateScopeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_an_edit_that_newly_trips_paragraph_length_blocks(self) -> None:
-        """paragraph-length is span-less, so it blocks when it newly fires."""
+        """An edit that grows a paragraph past the cap owns the result.
+
+        The edit's characters land inside the sentences the rule counts,
+        so ordinary overlap charges it. The rule is not on the whole-document
+        list and does not take the newly-fires path.
+        """
         four = (
             "One short sentence sits here now. Two more words follow along. "
             "Three keeps under the word cap. Four finishes this paragraph cleanly."
@@ -262,6 +267,18 @@ class GateScopeTests(unittest.TestCase):
             path, "Three short lines here.", "Three rewritten lines here.", session="pl1"))
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("paragraph-length", result.stderr)
+
+    def test_a_bullet_between_counted_sentences_is_not_blamed(self) -> None:
+        # The outer bounds run from the first counted sentence to the last, so
+        # a bullet sitting between two of them falls inside them. The finding
+        # carries each counted sentence separately for exactly this geometry.
+        doc = ("One short line here. Two short lines here.\n"
+               "- bullet sits here now\n"
+               "Three short lines here. Four short lines here. Five short lines here.")
+        path = self.write("pl4.md", doc + "\n")
+        result = self.gate(self.edit_payload(
+            path, "- bullet sits here now", "- bullet reworded here now", session="pl4"))
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rewording_a_bullet_is_not_blamed_for_the_intro(self) -> None:
         # List item lines are excluded from the sentence count, so the span
@@ -355,9 +372,18 @@ class DecisionHelperTests(unittest.TestCase):
         blocking = linter.blocking_findings_for_retry(findings)
         self.assertEqual([f.line for f in blocking], [2])
 
-    def test_only_the_ratio_rule_is_excluded_from_origin_filtering(self) -> None:
-        # long-sentence-rate is a ratio over the whole document with no text
-        # to point at. paragraph-length has its paragraph's span and takes the
+    def test_every_whole_document_metric_is_excluded_from_origin_filtering(self) -> None:
+        # A rule measured over the whole document has no text to point at, so
+        # origin overlap cannot place it and it would never block an Edit.
+        # All four take the newly-fires path instead.
+        for check in ("long-sentence-rate", "avg-sentence-length",
+                      "sentence-variation", "list-dominated"):
+            finding = linter.Finding(1, check, "x", "error", origin="new")
+            self.assertEqual(linter.blocking_findings_for_retry([finding]), [], check)
+            self.assertIn(check, linter.DOCUMENT_SCOPED_BLOCKING_RULES)
+
+    def test_the_ratio_rule_is_excluded_but_paragraph_length_is_not(self) -> None:
+        # paragraph-length has its paragraph's sentences and takes the
         # ordinary path, so a new one blocks like any other finding.
         ratio = linter.Finding(1, "long-sentence-rate", "x", "error", origin="new")
         self.assertEqual(linter.blocking_findings_for_retry([ratio]), [])
