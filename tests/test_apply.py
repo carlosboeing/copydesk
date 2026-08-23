@@ -254,6 +254,38 @@ class UninstallResidueTests(unittest.TestCase):
         self.assertTrue(settings.is_file())
         self.assertIn("my-own-hook.sh", settings.read_text(encoding="utf-8"))
 
+    def test_owned_output_style_is_unset_and_other_keys_survive(self) -> None:
+        # Uninstall deletes the style file; the key that names it has to
+        # leave in the same rewrite, or Claude Code names a missing file.
+        settings = self.home / "settings.json"
+        settings.write_text(
+            json.dumps({"model": "opus", "outputStyle": "CopyDesk"}),
+            encoding="utf-8",
+        )
+        apply._remove_copydesk_hooks(settings)
+        self.assertEqual(json.loads(settings.read_text(encoding="utf-8")), {"model": "opus"})
+
+    def test_a_retired_output_style_is_unset(self) -> None:
+        settings = self.home / "settings.json"
+        settings.write_text(
+            json.dumps({"outputStyle": "CopyDesk medium"}),
+            encoding="utf-8",
+        )
+        apply._remove_copydesk_hooks(settings)
+        self.assertFalse(settings.exists(), "a settings.json holding only {} carries no config")
+
+    def test_a_foreign_output_style_is_left_alone(self) -> None:
+        settings = self.home / "settings.json"
+        settings.write_text(
+            json.dumps({"outputStyle": "Plain English"}),
+            encoding="utf-8",
+        )
+        apply._remove_copydesk_hooks(settings)
+        self.assertEqual(
+            json.loads(settings.read_text(encoding="utf-8")),
+            {"outputStyle": "Plain English"},
+        )
+
     def test_empty_directories_are_pruned_up_to_the_harness_home(self) -> None:
         hooks = self.home / ".claude" / "hooks" / "copydesk"
         hooks.mkdir(parents=True)

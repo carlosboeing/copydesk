@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from typing import NamedTuple, Optional, Sequence, Union
 
+import instructions
 import jsonc
 
 MARKER_START = "<!-- copydesk:start -->"
@@ -212,7 +213,13 @@ def _write_atomic(path: Path, content: str) -> None:
 
 
 def _remove_copydesk_hooks(settings_path: Path) -> None:
-    """Drop CopyDesk's hook entries. Every other key survives untouched."""
+    """Drop CopyDesk's hook entries and an outputStyle it owns.
+
+    Every other key survives untouched. `outputStyle` is unset only when it
+    names CopyDesk or one of the retired per-level styles; any other value
+    is the user's and stays. Both edits share this rewrite so uninstall
+    cannot leave a key pointing at a style file it has just unlinked.
+    """
     if not settings_path.is_file():
         return
     try:
@@ -220,20 +227,30 @@ def _remove_copydesk_hooks(settings_path: Path) -> None:
         document = json.loads(jsonc.strip_comments(raw))
     except (OSError, json.JSONDecodeError):
         return
-    hooks = document.get("hooks")
-    if not isinstance(hooks, dict):
+    if not isinstance(document, dict):
         return
-    for event, entries in list(hooks.items()):
-        kept = [
-            entry for entry in entries
-            if not any("copydesk" in str(h.get("command", "")) for h in entry.get("hooks", []))
-        ]
-        if kept:
-            hooks[event] = kept
-        else:
-            hooks.pop(event)
-    if not hooks:
-        document.pop("hooks", None)
+    changed = False
+    hooks = document.get("hooks")
+    if isinstance(hooks, dict):
+        for event, entries in list(hooks.items()):
+            kept = [
+                entry for entry in entries
+                if not any("copydesk" in str(h.get("command", "")) for h in entry.get("hooks", []))
+            ]
+            if kept:
+                hooks[event] = kept
+            else:
+                hooks.pop(event)
+        if not hooks:
+            document.pop("hooks", None)
+        changed = True
+    style_name = document.get("outputStyle")
+    owned = (instructions.OUTPUT_STYLE_NAME, *instructions.LEGACY_OUTPUT_STYLE_NAMES)
+    if isinstance(style_name, str) and style_name in owned:
+        document.pop("outputStyle", None)
+        changed = True
+    if not changed:
+        return
     if not document:
         # An empty object carries no configuration, so there is nothing to
         # preserve. Any other key keeps the file, which the tests assert.

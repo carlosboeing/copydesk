@@ -463,6 +463,34 @@ class UninstallTests(unittest.TestCase):
         self._cli("uninstall", "--yes")
         self.assertEqual(list(styles_dir.glob("copydesk*")), [])
 
+    def test_uninstall_unsets_an_owned_output_style_and_keeps_the_rest(self) -> None:
+        # The style file is unlinked; leaving `outputStyle: CopyDesk` would
+        # name a file that is not on disk. Other keys are the user's.
+        settings = self.home / ".claude" / "settings.json"
+        settings.write_text(
+            json.dumps({"model": "opus", "outputStyle": "CopyDesk"}),
+            encoding="utf-8",
+        )
+        styles = self.home / ".claude" / "output-styles"
+        styles.mkdir(parents=True, exist_ok=True)
+        (styles / "copydesk.md").write_text("installed\n", encoding="utf-8")
+        self._cli("uninstall", "--yes")
+        remaining = json.loads(settings.read_text(encoding="utf-8"))
+        self.assertNotIn("outputStyle", remaining)
+        self.assertEqual(remaining["model"], "opus")
+        self.assertEqual(list(styles.glob("copydesk*")), [])
+
+    def test_uninstall_leaves_a_foreign_output_style_alone(self) -> None:
+        settings = self.home / ".claude" / "settings.json"
+        settings.write_text(
+            json.dumps({"model": "opus", "outputStyle": "Plain English"}),
+            encoding="utf-8",
+        )
+        self._cli("uninstall", "--yes")
+        remaining = json.loads(settings.read_text(encoding="utf-8"))
+        self.assertEqual(remaining["outputStyle"], "Plain English")
+        self.assertEqual(remaining["model"], "opus")
+
     def test_uninstall_names_every_path_before_touching_one(self) -> None:
         self._cli("setup", "--defaults", "--yes")
         result = self._cli("uninstall", "--dry-run")
@@ -863,6 +891,28 @@ class ActiveStyleTests(unittest.TestCase):
         document = json.loads(self.settings.read_text(encoding="utf-8"))
         self.assertNotIn("outputStyle", document)
         self.assertEqual(document["model"], "opus")
+
+    def test_defaults_leave_the_key_alone_when_chat_is_off(self) -> None:
+        # --defaults answers the activation question with yes, but the
+        # style body always carries the chat rules. Chat off means that
+        # write would load them into every Claude Code session the config
+        # says should not receive them. --repair is how the existing
+        # config (chat off) is the one that is resolved; --defaults
+        # without it would rebuild channels with chat on.
+        config_path = self.home / "config" / "copydesk" / "config.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(
+            json.dumps({
+                "version": 1,
+                "agents": ["claude-code"],
+                "channels": {"chat": {"enabled": False}},
+            }),
+            encoding="utf-8",
+        )
+        result = self._cli("setup", "--repair", "--defaults", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        document = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertNotIn("outputStyle", document)
 
 
 class _FdReader:

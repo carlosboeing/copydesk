@@ -845,9 +845,16 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
         # about at all. `_build_plan` renames it either way, because the
         # file it names is being deleted, so a question there would take an
         # answer it cannot honour.
+        #
+        # The style body always carries the chat rules, so activating it
+        # when chat is off would load them into every Claude Code session
+        # the config says should not receive them. Skip both writes; the
+        # key stays as found. The retired-name repoint in `_build_plan`
+        # is separate: that value is one CopyDesk wrote.
         current_style = settings_doc.get("outputStyle")
         retiring = current_style in instructions.LEGACY_OUTPUT_STYLE_NAMES
-        if current_style != instructions.OUTPUT_STYLE_NAME and not retiring:
+        chat_on = ((resolved_config.get("channels") or {}).get("chat") or {}).get("enabled", True)
+        if chat_on and current_style != instructions.OUTPUT_STYLE_NAME and not retiring:
             if args.defaults:
                 settings_doc["outputStyle"] = instructions.OUTPUT_STYLE_NAME
             elif interactive:

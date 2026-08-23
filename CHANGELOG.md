@@ -15,6 +15,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - **A hand-edited output style read as fresh forever.** The staleness check compared an install's build stamp against the stamp of a fresh render. The stamp describes the inputs, not the bytes, so editing an installed file never changed its stamp and every check called it current. The comparison is now byte-for-byte against what setup would write today, so a hand edit surfaces the same way input drift does. Retired per-level files left by an upgrade are also reported until setup migrates them away; a glob written for the three-file layout had stopped matching the new single-file name entirely.
+- **Uninstall left `outputStyle` naming a style it had just deleted.** Setup is the first version that writes the key. Uninstall only dropped CopyDesk's hook entries from `settings.json`. After `copydesk uninstall` the file still said `"outputStyle": "CopyDesk"` while `copydesk.md` was gone. Every later Claude Code session then named a style that was not on disk. Uninstall now unsets the key when it names CopyDesk or a retired per-level style. Any other value, and the rest of the file, stay.
+- **Setup activated CopyDesk when chat was off.** The installed style body always carries the chat rules. Accepting the default loaded them into every Claude Code session the config said should not receive them. Setup now skips the activation write and the question when `channels.chat.enabled` is false. The key stays as it was found. A retired name is still repointed: that value is one CopyDesk wrote, and the file it names is being deleted.
 
 ## [0.4.2]
 
