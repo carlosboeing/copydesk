@@ -254,6 +254,7 @@ def _doctor_instruction_files(home: Path, resolved: dict) -> None:
     if not targets:
         return
     print("Instruction files")
+    chat_on = ((resolved.get("channels") or {}).get("chat") or {}).get("enabled", True)
     for target in targets:
         if len(target.tools) == 1:
             print(f"  {target.declared[0]}   {adapters.REGISTRY[target.tools[0]].label}")
@@ -261,7 +262,7 @@ def _doctor_instruction_files(home: Path, resolved: dict) -> None:
         print(f"  {target.real}")
         labels = ", ".join(adapters.REGISTRY[tool].label for tool in target.tools)
         print(f"    reached by {labels}")
-        if "claude-code" not in target.tools:
+        if "claude-code" not in target.tools or not chat_on:
             continue
         # Chat joins a shared block for the other harness's sake, so those
         # rules reach Claude Code twice: once here, once in its output style.
@@ -283,9 +284,14 @@ def _doctor_output_styles(home: Path) -> None:
         print(f"  installed  {path}")
     if not installed:
         print("  installed  none")
-    settings_doc, _reason = wizard._read_settings(home / ".claude" / "settings.json")
-    active = settings_doc.get("outputStyle") if isinstance(settings_doc, dict) else None
-    print(f"  active     {active if isinstance(active, str) and active else 'none'}")
+    settings_doc, settings_reason = wizard._read_settings(home / ".claude" / "settings.json")
+    if settings_doc is None:
+        # "none" says no style is set; an unreadable file is a different
+        # state, and setup refuses against it naming the same path.
+        print(f"  active     unreadable ({settings_reason})")
+    else:
+        active = settings_doc.get("outputStyle") if isinstance(settings_doc, dict) else None
+        print(f"  active     {active if isinstance(active, str) and active else 'none'}")
     print()
 
 
