@@ -901,13 +901,14 @@ class ActiveStyleInteractiveTests(unittest.TestCase):
 
         master, slave = os.openpty()
         outcome: dict = {}
+        printed = io.StringIO()
 
         def run() -> None:
             try:
                 outcome["code"] = wizard.run_setup(
                     ["--repair", "--yes"],
                     stdin=_FdReader(master),
-                    stdout=io.StringIO(),
+                    stdout=printed,
                 )
             except BaseException as error:  # surfaced below, not swallowed
                 outcome["error"] = error
@@ -932,7 +933,7 @@ class ActiveStyleInteractiveTests(unittest.TestCase):
         if "error" in outcome:
             raise outcome["error"]
         self.assertEqual(outcome.get("code"), 0)
-        return ""
+        return printed.getvalue()
 
     def test_enter_accepts_and_sets_the_key(self) -> None:
         self._run(b"\r")
@@ -944,6 +945,45 @@ class ActiveStyleInteractiveTests(unittest.TestCase):
         document = json.loads(self.settings.read_text(encoding="utf-8"))
         self.assertNotIn("outputStyle", document)
         self.assertEqual(document["model"], "opus")
+
+
+class RetiredStyleNeedsNoQuestionTests(ActiveStyleInteractiveTests):
+    """A key naming a retired per-level style is renamed, never asked about.
+
+    The file it names is deleted by this same run, so "no" is an answer
+    setup cannot honour. Asking anyway produced a question whose answer was
+    then overridden. The question must not appear, and the key must land on
+    the single name.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.settings.write_text(
+            json.dumps({"model": "opus", "outputStyle": "CopyDesk medium"}),
+            encoding="utf-8",
+        )
+        styles = self.home / ".claude" / "output-styles"
+        styles.mkdir(parents=True, exist_ok=True)
+        for level in instructions.VERBOSITY_LEVELS:
+            (styles / f"copydesk-{level}.md").write_text("retired\n", encoding="utf-8")
+
+    # The inherited cases start from a key this class replaces.
+    def test_enter_accepts_and_sets_the_key(self) -> None:
+        self.skipTest("covered by the base fixture, which has no retired key")
+
+    def test_escape_declines_and_leaves_the_key_alone(self) -> None:
+        self.skipTest("covered by the base fixture, which has no retired key")
+
+    def test_the_question_is_never_asked(self) -> None:
+        printed = self._run(b"\x1b")
+        self.assertNotIn(wizard.COPY["active_style"], printed)
+        document = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(document["outputStyle"], "CopyDesk")
+        self.assertEqual(document["model"], "opus")
+        styles = self.home / ".claude" / "output-styles"
+        self.assertEqual(
+            sorted(path.name for path in styles.glob("*.md")), ["copydesk.md"]
+        )
 
 
 class ExistingSettingsTests(unittest.TestCase):

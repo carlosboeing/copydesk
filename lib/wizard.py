@@ -840,13 +840,20 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
         # would be replaced. The key is never written without an answer:
         # --defaults answers for the user, a terminal asks, and anything
         # else leaves the key exactly as it was found.
-        if settings_doc.get("outputStyle") != instructions.OUTPUT_STYLE_NAME:
+        #
+        # A key naming one of the retired per-level styles is not asked
+        # about at all. `_build_plan` renames it either way, because the
+        # file it names is being deleted, so a question there would take an
+        # answer it cannot honour.
+        current_style = settings_doc.get("outputStyle")
+        retiring = current_style in instructions.LEGACY_OUTPUT_STYLE_NAMES
+        if current_style != instructions.OUTPUT_STYLE_NAME and not retiring:
             if args.defaults:
                 settings_doc["outputStyle"] = instructions.OUTPUT_STYLE_NAME
             elif interactive:
                 try:
                     accepted = prompt.confirm(
-                        active_style_prompt(settings_doc.get("outputStyle")),
+                        active_style_prompt(current_style),
                         default=True,
                         stdin=in_stream,
                         stdout=out_stream,
