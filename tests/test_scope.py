@@ -375,6 +375,19 @@ class DecisionHelperTests(unittest.TestCase):
         self.assertGreaterEqual(lo, proposed.index("YYY"))
         self.assertLessEqual(hi, proposed.index("YYY") + 3)
 
+    def test_a_long_document_pair_skips_the_line_matcher(self) -> None:
+        # The outer matcher is quadratic in line count. Past the hook's
+        # timeout the gate is killed and every write goes through unchecked,
+        # so a document pair over the cap is charged whole instead.
+        paragraphs = "\n\n".join(
+            f"Paragraph {i} sits here with a few ordinary words." for i in range(1600)
+        )
+        changed = paragraphs.replace("ordinary", "different")
+        started = time.time()
+        ranges = linter._changed_char_ranges(paragraphs, changed)
+        self.assertLess(time.time() - started, 2.0, "the line matcher ran uncapped")
+        self.assertEqual(ranges, [(0, len(changed) + 1)])
+
     def test_a_large_replaced_block_falls_back_without_stalling(self) -> None:
         n = 20000
         existing = "a" * n

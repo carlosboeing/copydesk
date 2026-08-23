@@ -71,6 +71,13 @@ MAX_STORED_FINDINGS = 20
 # than this fall back to the whole block so the PreToolUse hook cannot stall.
 # Over-attribution blocks rather than fail-open.
 INNER_DIFF_CHAR_CAP = 4096
+# The outer line-level matcher is quadratic in line count for the same reason.
+# Measured on one machine: 800 lines take 0.13 s, 1,600 take 0.98 s, 3,200 take
+# 7.96 s and 6,400 take 63.5 s — past Claude Code's 60 s hook timeout, which
+# kills the gate and lets the write through unchecked. The largest Markdown
+# file in this repository is 342 lines, so the cap sits far above real
+# documents and still bounds the worst case near a second.
+OUTER_DIFF_LINE_CAP = 2000
 # Whitespace-delimited words emitted by hooks/reminder.sh on every user prompt.
 # tests/test_telemetry.py reads the hook and fails if this drifts from the text.
 REMINDER_WORD_COUNT = 49
@@ -872,7 +879,8 @@ def _changed_char_ranges(existing: str, proposed: str) -> list[tuple[int, int]]:
     A deletion leaves no proposed text, so it is recorded as a zero-width join
     at the point where the remaining sides now meet. Replaced blocks larger
     than ``INNER_DIFF_CHAR_CAP`` keep the whole block rather than running the
-    quadratic inner matcher.
+    quadratic inner matcher, and a pair of documents longer than
+    ``OUTER_DIFF_LINE_CAP`` lines together skips the line matcher the same way.
     """
     a_lines = existing.split("\n")
     b_lines = proposed.split("\n")
@@ -882,6 +890,11 @@ def _changed_char_ranges(existing: str, proposed: str) -> list[tuple[int, int]]:
         b_starts.append(total)
         total += len(line) + 1
     ranges: list[tuple[int, int]] = []
+    if len(a_lines) + len(b_lines) > OUTER_DIFF_LINE_CAP:
+        # Too large to diff inside a hook's timeout. Charge the whole proposed
+        # document to the edit: over-attribution refuses a write that might
+        # have been innocent, where a timed-out gate lets every write through.
+        return [(0, total)] if total else []
     matcher = difflib.SequenceMatcher(None, a_lines, b_lines, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
