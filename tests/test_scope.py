@@ -263,6 +263,19 @@ class GateScopeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("paragraph-length", result.stderr)
 
+    def test_rewording_a_bullet_is_not_blamed_for_the_intro(self) -> None:
+        # List item lines are excluded from the sentence count, so the span
+        # stops at the last counted sentence. A span covering the bullets
+        # would blame one for prose it was never measured against.
+        block = ("One short line here. Two short lines here. Three short lines here. "
+                 "Four short lines here. Five short lines here.\n"
+                 "- first bullet sits here\n"
+                 "- second bullet sits here")
+        path = self.write("pl3.md", block + "\n")
+        result = self.gate(self.edit_payload(
+            path, "- second bullet sits here", "- second bullet reworded here", session="pl3"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_an_edit_in_another_paragraph_leaves_it_alone(self) -> None:
         over = ("One short line here. Two short lines here. Three short lines here. "
                 "Four short lines here. Five short lines here.")

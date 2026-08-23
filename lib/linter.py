@@ -518,15 +518,22 @@ def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error", max
             if record.line not in item_lines
         ]
         if len(paragraph_sentences) > max_sentences:
-            # The paragraph's own bounds are the right unit. An edit inside it
-            # made it too long; an edit elsewhere did not, and that is exactly
-            # what span overlap answers. Blaming the one word that moved would
-            # be wrong, but the paragraph is not one word.
+            # The counted sentences are the right unit. An edit inside them
+            # made the paragraph too long; an edit elsewhere did not, and that
+            # is exactly what span overlap answers. Blaming the one word that
+            # moved would be wrong, but the counted prose is not one word.
+            #
+            # The span stops short of the whole paragraph on purpose. List
+            # items are excluded from the count above, so a span covering them
+            # blames a bullet for sentences it was never measured against —
+            # the issue 8 symptom, reintroduced one layer down.
             start = max(0, position)
             line = _line_number(text, start)
+            span_start = start + min(record.start for record in paragraph_sentences)
+            span_end = start + max(record.end for record in paragraph_sentences)
             findings.append(Finding(
                 line, "paragraph-length", _excerpt(paragraph), severity,
-                span_start=start, span_end=start + len(paragraph),
+                span_start=span_start, span_end=span_end,
             ))
     return findings
 
