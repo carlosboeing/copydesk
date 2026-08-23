@@ -251,6 +251,27 @@ class GateScopeTests(unittest.TestCase):
         self.assertIn("paragraph-length", result.stderr)
         self.assertNotIn("pre-existing error", result.stderr)
 
+    def test_an_edit_inside_an_over_long_paragraph_blocks(self) -> None:
+        # The paragraph was already over the cap. Editing inside it is what
+        # the span answers: while paragraph-length skipped origin filtering,
+        # one old violation switched the rule off for the whole file.
+        over = ("One short line here. Two short lines here. Three short lines here. "
+                "Four short lines here. Five short lines here.")
+        path = self.write("pl1.md", over + "\n\nA separate clean paragraph sits here.\n")
+        result = self.gate(self.edit_payload(
+            path, "Three short lines here.", "Three rewritten lines here.", session="pl1"))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("paragraph-length", result.stderr)
+
+    def test_an_edit_in_another_paragraph_leaves_it_alone(self) -> None:
+        over = ("One short line here. Two short lines here. Three short lines here. "
+                "Four short lines here. Five short lines here.")
+        path = self.write("pl2.md", over + "\n\nA separate clean paragraph sits here.\n")
+        result = self.gate(self.edit_payload(
+            path, "A separate clean paragraph sits here.",
+            "A separate tidy paragraph sits here.", session="pl2"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_a_pre_existing_paragraph_length_does_not_block_an_unrelated_edit(self) -> None:
         five = (
             "One short sentence sits here now. Two more words follow along. "
@@ -321,12 +342,16 @@ class DecisionHelperTests(unittest.TestCase):
         blocking = linter.blocking_findings_for_retry(findings)
         self.assertEqual([f.line for f in blocking], [2])
 
-    def test_the_document_scoped_rule_is_excluded_from_origin_filtering(self) -> None:
-        findings = [
-            linter.Finding(1, "long-sentence-rate", "x", "error", origin="new"),
-            linter.Finding(2, "paragraph-length", "y", "error", origin="new"),
-        ]
-        self.assertEqual(linter.blocking_findings_for_retry(findings), [])
+    def test_only_the_ratio_rule_is_excluded_from_origin_filtering(self) -> None:
+        # long-sentence-rate is a ratio over the whole document with no text
+        # to point at. paragraph-length has its paragraph's span and takes the
+        # ordinary path, so a new one blocks like any other finding.
+        ratio = linter.Finding(1, "long-sentence-rate", "x", "error", origin="new")
+        self.assertEqual(linter.blocking_findings_for_retry([ratio]), [])
+        paragraph = linter.Finding(2, "paragraph-length", "y", "error", origin="new")
+        self.assertEqual(linter.blocking_findings_for_retry([paragraph]), [paragraph])
+        existing = linter.Finding(2, "paragraph-length", "y", "error", origin="existing")
+        self.assertEqual(linter.blocking_findings_for_retry([existing]), [])
 
     def test_inner_narrowing_excludes_unchanged_context(self) -> None:
         existing = "unchanged prefix XXX unchanged suffix"

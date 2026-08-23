@@ -149,12 +149,17 @@ class TestTelemetry(unittest.TestCase):
         multi_event = [e for e in events if e.get("session_id") == "test-origin-multi"][0]
         # Occurrence 1 replaced line 2 with 2 lines -> lines 2, 3
         # Occurrence 2 was line 4 -> shifted to lines 5, 6
+        # The replacement grows the single paragraph from five sentences to
+        # seven, so paragraph-length is charged to this edit like any other
+        # finding whose span the edit overlaps. Before it carried a span it
+        # read as pre-existing whatever the edit did.
         for f in multi_event["findings"]:
-            if f["rule"] == "banned-word":
-                self.assertEqual(f["origin"], "new")
-                self.assertIn(f["line"], [2, 3, 5, 6])
+            if f["rule"] in ("banned-word", "paragraph-length"):
+                self.assertEqual(f["origin"], "new", f["rule"])
             else:
-                self.assertEqual(f["origin"], "existing")
+                self.assertEqual(f["origin"], "existing", f["rule"])
+            if f["rule"] == "banned-word":
+                self.assertIn(f["line"], [2, 3, 5, 6])
 
     def test_payload_bytes_and_words(self) -> None:
         # Write

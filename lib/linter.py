@@ -518,11 +518,16 @@ def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error", max
             if record.line not in item_lines
         ]
         if len(paragraph_sentences) > max_sentences:
-            # Span-less: density is a property the document accumulates, so
-            # origin overlap never charges it. DOCUMENT_SCOPED_BLOCKING_RULES
-            # blocks when the rule newly fires on Edit, and always on Write.
-            line = _line_number(text, max(0, position))
-            findings.append(Finding(line, "paragraph-length", _excerpt(paragraph), severity))
+            # The paragraph's own bounds are the right unit. An edit inside it
+            # made it too long; an edit elsewhere did not, and that is exactly
+            # what span overlap answers. Blaming the one word that moved would
+            # be wrong, but the paragraph is not one word.
+            start = max(0, position)
+            line = _line_number(text, start)
+            findings.append(Finding(
+                line, "paragraph-length", _excerpt(paragraph), severity,
+                span_start=start, span_end=start + len(paragraph),
+            ))
     return findings
 
 
@@ -795,10 +800,16 @@ def lint(
     return sorted(findings, key=lambda finding: (finding.line, finding.severity != "error", finding.check, finding.excerpt))
 
 
-# Rules computed over a span origin filtering cannot place. long-sentence-rate
-# is always reported at line 1; paragraph-length is deliberately span-less so
-# a neighbouring word is not blamed. Both block when they newly fire instead.
-DOCUMENT_SCOPED_BLOCKING_RULES = frozenset({"long-sentence-rate", "paragraph-length"})
+# long-sentence-rate is the one blocking rule computed over the whole document.
+# It is a ratio with no text to point at, always reported at line 1, so origin
+# filtering cannot place it. It blocks when it newly fires instead.
+#
+# paragraph-length was here too, and being here cost three defects: one old
+# violation switched the rule off for a whole file, a violation the model had
+# just written was reported as pre-existing, and the block message named an
+# error it said needed no change. It carries its paragraph's span now and
+# takes the ordinary overlap path.
+DOCUMENT_SCOPED_BLOCKING_RULES = frozenset({"long-sentence-rate"})
 
 
 def blocking_findings_for_retry(findings: Iterable[Finding]) -> list[Finding]:
