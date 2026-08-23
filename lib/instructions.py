@@ -53,11 +53,11 @@ SCHEMA_URL = (
 # session; a 200-word one did. The budget is tested, not documented. Chat
 # moved from 220 to 240 when the guidance default grew to four items
 # (+14 words) and the gloss clause arrived (+15): the default render then
-# measured 236 words. The vocabulary clause then replaced the unusable
-# "opaque jargon" category and the shorter gloss line, taking the block to
-# 263. Nothing outside tests reads this table, so a budget below its own
-# default fails test_the_chat_block_fits_its_budget, never an install.
-BUDGETS = {"chat": 267, "documents": 260, "commits": 25, "reviews": 25}
+# measured 236 words. The vocabulary clause then absorbed the shorter gloss
+# line and gave the jargon category a test, taking the block to 265. Nothing
+# outside tests reads this table, so a budget below its own default fails
+# test_the_chat_block_fits_its_budget, never an install.
+BUDGETS = {"chat": 269, "documents": 260, "commits": 25, "reviews": 25}
 
 _STOPPING_RULES = (
     "If the first line answers it, stop. "
@@ -75,8 +75,10 @@ _CHAT_STRUCTURE = (
 # is this clause. Fifteen words, measured.
 # Prevention before glossing. A banned-word list holds what someone thought to
 # add; it can never hold a word the model invents mid-sentence. The rule, the
-# test and the examples travel together because the bare category "opaque
-# jargon" gave no way to tell `race condition` from `seam`.
+# test and the allowed examples travel together, because the bare category
+# "opaque jargon" gave no way to tell `race condition` from `seam`. The banned
+# side stays a category: a test pins that the token list never reaches the
+# chat block, which is what keeps this text short.
 VOCABULARY = (
     "Prefer the word your reader already uses. Never invent one. Common domain "
     "vocabulary is fine: race condition, idempotent, design pattern. Anything you "

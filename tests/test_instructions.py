@@ -77,7 +77,7 @@ class ChatBudgetTests(unittest.TestCase):
         self.assertLessEqual(words, instructions.BUDGETS["chat"])
 
     def test_the_budget_is_the_designed_one(self) -> None:
-        self.assertEqual(instructions.BUDGETS["chat"], 267)
+        self.assertEqual(instructions.BUDGETS["chat"], 269)
 
     def test_no_banned_word_token_list_reaches_the_chat_block(self) -> None:
         rendered = instructions.render_chat(resolved())
@@ -780,11 +780,16 @@ class VocabularyTests(unittest.TestCase):
         body = instructions.render_agents_block(resolved(), include_chat=True).lower()
         self.assertIn("first use", body)
 
-    def test_the_unusable_category_is_gone(self) -> None:
-        # "opaque jargon" named a category with no test attached, so it could
-        # not be applied. The clause above replaces the job it failed to do.
+    def test_the_categories_still_name_what_the_gate_blocks(self) -> None:
+        # Dropping "opaque jargon" from the categories left the instruction
+        # saying a word was fine while the gate refused the write at error.
         rendered = instructions.render_chat(resolved()).lower()
-        self.assertNotIn("opaque jargon", rendered)
+        self.assertIn("opaque jargon", rendered)
+        preset = json.loads((ROOT / "rules" / "plain.json").read_text(encoding="utf-8"))
+        pattern = [p for p in preset["patterns"] if p["id"] == "banned-word"][0]
+        tokens = {t["phrase"] if isinstance(t, dict) else t for t in pattern["tokens"]}
+        self.assertEqual(pattern["severity"], "error")
+        self.assertIn("seam", tokens)
 
     def test_the_clause_stays_under_fifty_words(self) -> None:
         self.assertLessEqual(instructions.word_count(instructions.VOCABULARY), 50)
