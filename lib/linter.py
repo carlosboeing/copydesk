@@ -1218,7 +1218,6 @@ def run_hook(raw_payload: str) -> int:
         else:
             old_string = str(tool_input.get("old_string", "")) if isinstance(tool_input, dict) else ""
             new_string = str(tool_input.get("new_string", "")) if isinstance(tool_input, dict) else ""
-            replace_all = bool(tool_input.get("replace_all", False)) if isinstance(tool_input, dict) else False
             try:
                 existing = Path(file_path).read_text(encoding="utf-8")
             except OSError:
