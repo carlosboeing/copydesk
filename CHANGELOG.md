@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **Claude Code's line on the setup screen promised a file setup may never write.** The wizard prints each harness's `installs` summary while the user is still choosing tools, before any channel is picked, and Claude Code's read as an unconditional promise of a `CLAUDE.md` block. Chat lives in the output style rather than in the block, so an install with only chat enabled rendered an empty block and skipped the file entirely. The line now promises "a CLAUDE.md block where channels need one", and two plan-level tests pin both halves of that wording: chat alone plans no instruction write, and a second channel joining plans the write.
+- **A proof whose session state could not be deleted failed without naming why.** Setup deletes its fixed proof-session file before running the sample, and every failed deletion was swallowed alike — absence, a permission error, or a directory sitting at the path. Against surviving retry state the failure line said only `no finding reported`. Setup still never crashes on a state directory it cannot write, but the reason now names the surviving path and the error behind it, which gives `copydesk doctor` a lead. A test places a directory at the path, so deletion fails for a reason that is not absence.
+- **The reminder-fallback equality pin duplicated a guarantee the suite already held.** It asserted that the heredoc in the reminder hook matches the preset's `reminder` field, and `scripts/generate-instructions.py --check`, which runs in CI and inside the suite, already fails on exactly that difference. The removed test also re-declared the heredoc delimiters as inline literals, so a delimiter change would have raised an opaque index error rather than a readable message. The hook's header comment now cites the generator instead of the removed test.
+
 ## [0.4.2]
 
 ### Fixed
