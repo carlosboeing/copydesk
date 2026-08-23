@@ -64,3 +64,19 @@ class MergeTests(unittest.TestCase):
 
     def test_an_unknown_id_is_ignored_rather_than_raising(self) -> None:
         self.assertEqual(guidance.render({"vibes": True}), [])
+
+
+class CollapseMembersTests(unittest.TestCase):
+    def test_a_member_snippet_drops_when_the_merge_is_present(self) -> None:
+        merged = guidance.MERGES[frozenset({"recommendations", "alternatives"})]
+        member = guidance.SNIPPETS["recommendations"]
+        self.assertEqual(guidance.collapse_members([merged, member]), [merged])
+
+    def test_a_later_merge_still_drops_an_earlier_member(self) -> None:
+        merged = guidance.MERGES[frozenset({"recommendations", "alternatives"})]
+        member = guidance.SNIPPETS["recommendations"]
+        self.assertEqual(guidance.collapse_members([member, merged]), [merged])
+
+    def test_a_lone_member_stays(self) -> None:
+        member = guidance.SNIPPETS["recommendations"]
+        self.assertEqual(guidance.collapse_members([member]), [member])

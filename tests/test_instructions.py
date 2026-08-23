@@ -709,6 +709,26 @@ class SharedGuidanceTests(unittest.TestCase):
         body = instructions.render_agents_block(config_body, include_chat=True)
         self.assertEqual(body.count("ranked options"), 1)
 
+    def test_a_merged_line_replaces_the_other_channel_member_snippet(self) -> None:
+        # Chat defaults carry the pair; documents carry recommendations
+        # alone. Exact-text dedup keeps both until the merge wins.
+        config_body = resolved()
+        config_body["channels"]["chat"]["guidance"] = {
+            "recommendations": True,
+            "alternatives": True,
+        }
+        config_body["channels"]["documents"]["guidance"] = {"recommendations": True}
+        body = instructions.render_agents_block(config_body, include_chat=True)
+        self.assertEqual(body.count(self.RECOMMENDATIONS), 1)
+        self.assertIn("ranked options", body)
+        self.assertNotIn("proposed answer", body)
+
+    def test_the_default_join_carries_one_open_choice_rule(self) -> None:
+        resolved_default = config.resolve(ROOT / "rules", user_path=None, project_path=None)
+        body = instructions.render_agents_block(resolved_default, include_chat=True)
+        self.assertEqual(body.count(self.RECOMMENDATIONS), 1)
+        self.assertIn("ranked options", body)
+
 
 class GlossTermsTests(unittest.TestCase):
     def test_the_chat_block_tells_the_agent_to_gloss_coined_terms(self) -> None:

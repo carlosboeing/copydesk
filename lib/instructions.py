@@ -274,7 +274,8 @@ def render_agents_block(resolved: dict, include_chat: bool = False) -> str:
     ])
     # One paragraph per instruction file. A toggle on in two channels wrote
     # its line twice once the channels joined; deduplication runs on the
-    # rendered text, so merged lines collapse the same way.
+    # rendered text, so merged lines collapse the same way. A merge from one
+    # channel also replaces a member snippet from another, matching MERGES.
     seen: set[str] = set()
     paragraphs: list[str] = []
     for part in parts:
@@ -282,7 +283,7 @@ def render_agents_block(resolved: dict, include_chat: bool = False) -> str:
             if paragraph and paragraph not in seen:
                 seen.add(paragraph)
                 paragraphs.append(paragraph)
-    return "\n\n".join(paragraphs)
+    return "\n\n".join(guidance.collapse_members(paragraphs))
 
 
 def fingerprint(rendered: str) -> str:
