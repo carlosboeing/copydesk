@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CopyDesk per-turn chat reminder for Claude Code UserPromptSubmit hook.
-# Hand-written précis (49 words) reinforcing style against long-session decay.
+# Hand-written précis (51 words) reinforcing style against long-session decay.
 # linter.REMINDER_WORD_COUNT must match; tests/test_telemetry.py checks it.
 # The heredoc body is regenerated from the preset's reminder field by
 # scripts/generate-instructions.py; --check fails on any difference.
