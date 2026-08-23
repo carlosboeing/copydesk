@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.0]
+
 ### Changed
 
 - **One output style ships and installs instead of three.** `copydesk-low.md`, `copydesk-medium.md` and `copydesk-high.md` differed by exactly one sentence: the verbosity line. They existed so Claude Code's style picker could act as a verbosity switch, but nothing ever read the pick back. The resolver had no callers outside its tests, no code read `outputStyle` from `settings.json`, and the documented `COPYDESK_VERBOSITY` override changed nothing. Setup now writes a single `copydesk.md`, rendered at the configured chat verbosity, named `CopyDesk`. The dead resolver, its environment variable, and the per-level renderer are deleted. On upgrade, setup removes the three retired files and repoints an `outputStyle` naming one of them at `CopyDesk`. A session that ran one keeps its style; any other value is left alone. The activation question is not asked when the key names a retired style, because the file it names is deleted by the same run and a declined answer could not be honoured. Uninstall takes the retired files too.
