@@ -706,7 +706,7 @@ class SharedGuidanceTests(unittest.TestCase):
         merged_pair = {"recommendations": True, "alternatives": True}
         config_body["channels"]["chat"]["guidance"] = dict(merged_pair)
         config_body["channels"]["documents"]["guidance"] = dict(merged_pair)
-        body = instructions.render_agents_block(config_body)
+        body = instructions.render_agents_block(config_body, include_chat=True)
         self.assertEqual(body.count("ranked options"), 1)
 
 
