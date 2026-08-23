@@ -196,28 +196,37 @@ def main() -> int:
     OUTPUT_STYLES_DIR.mkdir(parents=True, exist_ok=True)
 
     targets = {
-        **{
-            OUTPUT_STYLES_DIR / f"copydesk-{level}.md": instructions.render_output_style(
-                resolved, level, writer=instructions.GENERATOR_WRITER
-            )
-            for level in instructions.VERBOSITY_LEVELS
-        },
+        OUTPUT_STYLES_DIR / "copydesk.md": instructions.render_output_style(
+            resolved, writer=instructions.GENERATOR_WRITER
+        ),
         REMINDER: render_reminder(preset, REMINDER.read_text(encoding="utf-8")),
         SCHEMA_PATH: render_schema(preset),
     }
+    # The three per-level styles this file replaced. A checkout that still
+    # carries them fails --check until the generator retires them.
+    legacy_styles = [
+        OUTPUT_STYLES_DIR / f"copydesk-{level}.md"
+        for level in instructions.VERBOSITY_LEVELS
+    ]
+    leftover_legacy = [path for path in legacy_styles if path.is_file()]
 
     stale = [path for path, rendered in targets.items() if not path.is_file() or path.read_text(encoding="utf-8") != rendered]
     if args.check:
         for path in stale:
             print(f"error  {path.relative_to(BUNDLE_ROOT)} differs from the preset", file=sys.stderr)
-        if stale:
+        for path in leftover_legacy:
+            print(f"error  {path.relative_to(BUNDLE_ROOT)} is left over from the retired three-style build", file=sys.stderr)
+        if stale or leftover_legacy:
             print("       run: python3 scripts/generate-instructions.py", file=sys.stderr)
-        return 1 if stale else 0
+        return 1 if (stale or leftover_legacy) else 0
 
     for path in stale:
         path.write_text(targets[path], encoding="utf-8")
         print(f"wrote {path.relative_to(BUNDLE_ROOT)}")
-    if not stale:
+    for path in leftover_legacy:
+        path.unlink()
+        print(f"removed {path.relative_to(BUNDLE_ROOT)}")
+    if not stale and not leftover_legacy:
         print("instructions already match the preset")
     return 0
 

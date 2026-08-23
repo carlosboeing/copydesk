@@ -14,11 +14,13 @@ import time
 BUNDLE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BUNDLE_ROOT / "lib"))
 
+import adapters  # noqa: E402
 import channels  # noqa: E402
 import config  # noqa: E402
 import config_writer  # noqa: E402
 import guidance  # noqa: E402
 import hook  # noqa: E402
+import instructions  # noqa: E402
 import linter  # noqa: E402
 import styles  # noqa: E402
 import wizard  # noqa: E402
@@ -239,6 +241,54 @@ def _doctor_file(file_path: str) -> int:
     return 0
 
 
+def _doctor_instruction_files(home: Path, resolved: dict) -> None:
+    """Report instruction targets and the harnesses that reach each.
+
+    Several adapters can name one real file when a setup symlinks the
+    per-harness names at one canonical instructions file. Naming the real
+    file and the word count of the shared block is what lets a reader see
+    the duplication instead of inferring it from their CLAUDE.md carrying
+    chat.
+    """
+    targets = wizard.instruction_targets(home, require_existing=True)
+    if not targets:
+        return
+    print("Instruction files")
+    for target in targets:
+        if len(target.tools) == 1:
+            print(f"  {target.declared[0]}   {adapters.REGISTRY[target.tools[0]].label}")
+            continue
+        print(f"  {target.real}")
+        labels = ", ".join(adapters.REGISTRY[tool].label for tool in target.tools)
+        print(f"    reached by {labels}")
+        if "claude-code" not in target.tools:
+            continue
+        # Chat joins a shared block for the other harness's sake, so those
+        # rules reach Claude Code twice: once here, once in its output style.
+        try:
+            words = len(instructions.render_agents_block(resolved, include_chat=True).split())
+        except Exception:
+            words = 0
+        detail = f" ({words} words)" if words else ""
+        print(f"    carries chat{detail}, so the rules load twice in a Claude Code session")
+    print()
+
+
+def _doctor_output_styles(home: Path) -> None:
+    """Installed styles and the active one. Installed is not active."""
+    print("Output styles")
+    styles_dir = home / ".claude" / "output-styles"
+    installed = sorted(styles_dir.glob("copydesk*.md")) if styles_dir.is_dir() else []
+    for path in installed:
+        print(f"  installed  {path}")
+    if not installed:
+        print("  installed  none")
+    settings_doc, _reason = wizard._read_settings(home / ".claude" / "settings.json")
+    active = settings_doc.get("outputStyle") if isinstance(settings_doc, dict) else None
+    print(f"  active     {active if isinstance(active, str) and active else 'none'}")
+    print()
+
+
 def _doctor_bare() -> int:
     home = _home_path()
     print(f"CopyDesk {_version()}")
@@ -333,6 +383,9 @@ def _doctor_bare() -> int:
     hook_preset = hook_dir / "rules" / "plain-english.json"
     print(f"  {'rules/':12} {'installed' if hook_preset.is_file() else 'not installed'}   {hook_preset}")
     print()
+
+    _doctor_instruction_files(home, resolved)
+    _doctor_output_styles(home)
 
     print("Harness registration")
     settings = home / ".claude" / "settings.json"

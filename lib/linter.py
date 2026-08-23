@@ -1946,44 +1946,46 @@ def user_layer() -> dict:
 def stale_output_styles(home: Path) -> list[str]:
     """The installed output styles that no longer match their inputs.
 
-    The marker holds the fingerprint of the whole file as rendered at build
-    time, so the comparison re-renders that file now. Hashing the installed
-    bytes instead would compare the file with itself, and a changed config
-    would never show up. SETUP_WRITER is the only writer files under
-    ~/.claude/output-styles can carry — shipped copies never install there
-    — so re-rendering through it reproduces what setup wrote. The reminder
-    and doctor both call this, so neither can hash a different payload from
-    the wizard.
+    The comparison re-renders what setup would write today and compares
+    bytes. That catches both kinds of drift: an input changed since the
+    install, and an installed file edited by hand — its build stamp
+    survives untouched, so comparing stamps alone called every hand-edited
+    file fresh.
+
+    SETUP_WRITER is the only writer files under ~/.claude/output-styles
+    can carry — shipped copies never install there — so re-rendering
+    through it reproduces what setup wrote. The reminder and doctor both
+    call this, so neither can hash a different payload from the wizard.
+
+    Known names are enumerated rather than globbed. The current install is
+    copydesk.md, whose stem has no hyphen, so a `copydesk-*.md` glob stops
+    matching it; the retired per-level files must stay visible too, until
+    setup migrates them away.
     """
     directory = home / ".claude" / "output-styles"
     if instructions is None or not directory.is_dir():
         return []
     try:
         layer = user_layer()
+        fresh = instructions.render_output_style(
+            layer, writer=instructions.SETUP_WRITER
+        )
     except Exception:
         return []         # cannot re-render: fail open, say nothing
-    pattern = re.compile(re.escape(instructions.FINGERPRINT_MARKER) + r"([0-9a-f]{12})")
     stale: list[str] = []
-    for installed in sorted(directory.glob("copydesk-*.md")):
-        # The level is the file's own, because each renders a different body.
-        level = installed.stem[len("copydesk-"):]
-        if level not in instructions.VERBOSITY_LEVELS:
+    names = ["copydesk.md", *(
+        f"copydesk-{level}.md" for level in instructions.VERBOSITY_LEVELS
+    )]
+    for name in names:
+        installed = directory / name
+        if not installed.is_file():
             continue
         try:
             rendered = installed.read_text(encoding="utf-8")
         except OSError:
             continue      # unreadable: say nothing about it
-        marker = pattern.search(rendered)
-        if marker is None:
-            continue
-        try:
-            fresh = instructions.render_output_style(
-                layer, level, writer=instructions.SETUP_WRITER
-            )
-        except Exception:
-            continue
-        if marker.group(1) != instructions.fingerprint(fresh):
-            stale.append(installed.name)
+        if rendered != fresh:
+            stale.append(name)
     return stale
 
 

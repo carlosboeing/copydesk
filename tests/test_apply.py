@@ -141,6 +141,49 @@ class RollbackTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.home.iterdir()), ["settings.json"])
         self.assertNotIn("s3cret", target.read_text(encoding="utf-8"))
 
+    def test_a_planned_removal_happens_after_the_writes_succeed(self) -> None:
+        # The style migration removes the retired per-level files only once
+        # the new single file is on disk, so a failed write never leaves an
+        # install with neither.
+        styles = self.home / "output-styles"
+        styles.mkdir()
+        legacy = styles / "copydesk-medium.md"
+        legacy.write_text("old\n", encoding="utf-8")
+        fresh = styles / "copydesk.md"
+        result = apply.execute(apply.Plan(
+            writes=[apply.Write(fresh, "new")],
+            removes=[legacy],
+        ))
+        self.assertTrue(result.ok, result.message)
+        self.assertTrue(fresh.is_file())
+        self.assertFalse(legacy.exists())
+
+    def test_an_absent_removal_target_is_not_a_failure(self) -> None:
+        # A second repair finds no leftovers; the plan still names them so
+        # the first run's review panel stays honest about intent.
+        styles = self.home / "output-styles"
+        styles.mkdir()
+        result = apply.execute(apply.Plan(
+            writes=[apply.Write(styles / "copydesk.md", "new")],
+            removes=[styles / "copydesk-low.md"],
+        ))
+        self.assertTrue(result.ok, result.message)
+
+    def test_a_failed_write_rolls_the_removal_back(self) -> None:
+        # All-or-nothing covers deletions too: the retired files come back
+        # if the plan fails, leaving the install exactly as it was found.
+        legacy = self.home / "copydesk-low.md"
+        legacy.write_text("old\n", encoding="utf-8")
+        result = apply.execute(apply.Plan(
+            writes=[
+                apply.Write(self.home / "copydesk.md", "new"),
+                apply.Write(self.home / "copydesk.md" / "child", "boom"),
+            ],
+            removes=[legacy],
+        ))
+        self.assertFalse(result.ok)
+        self.assertEqual(legacy.read_text(encoding="utf-8"), "old\n")
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -210,6 +253,38 @@ class UninstallResidueTests(unittest.TestCase):
         apply._remove_copydesk_hooks(settings)
         self.assertTrue(settings.is_file())
         self.assertIn("my-own-hook.sh", settings.read_text(encoding="utf-8"))
+
+    def test_owned_output_style_is_unset_and_other_keys_survive(self) -> None:
+        # Uninstall deletes the style file; the key that names it has to
+        # leave in the same rewrite, or Claude Code names a missing file.
+        settings = self.home / "settings.json"
+        settings.write_text(
+            json.dumps({"model": "opus", "outputStyle": "CopyDesk"}),
+            encoding="utf-8",
+        )
+        apply._remove_copydesk_hooks(settings)
+        self.assertEqual(json.loads(settings.read_text(encoding="utf-8")), {"model": "opus"})
+
+    def test_a_retired_output_style_is_unset(self) -> None:
+        settings = self.home / "settings.json"
+        settings.write_text(
+            json.dumps({"outputStyle": "CopyDesk medium"}),
+            encoding="utf-8",
+        )
+        apply._remove_copydesk_hooks(settings)
+        self.assertFalse(settings.exists(), "a settings.json holding only {} carries no config")
+
+    def test_a_foreign_output_style_is_left_alone(self) -> None:
+        settings = self.home / "settings.json"
+        settings.write_text(
+            json.dumps({"outputStyle": "Plain English"}),
+            encoding="utf-8",
+        )
+        apply._remove_copydesk_hooks(settings)
+        self.assertEqual(
+            json.loads(settings.read_text(encoding="utf-8")),
+            {"outputStyle": "Plain English"},
+        )
 
     def test_empty_directories_are_pruned_up_to_the_harness_home(self) -> None:
         hooks = self.home / ".claude" / "hooks" / "copydesk"

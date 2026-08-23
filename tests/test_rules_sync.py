@@ -19,7 +19,7 @@ import linter  # noqa: E402
 
 PRESET_PATH = REPOSITORY_ROOT / "rules" / "plain.json"
 GENERATOR = REPOSITORY_ROOT / "scripts" / "generate-instructions.py"
-OUTPUT_STYLES = [REPOSITORY_ROOT / "output-styles" / f"copydesk-{level}.md" for level in ("low", "medium", "high")]
+OUTPUT_STYLES = [REPOSITORY_ROOT / "output-styles" / "copydesk.md"]
 
 RULES_START = "<!-- plain-english-rules:start -->"
 RULES_END = "<!-- plain-english-rules:end -->"
@@ -111,7 +111,7 @@ class GeneratedInstructionTests(unittest.TestCase):
 
         It used to resolve through normal discovery. A contributor with
         CopyDesk installed then had their own verbosity and style baked into
-        three files the repository commits, in a run that looked routine.
+        the committed output style, in a run that looked routine.
         """
         import os
         import shutil
@@ -192,12 +192,11 @@ class GeneratedInstructionTests(unittest.TestCase):
         self.assertEqual(instructions_dict["reminder_word_count"], linter.REMINDER_WORD_COUNT)
 
     def test_output_styles_carry_correct_names_and_markers(self) -> None:
-        for level in ("low", "medium", "high"):
-            path = REPOSITORY_ROOT / "output-styles" / f"copydesk-{level}.md"
-            text = path.read_text(encoding="utf-8")
-            self.assertIn(f"name: CopyDesk {level}", text)
-            self.assertIn(RULES_START, text)
-            self.assertIn(RULES_END, text)
+        text = (REPOSITORY_ROOT / "output-styles" / "copydesk.md").read_text(encoding="utf-8")
+        self.assertIn("name: CopyDesk\n", text)
+        self.assertNotIn("name: CopyDesk low", text)
+        self.assertIn(RULES_START, text)
+        self.assertIn(RULES_END, text)
 
 
 class InstalledCopyTests(unittest.TestCase):
