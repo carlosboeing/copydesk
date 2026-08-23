@@ -321,6 +321,17 @@ def _format_config(channels_config: dict, selected_agents: list[str]) -> str:
     return "\n".join(out) + "\n"
 
 
+def _guidance_flags(selected: Sequence[int]) -> dict:
+    """Every id, so an unticked default is False rather than omitted.
+
+    `config.resolve` merges guidance key by key over CHANNEL_DEFAULTS.
+    Writing only the ticked ids as True leaves an unticked default absent,
+    and the default puts it back on.
+    """
+    chosen = set(selected)
+    return {gid: (index in chosen) for index, gid in enumerate(guidance.IDS)}
+
+
 def _default_channels() -> dict:
     """The settings `--defaults` picks: each channel's first preset, or off."""
     settings: dict = {}
@@ -784,12 +795,11 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
                 prompt.ask_in_order([ask_preset, ask_customize])
                 chosen_preset = presets[answers[f"{ch}.preset"]]
                 if chosen_preset.label == "Customize\u2026":
-                    ids = list(guidance.IDS)
                     channels_settings[ch] = {
                         "enabled": True,
                         "style": styles.STYLE_NAMES[answers[f"{ch}.style"]],
                         "verbosity": instructions.VERBOSITY_LEVELS[answers[f"{ch}.verbosity"]],
-                        "guidance": {ids[i]: True for i in answers[f"{ch}.guidance"]},
+                        "guidance": _guidance_flags(answers[f"{ch}.guidance"]),
                     }
                     return
                 # `enabled` is written out rather than implied. Reviews ship

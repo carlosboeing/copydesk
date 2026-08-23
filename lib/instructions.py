@@ -272,17 +272,23 @@ def render_agents_block(resolved: dict, include_chat: bool = False) -> str:
         render_commits(resolved),
         render_reviews(resolved),
     ])
-    # One paragraph per instruction file. A toggle on in two channels wrote
-    # its line twice once the channels joined; deduplication runs on the
-    # rendered text, so merged lines collapse the same way. A merge from one
-    # channel also replaces a member snippet from another, matching MERGES.
+    # Guidance only. A toggle on in two channels wrote its line twice
+    # once the channels joined; style, verbosity and craft stay per
+    # channel because the same extent line is a different instruction
+    # beside each channel-naming line. A merge from one channel also
+    # replaces a member snippet from another, matching MERGES.
+    guidance_texts = set(guidance.SNIPPETS.values()) | set(guidance.MERGES.values())
     seen: set[str] = set()
     paragraphs: list[str] = []
     for part in parts:
         for paragraph in part.split("\n\n"):
-            if paragraph and paragraph not in seen:
+            if not paragraph:
+                continue
+            if paragraph in guidance_texts:
+                if paragraph in seen:
+                    continue
                 seen.add(paragraph)
-                paragraphs.append(paragraph)
+            paragraphs.append(paragraph)
     return "\n\n".join(guidance.collapse_members(paragraphs))
 
 

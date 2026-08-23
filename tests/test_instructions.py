@@ -729,6 +729,25 @@ class SharedGuidanceTests(unittest.TestCase):
         self.assertEqual(body.count(self.RECOMMENDATIONS), 1)
         self.assertIn("ranked options", body)
 
+    def test_the_same_verbosity_stays_beside_each_channel(self) -> None:
+        # Documents and reviews share _VERBOSITY_LINES. Deduping every
+        # paragraph dropped the second copy, so reviews had a style line
+        # and no extent instruction.
+        config_body = resolved()
+        config_body["channels"]["documents"]["verbosity"] = "medium"
+        config_body["channels"]["reviews"]["enabled"] = True
+        config_body["channels"]["reviews"]["verbosity"] = "medium"
+        body = instructions.render_agents_block(config_body)
+        line = instructions._VERBOSITY_LINES["medium"]
+        self.assertEqual(body.count(line), 2)
+        documents_at = body.index(instructions.style_line("documents", "plain"))
+        reviews_at = body.index(instructions._REVIEWS)
+        first = body.find(line)
+        second = body.find(line, first + 1)
+        self.assertGreater(first, documents_at)
+        self.assertLess(first, reviews_at)
+        self.assertGreater(second, reviews_at)
+
 
 class GlossTermsTests(unittest.TestCase):
     def test_the_chat_block_tells_the_agent_to_gloss_coined_terms(self) -> None:
