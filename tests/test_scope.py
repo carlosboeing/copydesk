@@ -221,6 +221,7 @@ class GateScopeTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("long-sentence-rate", result.stderr)
+        self.assertNotIn("pre-existing error", result.stderr)
 
     def test_a_pre_existing_long_sentence_rate_does_not_block_an_unrelated_edit(self) -> None:
         long_sentence = " ".join(["word"] * 30) + "."
@@ -248,6 +249,7 @@ class GateScopeTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("paragraph-length", result.stderr)
+        self.assertNotIn("pre-existing error", result.stderr)
 
     def test_a_pre_existing_paragraph_length_does_not_block_an_unrelated_edit(self) -> None:
         five = (

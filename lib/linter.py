@@ -1278,7 +1278,11 @@ def run_hook(raw_payload: str) -> int:
         # only when there is nothing else to block on, so the common path
         # keeps its measured 17 ms median.
         if not blocking:
-            scoped = [f for f in findings if f.check in DOCUMENT_SCOPED_BLOCKING_RULES and f.severity == "error"]
+            scoped = [
+                f
+                for f in findings_with_origin
+                if f.check in DOCUMENT_SCOPED_BLOCKING_RULES and f.severity == "error"
+            ]
             if scoped:
                 if tool_name == "Write":
                     blocking = scoped
