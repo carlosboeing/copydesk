@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -21,6 +22,13 @@ import linter  # noqa: E402
 
 BANNED = "The design is robust."
 CLEAN = "A short sentence has enough words here."
+LONG_ERROR = (
+    "This entry carries a pre-existing sentence that runs far past every limit "
+    "the gate enforces because it keeps adding clause after clause after clause "
+    "without ever reaching a proper stopping point, and it continues past every "
+    "natural pause, piling subordinate clause on subordinate clause until the "
+    "reader quite loses the thread of the entire thing altogether."
+)
 
 
 class GateScopeTests(unittest.TestCase):
@@ -89,6 +97,91 @@ class GateScopeTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    # --- issue 8: pre-existing sentences must never carry the block ----------
+
+    def test_an_unchanged_line_inside_old_string_does_not_block(self) -> None:
+        """The replacement span includes context lines; identical text is not authored."""
+        path = self.write("d2.md", f"- {LONG_ERROR}\n- A short bullet sits below.\n")
+        result = self.gate(
+            self.edit_payload(
+                path,
+                f"- {LONG_ERROR}\n- A short bullet sits below.",
+                f"- {LONG_ERROR}\n- A short bullet reworded here.",
+                session="issue8a",
+            )
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_the_pre_existing_sentence_is_reported_while_a_new_error_blocks(self) -> None:
+        """The block names only the new text; the old error is counted, not charged."""
+        path = self.write("d6.md", f"- {LONG_ERROR}\n- A short bullet sits below.\n")
+        result = self.gate(
+            self.edit_payload(
+                path,
+                f"- {LONG_ERROR}\n- A short bullet sits below.",
+                f"- {LONG_ERROR}\n- A short bullet, robust and simple.",
+                session="issue8e",
+            )
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("banned-word", result.stderr)
+        self.assertNotIn(LONG_ERROR[:40], result.stderr)
+        self.assertIn("pre-existing error", result.stderr)
+        self.assertIn("need no change", result.stderr)
+
+    def test_a_pre_existing_sentence_sharing_the_edited_line_passes(self) -> None:
+        """Two sentences share one physical line; editing one must not block the other."""
+        path = self.write("d3.md", f"Opening short line here. Second up, {LONG_ERROR[0].lower()}{LONG_ERROR[1:]}\n")
+        result = self.gate(
+            self.edit_payload(path, "Opening short line here.", "Opening line rewritten.", session="issue8b")
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_control_an_error_written_inside_the_edit_still_blocks(self) -> None:
+        """A fix that stopped blocking on everything would break the gate here."""
+        path = self.write("d4.md", "A clean intro line sits here.\n")
+        result = self.gate(
+            self.edit_payload(path, "A clean intro line sits here.", f"A clean intro line sits here. {LONG_ERROR}", session="issue8c")
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("sentence-length", result.stderr)
+
+    def test_an_edit_inside_a_pre_existing_long_sentence_blocks(self) -> None:
+        """A sentence the edit cuts into belongs to the edit: partly authored prose blocks.
+
+        The sentence starts on line one and the replaced word sits on its second
+        line, so anchor-line attribution alone would call it pre-existing.
+        """
+        words = LONG_ERROR.split()
+        cut = len(words) // 2
+        path = self.write("d5.md", " ".join(words[:cut]) + "\n" + " ".join(words[cut:]) + "\n")
+        target = words[cut + 2]
+        result = self.gate(
+            self.edit_payload(path, " " + target + " ", " rewoven ", session="issue8d")
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("sentence-length", result.stderr)
+
+    def test_deleting_a_full_stop_that_joins_two_sentences_blocks(self) -> None:
+        """A deletion-only inner opcode must still own the join it creates."""
+        first = " ".join(["alpha"] * 24) + " here."
+        second = "Then " + " ".join(["bravo"] * 24) + "."
+        path = self.write("d7.md", first + " " + second + "\n")
+        result = self.gate(
+            self.edit_payload(path, "here. Then", "here Then", session="issue8f")
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("sentence-length", result.stderr)
+
+    def test_deleting_a_period_line_that_joins_two_sentences_blocks(self) -> None:
+        """A line-level delete that joins two sentences owns the join point."""
+        first = " ".join(["alpha"] * 24) + " here"
+        second = "Then " + " ".join(["bravo"] * 24) + "."
+        path = self.write("d8.md", first + "\n.\n" + second + "\n")
+        result = self.gate(self.edit_payload(path, "\n.\n", "\n", session="issue8g"))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("sentence-length", result.stderr)
+
     def test_a_pure_deletion_passes(self) -> None:
         path = self.write("e.md", BANNED + "\n\nAnother line sits here quietly.\n")
         result = self.gate(
@@ -128,6 +221,7 @@ class GateScopeTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("long-sentence-rate", result.stderr)
+        self.assertNotIn("pre-existing error", result.stderr)
 
     def test_a_pre_existing_long_sentence_rate_does_not_block_an_unrelated_edit(self) -> None:
         long_sentence = " ".join(["word"] * 30) + "."
@@ -135,6 +229,102 @@ class GateScopeTests(unittest.TestCase):
         path = self.write("i.md", body + "\n")
         result = self.gate(
             self.edit_payload(path, "Another line sits here quietly.", "Another line sits here calmly.", session="e7")
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_an_edit_that_newly_trips_paragraph_length_blocks(self) -> None:
+        """An edit that grows a paragraph past the cap owns the result.
+
+        The edit's characters land inside the sentences the rule counts,
+        so ordinary overlap charges it. The rule is not on the whole-document
+        list and does not take the newly-fires path.
+        """
+        four = (
+            "One short sentence sits here now. Two more words follow along. "
+            "Three keeps under the word cap. Four finishes this paragraph cleanly."
+        )
+        path = self.write("p1.md", four + "\n")
+        result = self.gate(
+            self.edit_payload(
+                path,
+                "Four finishes this paragraph cleanly.",
+                "Four finishes this paragraph cleanly. Five adds one more sentence here.",
+                session="e6p",
+            )
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("paragraph-length", result.stderr)
+        self.assertNotIn("pre-existing error", result.stderr)
+
+    def test_an_edit_inside_an_over_long_paragraph_blocks(self) -> None:
+        # The paragraph was already over the cap. Editing inside it is what
+        # the span answers: while paragraph-length skipped origin filtering,
+        # one old violation switched the rule off for the whole file.
+        over = ("One short line here. Two short lines here. Three short lines here. "
+                "Four short lines here. Five short lines here.")
+        path = self.write("pl1.md", over + "\n\nA separate clean paragraph sits here.\n")
+        result = self.gate(self.edit_payload(
+            path, "Three short lines here.", "Three rewritten lines here.", session="pl1"))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("paragraph-length", result.stderr)
+
+    def test_deleting_a_paragraph_break_owns_the_merged_paragraph(self) -> None:
+        # A deletion is a zero-width point that falls between two counted
+        # sentences by definition, so per-sentence ranges alone never see it.
+        # Removing text there is exactly what merges two paragraphs into one
+        # over the cap.
+        doc = ("One short line here. Two short lines here. Three short lines here.\n\n"
+               "Four short lines here. Five short lines here.")
+        path = self.write("pl5.md", doc + "\n")
+        result = self.gate(self.edit_payload(
+            path, "here.\n\nFour", "here. Four", session="pl5"))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("paragraph-length", result.stderr)
+
+    def test_a_bullet_between_counted_sentences_is_not_blamed(self) -> None:
+        # The outer bounds run from the first counted sentence to the last, so
+        # a bullet sitting between two of them falls inside them. The finding
+        # carries each counted sentence separately for exactly this geometry.
+        doc = ("One short line here. Two short lines here.\n"
+               "- bullet sits here now\n"
+               "Three short lines here. Four short lines here. Five short lines here.")
+        path = self.write("pl4.md", doc + "\n")
+        result = self.gate(self.edit_payload(
+            path, "- bullet sits here now", "- bullet reworded here now", session="pl4"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rewording_a_bullet_is_not_blamed_for_the_intro(self) -> None:
+        # List item lines are excluded from the sentence count, so the span
+        # stops at the last counted sentence. A span covering the bullets
+        # would blame one for prose it was never measured against.
+        block = ("One short line here. Two short lines here. Three short lines here. "
+                 "Four short lines here. Five short lines here.\n"
+                 "- first bullet sits here\n"
+                 "- second bullet sits here")
+        path = self.write("pl3.md", block + "\n")
+        result = self.gate(self.edit_payload(
+            path, "- second bullet sits here", "- second bullet reworded here", session="pl3"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_an_edit_in_another_paragraph_leaves_it_alone(self) -> None:
+        over = ("One short line here. Two short lines here. Three short lines here. "
+                "Four short lines here. Five short lines here.")
+        path = self.write("pl2.md", over + "\n\nA separate clean paragraph sits here.\n")
+        result = self.gate(self.edit_payload(
+            path, "A separate clean paragraph sits here.",
+            "A separate tidy paragraph sits here.", session="pl2"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_pre_existing_paragraph_length_does_not_block_an_unrelated_edit(self) -> None:
+        five = (
+            "One short sentence sits here now. Two more words follow along. "
+            "Three keeps under the word cap. Four finishes this paragraph cleanly. "
+            "Five was already over the cap."
+        )
+        body = five + "\n\nAnother line sits here quietly."
+        path = self.write("p2.md", body + "\n")
+        result = self.gate(
+            self.edit_payload(path, "Another line sits here quietly.", "Another line sits here calmly.", session="e7p")
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -195,9 +385,75 @@ class DecisionHelperTests(unittest.TestCase):
         blocking = linter.blocking_findings_for_retry(findings)
         self.assertEqual([f.line for f in blocking], [2])
 
-    def test_the_document_scoped_rule_is_excluded_from_origin_filtering(self) -> None:
-        findings = [linter.Finding(1, "long-sentence-rate", "x", "error", origin="new")]
-        self.assertEqual(linter.blocking_findings_for_retry(findings), [])
+    def test_every_whole_document_metric_is_excluded_from_origin_filtering(self) -> None:
+        # A rule measured over the whole document has no text to point at, so
+        # origin overlap cannot place it and it would never block an Edit.
+        # All four take the newly-fires path instead.
+        for check in ("long-sentence-rate", "avg-sentence-length",
+                      "sentence-variation", "list-dominated"):
+            finding = linter.Finding(1, check, "x", "error", origin="new")
+            self.assertEqual(linter.blocking_findings_for_retry([finding]), [], check)
+            self.assertIn(check, linter.DOCUMENT_SCOPED_BLOCKING_RULES)
+
+    def test_the_ratio_rule_is_excluded_but_paragraph_length_is_not(self) -> None:
+        # paragraph-length has its paragraph's sentences and takes the
+        # ordinary path, so a new one blocks like any other finding.
+        ratio = linter.Finding(1, "long-sentence-rate", "x", "error", origin="new")
+        self.assertEqual(linter.blocking_findings_for_retry([ratio]), [])
+        paragraph = linter.Finding(2, "paragraph-length", "y", "error", origin="new")
+        self.assertEqual(linter.blocking_findings_for_retry([paragraph]), [paragraph])
+        existing = linter.Finding(2, "paragraph-length", "y", "error", origin="existing")
+        self.assertEqual(linter.blocking_findings_for_retry([existing]), [])
+
+    def test_inner_narrowing_excludes_unchanged_context(self) -> None:
+        existing = "unchanged prefix XXX unchanged suffix"
+        proposed = "unchanged prefix YYY unchanged suffix"
+        ranges = linter._changed_char_ranges(existing, proposed)
+        self.assertEqual(len(ranges), 1)
+        lo, hi = ranges[0]
+        self.assertGreaterEqual(lo, proposed.index("YYY"))
+        self.assertLessEqual(hi, proposed.index("YYY") + 3)
+
+    def test_a_long_document_pair_skips_the_line_matcher(self) -> None:
+        # The outer matcher is quadratic in line count. Past the hook's
+        # timeout the gate is killed and every write goes through unchecked,
+        # so a document pair over the cap is charged whole instead.
+        paragraphs = "\n\n".join(
+            f"Paragraph {i} sits here with a few ordinary words." for i in range(1600)
+        )
+        changed = paragraphs.replace("ordinary", "different")
+        started = time.time()
+        with self.assertRaises(linter._TooLargeToCompare):
+            linter._changed_char_ranges(paragraphs, changed)
+        self.assertLess(time.time() - started, 2.0, "the line matcher ran uncapped")
+
+    def test_a_long_document_charges_only_the_edit(self) -> None:
+        # Charging the whole document past the cap refused every pre-existing
+        # error in the file, which is the symptom this attribution removes.
+        paragraphs = "\n\n".join(
+            f"Paragraph {i} sits here with a few ordinary words." for i in range(1600)
+        )
+        old = "Paragraph 800 sits here with a few ordinary words."
+        new = "Paragraph 800 sits here with several different words."
+        proposed = paragraphs.replace(old, new)
+        findings = [
+            linter.Finding(1, "banned-word", "x", "error", span_start=0, span_end=5),
+            linter.Finding(2, "banned-word", "y", "error",
+                           span_start=paragraphs.find(old), span_end=paragraphs.find(old) + 10),
+        ]
+        placed = linter._compute_edit_origins(findings, paragraphs, old, proposed)
+        self.assertEqual(placed[0].origin, "existing", "a far-away finding was charged")
+        self.assertEqual(placed[1].origin, "new", "the edited text was not charged")
+
+    def test_a_large_replaced_block_falls_back_without_stalling(self) -> None:
+        n = 20000
+        existing = "a" * n
+        proposed = "b" * n
+        start = time.perf_counter()
+        ranges = linter._changed_char_ranges(existing, proposed)
+        elapsed = time.perf_counter() - start
+        self.assertLess(elapsed, 2.0)
+        self.assertEqual(ranges, [(0, n)])
 
 
 class RoutingTests(unittest.TestCase):
