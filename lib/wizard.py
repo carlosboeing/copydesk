@@ -188,10 +188,18 @@ def prove(home: Path) -> tuple[bool, str]:
     # gate's identical-content escape valve never fires on a healthy install,
     # and entries from earlier homes cannot pile up behind the session. The
     # path comes from the linter so both sides resolve one location.
+    state_path = linter._state_path(linter._state_directory(), PROOF_SESSION_ID)
+    undeleted = ""
     try:
-        linter._state_path(linter._state_directory(), PROOF_SESSION_ID).unlink()
-    except OSError:
+        state_path.unlink()
+    except FileNotFoundError:
         pass
+    except OSError as error:
+        # Setup never crashes on a state directory it cannot write, so the
+        # swallow stays. Absence is the healthy case; a permission error or
+        # a directory at the path leaves retry state behind that decides
+        # what this proof runs against, so the survivor joins the result.
+        undeleted = f"; previous proof state at {state_path} could not be deleted ({error})"
 
     payload = json.dumps({
         "session_id": PROOF_SESSION_ID,
@@ -213,7 +221,8 @@ def prove(home: Path) -> tuple[bool, str]:
     )
     blocked = result.returncode == 2
     reason = (result.stderr or result.stdout).strip().splitlines()
-    return blocked, reason[0] if reason else "no finding reported"
+    text = reason[0] if reason else "no finding reported"
+    return blocked, text + undeleted
 
 
 # The marker and the git directory answers live in hook.py, which owns hook

@@ -356,6 +356,20 @@ class ProofRunTests(unittest.TestCase):
         self.assertTrue(blocked, reason)
         self.assertNotIn(stale, self._entries())
 
+    def test_an_undeletable_state_path_is_named_in_the_reason(self) -> None:
+        # A directory sitting at the session file makes unlink fail for a
+        # reason that is not absence. Setup must not crash on it, but the
+        # survivor decides what the proof runs against, so the reason has
+        # to name it rather than report only that the proof failed.
+        state_file = self.state / "copydesk" / "copydesk-setup-proof.json"
+        state_file.unlink()
+        state_file.mkdir()
+        blocked, reason = wizard.prove(self.home)
+        self.assertFalse(blocked, f"proof {reason}")
+        self.assertTrue(state_file.is_dir(), "the gate removed what deletion could not")
+        self.assertIn(str(state_file), reason)
+        self.assertIn("could not be deleted", reason)
+
 
 class RealStateDirectoryTests(unittest.TestCase):
     """A suite run must leave the developer's own state directory alone.
@@ -1170,6 +1184,48 @@ class InstructionAudienceTests(unittest.TestCase):
                 "reviews": {"enabled": True},
             },
         }), encoding="utf-8")
+
+    def _resolved(self, enabled: list[str]) -> object:
+        """A resolved config where exactly the named channels are on."""
+        path = self.home / "config.json"
+        path.write_text(json.dumps({
+            "version": 1,
+            "channels": {
+                name: {"enabled": name in enabled}
+                for name in ("chat", "documents", "commits", "reviews")
+            },
+        }), encoding="utf-8")
+        return config.resolve(ROOT / "rules", user_path=path)
+
+    def test_a_chat_only_claude_code_plan_writes_no_instruction_file(self) -> None:
+        # Chat reaches Claude Code through the output style, so with the
+        # other channels off the block renders empty and setup skips the
+        # file. The installs line promises a CLAUDE.md block conditionally
+        # because of exactly this plan; this pins the behaviour it words.
+        plan = wizard._build_plan(
+            self.home,
+            self.home / "config" / "copydesk" / "config.json",
+            '{"version": 1}',
+            ["claude-code"],
+            self._resolved(["chat"]),
+            {},
+            write_config=False,
+        )
+        self.assertEqual(self._instruction_writes(plan), [])
+
+    def test_documents_joining_makes_the_claude_code_block_exist(self) -> None:
+        # The control for the skip above: a block with something to say
+        # produces the write, so the skip tracks emptiness, not the harness.
+        plan = wizard._build_plan(
+            self.home,
+            self.home / "config" / "copydesk" / "config.json",
+            '{"version": 1}',
+            ["claude-code"],
+            self._resolved(["chat", "documents"]),
+            {},
+            write_config=False,
+        )
+        self.assertEqual([w.path.name for w in self._instruction_writes(plan)], ["CLAUDE.md"])
 
     def _cli(self, command: str, *args: str) -> subprocess.CompletedProcess:
         env = dict(
