@@ -9,3 +9,4 @@ __pycache__/
 
 # Worktrees
 .worktrees/
+.DS_Store
