@@ -128,9 +128,14 @@ def execute(plan: Plan) -> Result:
         if real_p.is_symlink():
             try:
                 removed_symlinks[real_p] = Path(os.readlink(real_p))
+                continue
             except OSError:
+                # `readlink` can fail on a path that just tested as a
+                # symlink. Fall through to the byte capture rather than
+                # record nothing: rollback then leaves a regular file where
+                # the link was, which is the weaker guarantee, and losing
+                # the path with no error is worse than either.
                 pass
-            continue
         if real_p.is_file():
             try:
                 removed_originals[real_p] = real_p.read_text(encoding="utf-8")

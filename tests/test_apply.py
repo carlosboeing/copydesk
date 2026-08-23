@@ -216,6 +216,40 @@ class RollbackTests(unittest.TestCase):
         self.assertEqual(Path(os.readlink(link)), kept)
         self.assertEqual(kept.read_text(encoding="utf-8"), "old\n")
 
+    def test_an_unreadable_link_keeps_the_weaker_guarantee(self) -> None:
+        # `readlink` can fail on a path that just tested as a symlink — a
+        # race, or a permission on the parent. Dropping the path from both
+        # records loses the user's file with no error, which is worse than
+        # the regular-file rollback this fix replaced.
+        elsewhere = self.home / "elsewhere"
+        elsewhere.mkdir()
+        kept = elsewhere / "kept-style.md"
+        kept.write_text("old\n", encoding="utf-8")
+        link = self.home / "copydesk-low.md"
+        link.symlink_to(kept)
+        doomed = self.home / "copydesk-high.md"
+        doomed.write_text("old too\n", encoding="utf-8")
+        real_unlink = Path.unlink
+
+        def refuse(path, *args, **kwargs):
+            if path.name == "copydesk-high.md":
+                raise OSError("refused")
+            return real_unlink(path, *args, **kwargs)
+
+        def no_readlink(path, *args, **kwargs):
+            raise OSError("refused")
+
+        with mock.patch.object(Path, "unlink", refuse), \
+                mock.patch.object(apply.os, "readlink", no_readlink):
+            result = apply.execute(apply.Plan(
+                writes=[apply.Write(self.home / "copydesk.md", "new")],
+                removes=[link, doomed],
+            ))
+        self.assertFalse(result.ok)
+        self.assertTrue(link.exists(), "the path vanished with no error")
+        self.assertEqual(link.read_text(encoding="utf-8"), "old\n")
+
+
 
 class PlanDefaultTests(unittest.TestCase):
     def test_a_plan_built_without_removes_shares_no_mutable_list(self) -> None:
