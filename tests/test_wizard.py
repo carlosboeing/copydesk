@@ -110,6 +110,38 @@ class PresetMappingTests(unittest.TestCase):
     def test_reviews_ships_unticked(self) -> None:
         self.assertFalse(wizard.CHANNEL_PRESELECTED["reviews"])
 
+    def test_chat_presets_carry_the_default_guidance_set(self) -> None:
+        wanted = tuple(
+            guidance_id
+            for guidance_id, state in config.CHANNEL_DEFAULTS["chat"]["guidance"].items()
+            if state
+        )
+        for preset in wizard.PRESETS["chat"][:-1]:
+            self.assertEqual(preset.guidance, wanted, preset.label)
+
+    def test_defaults_write_the_default_guidance_set(self) -> None:
+        chat = wizard._default_channels()["chat"]
+        self.assertEqual(
+            sorted(chat["guidance"]),
+            ["alternatives", "assumptions", "recommendations", "verification"],
+        )
+
+    def test_the_guidance_question_preselects_the_channel_default(self) -> None:
+        # The six untaken ids stay one keystroke away: Customize opens with
+        # the same set a no-config install resolves to.
+        defaults = {
+            channel: {
+                index
+                for index, guidance_id in enumerate(wizard.guidance.IDS)
+                if config.CHANNEL_DEFAULTS[channel]["guidance"].get(guidance_id)
+            }
+            for channel in ("chat", "documents", "commits", "reviews")
+        }
+        self.assertEqual(defaults["chat"], {0, 4, 5, 9})
+        self.assertEqual(defaults["documents"], {0})
+        self.assertEqual(defaults["commits"], set())
+        self.assertEqual(defaults["reviews"], {3})
+
     def test_every_preset_has_an_example(self) -> None:
         missing = [
             (channel, preset.label)

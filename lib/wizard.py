@@ -42,11 +42,11 @@ _CUSTOMIZE = Preset("Customize…", "pick each setting yourself.", "", "", ())
 PRESETS: dict[str, list[Preset]] = {
     "chat": [
         Preset("Short and direct", "answer first, one reason, stop.",
-               "plain", "low", ("recommendations", "direction", "progress")),
+               "plain", "low", ("recommendations", "alternatives", "assumptions", "verification")),
         Preset("More explanatory", "defines terms, adds context.",
-               "general", "medium", ("recommendations", "direction", "progress")),
+               "general", "medium", ("recommendations", "alternatives", "assumptions", "verification")),
         Preset("Thorough", "full reasoning, every step shown.",
-               "plain", "high", ("recommendations", "direction", "progress")),
+               "plain", "high", ("recommendations", "alternatives", "assumptions", "verification")),
         _CUSTOMIZE,
     ],
     "documents": [
@@ -755,10 +755,19 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
             def ask_guidance() -> None:
                 ids = list(guidance.IDS)
                 options = [prompt.Option(gid, guidance.SNIPPETS.get(gid, "")) for gid in ids]
+                previous = answers.get(f"{ch}.guidance")
+                if previous is None:
+                    # Customize opens where a no-config install lands: the
+                    # channel's resolved defaults ticked, the rest one
+                    # keystroke away.
+                    previous = [
+                        index for index, gid in enumerate(ids)
+                        if config_mod.CHANNEL_DEFAULTS[ch]["guidance"].get(gid)
+                    ]
                 answers[f"{ch}.guidance"] = prompt.multiselect(
                     f"Guidance deliverables (channels.{ch}.guidance)",
                     options,
-                    answers.get(f"{ch}.guidance", []),
+                    previous,
                     stdin=in_stream,
                     stdout=out_stream,
                 )

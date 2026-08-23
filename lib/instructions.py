@@ -50,8 +50,11 @@ SCHEMA_URL = (
 )
 
 # Measured, not guessed. A 1,256-word block did not hold across a long
-# session; a 200-word one did. The budget is tested, not documented.
-BUDGETS = {"chat": 220, "documents": 260, "commits": 25, "reviews": 25}
+# session; a 200-word one did. The budget is tested, not documented. Chat
+# moved from 220 to 240 when the guidance default grew to four items
+# (+14 words) and the gloss clause arrived (+15): the default render then
+# measured 236 words, and a budget below its own default fails every install.
+BUDGETS = {"chat": 240, "documents": 260, "commits": 25, "reviews": 25}
 
 _STOPPING_RULES = (
     "If the first line answers it, stop. "
@@ -62,6 +65,13 @@ _STOPPING_RULES = (
 _CHAT_STRUCTURE = (
     "In the terminal, number every section and bold its label. "
     "Put a horizontal rule between sections. Never nest a table inside a list."
+)
+
+# Chat never reaches the gate, and no shipped word list anticipates the
+# vocabulary a project coins. The one prevention surface that covers both
+# is this clause. Fifteen words, measured.
+GLOSS_TERMS = (
+    "Gloss a term this project coined on its first use, meaning in the same sentence."
 )
 
 _VERBOSITY_LINES = {
@@ -189,6 +199,7 @@ def render_chat(resolved: dict) -> str:
         style_line("chat", settings.get("style", "plain")),
         _VERBOSITY_LINES.get(settings.get("verbosity", "low"), _VERBOSITY_LINES["low"]),
         inst.get("categories", ""),
+        GLOSS_TERMS,
         _CHAT_STRUCTURE,
     ]
     parts.extend(guidance.render(settings.get("guidance") or {}))
@@ -261,7 +272,17 @@ def render_agents_block(resolved: dict, include_chat: bool = False) -> str:
         render_commits(resolved),
         render_reviews(resolved),
     ])
-    return "\n\n".join(part for part in parts if part)
+    # One paragraph per instruction file. A toggle on in two channels wrote
+    # its line twice once the channels joined; deduplication runs on the
+    # rendered text, so merged lines collapse the same way.
+    seen: set[str] = set()
+    paragraphs: list[str] = []
+    for part in parts:
+        for paragraph in part.split("\n\n"):
+            if paragraph and paragraph not in seen:
+                seen.add(paragraph)
+                paragraphs.append(paragraph)
+    return "\n\n".join(paragraphs)
 
 
 def fingerprint(rendered: str) -> str:

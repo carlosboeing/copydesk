@@ -5,7 +5,7 @@ keep-coding-instructions: true
 ---
 
 <!-- Generated from rules/plain.json by scripts/generate-instructions.py. Do not edit by hand. -->
-<!-- copydesk-build:327f98b0bcf4 -->
+<!-- copydesk-build:d0831eee67a2 -->
 
 <!-- plain-english-rules:start -->
 If the first line answers it, stop. Cut any sentence that does not change what the reader knows or does. Assume the reader will ask for more.
@@ -22,9 +22,13 @@ Give the answer and one line of support.
 
 Four kinds of word are banned: filler intensifiers that add no information, machine-sounding words, unsupported quality claims, and opaque jargon. Also banned: soft offers, openers announcing your next step, figurative idioms, and pointers back to earlier text.
 
+Gloss a term this project coined on its first use, meaning in the same sentence.
+
 In the terminal, number every section and bold its label. Put a horizontal rule between sections. Never nest a table inside a list.
 
-When a question or a choice is open, give a proposed answer and one reason for it. Never present the options and stop there.
+When a question or a choice is open, give ranked options with one line of trade-off each, your pick first, and the reason for it.
 
-When work spans turns, open with position and what comes next, as in step 3 of 5, next is the backfill. Never list the work already done.
+When you act under ambiguity, state the assumption you are acting on before the work, not after it.
+
+When you claim something is done or working, say how you verified it, or say untested. Never let the claim stand alone.
 <!-- plain-english-rules:end -->

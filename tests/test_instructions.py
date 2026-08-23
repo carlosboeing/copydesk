@@ -69,8 +69,15 @@ class ChatBudgetTests(unittest.TestCase):
         words = instructions.word_count(instructions.render_chat(resolved()))
         self.assertLessEqual(words, instructions.BUDGETS["chat"])
 
+    def test_a_config_that_names_no_guidance_set_fits_too(self) -> None:
+        # The defaults carry four guidance items, more than this file's
+        # fixture names, so the budget has to hold for the heavier case.
+        resolved_default = config.resolve(ROOT / "rules", user_path=None, project_path=None)
+        words = instructions.word_count(instructions.render_chat(resolved_default))
+        self.assertLessEqual(words, instructions.BUDGETS["chat"])
+
     def test_the_budget_is_the_designed_one(self) -> None:
-        self.assertEqual(instructions.BUDGETS["chat"], 220)
+        self.assertEqual(instructions.BUDGETS["chat"], 240)
 
     def test_no_banned_word_token_list_reaches_the_chat_block(self) -> None:
         rendered = instructions.render_chat(resolved())
@@ -667,6 +674,56 @@ class ChannelBlockTests(unittest.TestCase):
         # a second time.
         rendered = instructions.render_agents_block(resolved()).lower()
         self.assertNotIn("answer first", rendered)
+
+
+class SharedGuidanceTests(unittest.TestCase):
+    """One guidance paragraph per instruction file, however many channels ask."""
+
+    RECOMMENDATIONS = "When a question or a choice is open"
+
+    def _both_on(self) -> dict:
+        config_body = resolved()
+        config_body["channels"]["chat"]["guidance"] = {"recommendations": True}
+        return config_body
+
+    def test_two_channels_sharing_a_file_write_the_paragraph_once(self) -> None:
+        body = instructions.render_agents_block(self._both_on(), include_chat=True)
+        self.assertEqual(body.count(self.RECOMMENDATIONS), 1)
+
+    def test_the_control_separate_files_keep_it_in_each(self) -> None:
+        config_body = self._both_on()
+        self.assertEqual(
+            instructions.render_chat(config_body).count(self.RECOMMENDATIONS), 1
+        )
+        self.assertEqual(
+            instructions.render_documents(config_body).count(self.RECOMMENDATIONS), 1
+        )
+
+    def test_dedup_collapses_a_merged_line_not_just_a_name(self) -> None:
+        # recommendations and alternatives merge into one line; two channels
+        # carrying the pair must not write that line twice.
+        config_body = resolved()
+        merged_pair = {"recommendations": True, "alternatives": True}
+        config_body["channels"]["chat"]["guidance"] = dict(merged_pair)
+        config_body["channels"]["documents"]["guidance"] = dict(merged_pair)
+        body = instructions.render_agents_block(config_body)
+        self.assertEqual(body.count("ranked options"), 1)
+
+
+class GlossTermsTests(unittest.TestCase):
+    def test_the_chat_block_tells_the_agent_to_gloss_coined_terms(self) -> None:
+        rendered = instructions.render_chat(resolved()).lower()
+        self.assertIn("gloss", rendered)
+        self.assertIn("coined", rendered)
+        self.assertIn("first use", rendered)
+
+    def test_the_clause_rides_into_the_joined_block_with_chat(self) -> None:
+        body = instructions.render_agents_block(resolved(), include_chat=True).lower()
+        self.assertIn("first use", body)
+
+    def test_the_clause_stays_near_fifteen_words(self) -> None:
+        clause = instructions.GLOSS_TERMS
+        self.assertLessEqual(instructions.word_count(clause), 16)
 
 
 class RepeatCloserTests(unittest.TestCase):

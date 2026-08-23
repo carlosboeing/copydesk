@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **Chat guidance defaults to four items instead of ten.** The full set rendered at 183 words, more than half the output style's footprint, for the part a first-time user is least likely to have considered. The default is now `recommendations`, `alternatives`, `assumptions` and `verification` — measured through `guidance.render` at 65 words, because `recommendations` and `alternatives` merge into one line. Each of the four changes what the agent does rather than how it writes: a ranked pick instead of a survey, an assumption stated before the work, a verification named beside a completion claim. A config that names a guidance set keeps it; only the unnamed default moves. The wizard's chat presets carry the same four, and its Customize question opens with the channel's defaults ticked, so the other six stay one keystroke away.
+- **The chat budget moved from 220 to 240 words.** The default render now measures 236: the four-item guidance default adds 14 words over the old three, and the gloss clause below adds 15. A budget below its own default would fail every install.
+
+### Fixed
+
+- **Guidance repeated when two channels joined one instruction file.** A toggle switched on in both `chat` and `documents` wrote its paragraph twice in the shared block — once per channel — for every toggle the channels shared. The join now deduplicates on the rendered paragraph, the same treatment `guidance.MERGES` gives related snippets within one channel, so merged lines collapse too. Channels rendered into separate files keep their paragraph in each.
+- **A term coined inside a project reached no prevention text.** Chat never reaches the gate, `unglossed-term` reads only capitalised words and warns rather than blocking, and no shipped word list can anticipate a project's own vocabulary. The chat instructions now carry a fifteen-word clause: gloss a term this project coined on its first use, meaning in the same sentence. Prevention text cannot produce false positives, because nothing is linted against it.
+
 ## [0.5.0]
 
 ### Changed
