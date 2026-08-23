@@ -220,6 +220,17 @@ class ActiveStyleReportTests(unittest.TestCase):
         # report that prints whatever string was last seen.
         self.assertRegex(self._doctor(), r"active\s+none")
 
+    def test_an_unreadable_settings_file_is_not_reported_as_none(self) -> None:
+        # "none" means no style is set. A settings.json that will not parse
+        # is a different state — setup refuses against it naming the path —
+        # and must not print the same word.
+        settings_dir = self.home / ".claude"
+        settings_dir.mkdir(parents=True)
+        (settings_dir / "settings.json").write_text("{not json", encoding="utf-8")
+        out = self._doctor()
+        self.assertRegex(out, r"active\s+unreadable \(")
+        self.assertNotRegex(out, r"active\s+none")
+
 
 class SharedInstructionFileTests(unittest.TestCase):
     """Doctor reports instruction targets that resolve to one real file.
@@ -296,3 +307,39 @@ class SharedInstructionFileTests(unittest.TestCase):
     def test_an_empty_home_names_no_instruction_files(self) -> None:
         self.assertEqual(self._doctor().count("AGENTS.md"), 0)
         self.assertNotIn("CLAUDE.md", self._doctor())
+
+    def _share_one_file(self) -> Path:
+        real = self._real_file()
+        real.write_text("# mine\n", encoding="utf-8")
+        agents_home = self.home / ".agents" / "AGENTS.md"
+        agents_home.parent.mkdir(parents=True)
+        agents_home.symlink_to(real)
+        return real
+
+    def _set_chat(self, enabled: bool) -> None:
+        config_dir = self.home / "config" / "copydesk"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.json").write_text(
+            json.dumps({"version": 1, "channels": {"chat": {"enabled": enabled}}}),
+            encoding="utf-8",
+        )
+
+    def test_chat_off_names_no_duplication_on_the_same_shared_file(self) -> None:
+        # render_agents_block omits chat when the channel is off, so setup
+        # never wrote it into the shared file. The word count beside the
+        # line counts documents, commits and reviews only — no duplication.
+        self._set_chat(False)
+        real = self._share_one_file()
+        out = self._doctor()
+        self.assertIn(str(real), out)
+        self.assertNotIn("carries chat", out.lower())
+
+    def test_chat_on_still_reports_duplication_for_a_shared_file(self) -> None:
+        # The control for the test above: the line must go when chat is off
+        # and stay when it is on, through the same command form.
+        self._set_chat(True)
+        real = self._share_one_file()
+        out = self._doctor()
+        self.assertIn(str(real), out)
+        self.assertIn("carries chat", out.lower())
+        self.assertRegex(out, r"\(\d+ words\)")
