@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **`copydesk report` reads a Prevention baseline from a CopyDesk checkout when the installed bundle ships none.** The npm allowlist carries no `eval/` directory, so an installed CopyDesk could never see a published corpus result and every report ended at `not measured`. When the bundle holds no readable summary, the reader now falls back to `eval/results/` beside the working directory, and only when that directory sits in a CopyDesk checkout (`lib/linter.py` alongside), so an unrelated project's `eval/` cannot pose as the metric. A newest-file scan also skips summaries without a usable `rate` instead of letting one malformed file hide an older valid baseline behind it.
+
+### Added
+
+- **`eval/run-corpus.sh --measure-only`.** Re-runs the measurement phase over already-captured transcripts and republishes the dated summary JSON, with no harness sessions launched and no settings or target repository required.
+- **A prevention baseline under `eval/results/`.** `baseline-results.md` publishes the 2026-08-24 corpus rate (8.48 blocking findings per 1,000 chat words at the final turn) together with per-rule false-positive rates judged from a five-day telemetry window, stating the criterion and sample sizes; `2026-08-24-summary.json` carries the per-run detail `report` reads.
+
 ## [0.6.0]
 
 ### Changed

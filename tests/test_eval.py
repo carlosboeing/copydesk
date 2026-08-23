@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import importlib.util
 import inspect
 import json
@@ -183,6 +184,44 @@ class CorpusRunnerTests(unittest.TestCase):
             refused = subprocess.run([str(runner), "--harness", "claude", "--condition", "A", "--results-root", str(results)], text=True, capture_output=True, check=False)
             self.assertEqual(refused.returncode, 2)
             self.assertIn("--confirmed", refused.stderr)
+
+    def test_measure_only_republishes_summary_without_launching_sessions(self) -> None:
+        """The measurement phase must run over captured transcripts alone."""
+        runner = EVALUATION / "run-corpus.sh"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            transcript_dir = root / "captured" / "A" / "claude" / "01-implementation-dry-run" / "run-1"
+            transcript_dir.mkdir(parents=True)
+            records = [
+                {"type": "user", "message": {"content": [{"type": "text", "text": "prompt"}]}},
+                {"type": "assistant", "message": {"content": [{"type": "text", "text": "answer"}]}},
+            ]
+            (transcript_dir / "claude-session.jsonl").write_text(
+                "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+            )
+
+            completed = subprocess.run(
+                ["/bin/bash", str(runner), "--measure-only", "--harness", "claude", "--condition", "A", "--results-root", str(root / "captured")],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            summary_path = root / "captured" / f"{datetime.date.today():%Y-%m-%d}-summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["rate"], 0.0)
+            self.assertEqual(summary["runs_per_sequence"], 1)
+            self.assertEqual(summary["measured"][0]["sequence"], "01-implementation-dry-run")
+
+            # A condition with no captured transcripts refuses with a message.
+            refused = subprocess.run(
+                ["/bin/bash", str(runner), "--measure-only", "--harness", "claude", "--condition", "B", "--results-root", str(root / "captured")],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(refused.returncode, 2)
+            self.assertIn("no captured transcripts", refused.stderr)
 
     def test_runs_one_continuous_sequence_under_macos_bash(self) -> None:
         """Replacing the corpus collector with a Bash-4-only builtin must break this run."""
