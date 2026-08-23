@@ -53,7 +53,9 @@ SCHEMA_URL = (
 # session; a 200-word one did. The budget is tested, not documented. Chat
 # moved from 220 to 240 when the guidance default grew to four items
 # (+14 words) and the gloss clause arrived (+15): the default render then
-# measured 236 words, and a budget below its own default fails every install.
+# measured 236 words. Nothing outside tests reads this table, so a budget
+# below its own default fails test_the_chat_block_fits_its_budget, never an
+# install.
 BUDGETS = {"chat": 240, "documents": 260, "commits": 25, "reviews": 25}
 
 _STOPPING_RULES = (
