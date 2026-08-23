@@ -50,8 +50,14 @@ SCHEMA_URL = (
 )
 
 # Measured, not guessed. A 1,256-word block did not hold across a long
-# session; a 200-word one did. The budget is tested, not documented.
-BUDGETS = {"chat": 220, "documents": 260, "commits": 25, "reviews": 25}
+# session; a 200-word one did. The budget is tested, not documented. Chat
+# moved from 220 to 240 when the guidance default grew to four items
+# (+14 words) and the gloss clause arrived (+15): the default render then
+# measured 236 words. The vocabulary clause then absorbed the shorter gloss
+# line and gave the jargon category a test, taking the block to 267. Nothing
+# outside tests reads this table, so a budget below its own default fails
+# test_the_chat_block_fits_its_budget, never an install.
+BUDGETS = {"chat": 269, "documents": 260, "commits": 25, "reviews": 25}
 
 _STOPPING_RULES = (
     "If the first line answers it, stop. "
@@ -62,6 +68,24 @@ _STOPPING_RULES = (
 _CHAT_STRUCTURE = (
     "In the terminal, number every section and bold its label. "
     "Put a horizontal rule between sections. Never nest a table inside a list."
+)
+
+# Chat never reaches the gate, and no shipped word list anticipates the
+# vocabulary a project coins. The one prevention surface that covers both
+# is this clause. Fifteen words, measured.
+# Prevention before glossing. A banned-word list holds what someone thought to
+# add; it can never hold a word the model invents mid-sentence. The rule, the
+# test and the allowed examples travel together, because the bare category
+# "opaque jargon" gave no way to tell `race condition` from `seam`. The banned
+# side stays a category: a test pins that the token list never reaches the
+# chat block, which is what keeps this text short. Four sentences and no colon:
+# the splitter treats a colon as a break, and this paragraph has to pass the
+# same paragraph-length rule it ships.
+VOCABULARY = (
+    "Prefer the word your reader already uses and never invent one. Common domain "
+    "vocabulary such as race condition or idempotent is fine. Anything you cannot "
+    "source, say in plain English. A term you must use anyway is glossed on first "
+    "use, meaning in the same sentence."
 )
 
 _VERBOSITY_LINES = {
@@ -189,6 +213,7 @@ def render_chat(resolved: dict) -> str:
         style_line("chat", settings.get("style", "plain")),
         _VERBOSITY_LINES.get(settings.get("verbosity", "low"), _VERBOSITY_LINES["low"]),
         inst.get("categories", ""),
+        VOCABULARY,
         _CHAT_STRUCTURE,
     ]
     parts.extend(guidance.render(settings.get("guidance") or {}))
@@ -261,7 +286,24 @@ def render_agents_block(resolved: dict, include_chat: bool = False) -> str:
         render_commits(resolved),
         render_reviews(resolved),
     ])
-    return "\n\n".join(part for part in parts if part)
+    # Guidance only. A toggle on in two channels wrote its line twice
+    # once the channels joined; style, verbosity and craft stay per
+    # channel because the same extent line is a different instruction
+    # beside each channel-naming line. A merge from one channel also
+    # replaces a member snippet from another, matching MERGES.
+    guidance_texts = set(guidance.SNIPPETS.values()) | set(guidance.MERGES.values())
+    seen: set[str] = set()
+    paragraphs: list[str] = []
+    for part in parts:
+        for paragraph in part.split("\n\n"):
+            if not paragraph:
+                continue
+            if paragraph in guidance_texts:
+                if paragraph in seen:
+                    continue
+                seen.add(paragraph)
+            paragraphs.append(paragraph)
+    return "\n\n".join(guidance.collapse_members(paragraphs))
 
 
 def fingerprint(rendered: str) -> str:

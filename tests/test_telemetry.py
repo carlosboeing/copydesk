@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -822,6 +823,20 @@ class TestTelemetry(unittest.TestCase):
             if saved is not None:
                 os.environ["COPYDESK_STATE_DIR"] = saved
         self.assertNotIn(default_events, content)
+
+
+class ReminderHeaderTests(unittest.TestCase):
+    """The header comment carries the word count a maintainer reads first.
+
+    It is hand-written, so `generate-instructions.py --check` never sees it.
+    It said 49 while the body measured 51.
+    """
+
+    def test_the_header_count_matches_the_constant(self) -> None:
+        text = (REPO_ROOT / "hooks" / "reminder.sh").read_text(encoding="utf-8")
+        match = re.search(r"Hand-written précis \((\d+) words\)", text)
+        self.assertIsNotNone(match, "the header no longer states a word count")
+        self.assertEqual(int(match.group(1)), linter.REMINDER_WORD_COUNT)
 
 
 if __name__ == "__main__":

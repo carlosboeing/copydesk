@@ -407,6 +407,23 @@ class ChannelTests(unittest.TestCase):
         self.assertTrue(guidance["sources"])
         self.assertTrue(guidance["recommendations"])
 
+    def test_chat_defaults_to_four_guidance_items(self) -> None:
+        # The four change what the agent does; the rest stay a keystroke
+        # away in the wizard. Measured at 65 rendered words against 183
+        # for all ten.
+        resolved = config.resolve(RULES_DIR, self.doc, user_path=None)
+        chat = resolved["channels"]["chat"]["guidance"]
+        for guidance_id in ("recommendations", "alternatives", "assumptions", "verification"):
+            self.assertTrue(chat.get(guidance_id), guidance_id)
+        for guidance_id in ("direction", "progress", "pushback"):
+            self.assertFalse(chat.get(guidance_id), guidance_id)
+
+    def test_documents_keeps_its_single_default(self) -> None:
+        resolved = config.resolve(RULES_DIR, self.doc, user_path=None)
+        documents = resolved["channels"]["documents"]["guidance"]
+        self.assertTrue(documents["recommendations"])
+        self.assertFalse(documents.get("alternatives"), "alternatives")
+
     def test_agents_replaces_wholesale(self) -> None:
         (self.root / "copydesk.local.json").write_text(
             '{"version": 1, "agents": ["codex"]}', encoding="utf-8"

@@ -69,8 +69,15 @@ class ChatBudgetTests(unittest.TestCase):
         words = instructions.word_count(instructions.render_chat(resolved()))
         self.assertLessEqual(words, instructions.BUDGETS["chat"])
 
+    def test_a_config_that_names_no_guidance_set_fits_too(self) -> None:
+        # The defaults carry four guidance items, more than this file's
+        # fixture names, so the budget has to hold for the heavier case.
+        resolved_default = config.resolve(ROOT / "rules", user_path=None, project_path=None)
+        words = instructions.word_count(instructions.render_chat(resolved_default))
+        self.assertLessEqual(words, instructions.BUDGETS["chat"])
+
     def test_the_budget_is_the_designed_one(self) -> None:
-        self.assertEqual(instructions.BUDGETS["chat"], 220)
+        self.assertEqual(instructions.BUDGETS["chat"], 269)
 
     def test_no_banned_word_token_list_reaches_the_chat_block(self) -> None:
         rendered = instructions.render_chat(resolved())
@@ -667,6 +674,125 @@ class ChannelBlockTests(unittest.TestCase):
         # a second time.
         rendered = instructions.render_agents_block(resolved()).lower()
         self.assertNotIn("answer first", rendered)
+
+
+class SharedGuidanceTests(unittest.TestCase):
+    """One guidance paragraph per instruction file, however many channels ask."""
+
+    RECOMMENDATIONS = "When a question or a choice is open"
+
+    def _both_on(self) -> dict:
+        config_body = resolved()
+        config_body["channels"]["chat"]["guidance"] = {"recommendations": True}
+        return config_body
+
+    def test_two_channels_sharing_a_file_write_the_paragraph_once(self) -> None:
+        body = instructions.render_agents_block(self._both_on(), include_chat=True)
+        self.assertEqual(body.count(self.RECOMMENDATIONS), 1)
+
+    def test_the_control_separate_files_keep_it_in_each(self) -> None:
+        config_body = self._both_on()
+        self.assertEqual(
+            instructions.render_chat(config_body).count(self.RECOMMENDATIONS), 1
+        )
+        self.assertEqual(
+            instructions.render_documents(config_body).count(self.RECOMMENDATIONS), 1
+        )
+
+    def test_dedup_collapses_a_merged_line_not_just_a_name(self) -> None:
+        # recommendations and alternatives merge into one line; two channels
+        # carrying the pair must not write that line twice.
+        config_body = resolved()
+        merged_pair = {"recommendations": True, "alternatives": True}
+        config_body["channels"]["chat"]["guidance"] = dict(merged_pair)
+        config_body["channels"]["documents"]["guidance"] = dict(merged_pair)
+        body = instructions.render_agents_block(config_body, include_chat=True)
+        self.assertEqual(body.count("ranked options"), 1)
+
+    def test_a_merged_line_replaces_the_other_channel_member_snippet(self) -> None:
+        # Chat defaults carry the pair; documents carry recommendations
+        # alone. Exact-text dedup keeps both until the merge wins.
+        config_body = resolved()
+        config_body["channels"]["chat"]["guidance"] = {
+            "recommendations": True,
+            "alternatives": True,
+        }
+        config_body["channels"]["documents"]["guidance"] = {"recommendations": True}
+        body = instructions.render_agents_block(config_body, include_chat=True)
+        self.assertEqual(body.count(self.RECOMMENDATIONS), 1)
+        self.assertIn("ranked options", body)
+        self.assertNotIn("proposed answer", body)
+
+    def test_the_default_join_carries_one_open_choice_rule(self) -> None:
+        resolved_default = config.resolve(ROOT / "rules", user_path=None, project_path=None)
+        body = instructions.render_agents_block(resolved_default, include_chat=True)
+        self.assertEqual(body.count(self.RECOMMENDATIONS), 1)
+        self.assertIn("ranked options", body)
+
+    def test_the_same_verbosity_stays_beside_each_channel(self) -> None:
+        # Documents and reviews share _VERBOSITY_LINES. Deduping every
+        # paragraph dropped the second copy, so reviews had a style line
+        # and no extent instruction.
+        config_body = resolved()
+        config_body["channels"]["documents"]["verbosity"] = "medium"
+        config_body["channels"]["reviews"]["enabled"] = True
+        config_body["channels"]["reviews"]["verbosity"] = "medium"
+        body = instructions.render_agents_block(config_body)
+        line = instructions._VERBOSITY_LINES["medium"]
+        self.assertEqual(body.count(line), 2)
+        documents_at = body.index(instructions.style_line("documents", "plain"))
+        reviews_at = body.index(instructions._REVIEWS)
+        first = body.find(line)
+        second = body.find(line, first + 1)
+        self.assertGreater(first, documents_at)
+        self.assertLess(first, reviews_at)
+        self.assertGreater(second, reviews_at)
+
+
+class VocabularyTests(unittest.TestCase):
+    """Prevention first, glossing as the fallback.
+
+    A banned-word list holds what someone thought to add. It can never hold
+    a word the model invents mid-sentence, so the instruction has to state
+    the rule, the test and both sides of the line.
+    """
+
+    def test_the_chat_block_bans_inventing_a_word(self) -> None:
+        rendered = instructions.render_chat(resolved()).lower()
+        self.assertIn("never invent", rendered)
+
+    def test_the_chat_block_carries_the_sourcing_test(self) -> None:
+        rendered = instructions.render_chat(resolved()).lower()
+        self.assertIn("cannot source", rendered)
+        self.assertIn("plain english", rendered)
+
+    def test_the_chat_block_shows_vocabulary_that_is_allowed(self) -> None:
+        # A category alone gave no way to tell one from the other.
+        rendered = instructions.render_chat(resolved()).lower()
+        self.assertIn("race condition", rendered)
+        self.assertIn("idempotent", rendered)
+
+    def test_glossing_survives_as_the_fallback(self) -> None:
+        rendered = instructions.render_chat(resolved()).lower()
+        self.assertIn("glossed on first use", rendered)
+
+    def test_the_clause_rides_into_the_joined_block_with_chat(self) -> None:
+        body = instructions.render_agents_block(resolved(), include_chat=True).lower()
+        self.assertIn("first use", body)
+
+    def test_the_categories_still_name_what_the_gate_blocks(self) -> None:
+        # Dropping "opaque jargon" from the categories left the instruction
+        # saying a word was fine while the gate refused the write at error.
+        rendered = instructions.render_chat(resolved()).lower()
+        self.assertIn("opaque jargon", rendered)
+        preset = json.loads((ROOT / "rules" / "plain.json").read_text(encoding="utf-8"))
+        pattern = [p for p in preset["patterns"] if p["id"] == "banned-word"][0]
+        tokens = {t["phrase"] if isinstance(t, dict) else t for t in pattern["tokens"]}
+        self.assertEqual(pattern["severity"], "error")
+        self.assertIn("seam", tokens)
+
+    def test_the_clause_stays_under_fifty_words(self) -> None:
+        self.assertLessEqual(instructions.word_count(instructions.VOCABULARY), 50)
 
 
 class RepeatCloserTests(unittest.TestCase):

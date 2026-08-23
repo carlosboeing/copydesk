@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -21,6 +22,7 @@ import adapters  # noqa: E402
 import config  # noqa: E402
 import instructions  # noqa: E402
 import linter  # noqa: E402
+import prompt  # noqa: E402
 import wizard  # noqa: E402
 
 # A suite run from inside a worktree inherits GIT_DIR and its siblings, which
@@ -109,6 +111,78 @@ class PresetMappingTests(unittest.TestCase):
 
     def test_reviews_ships_unticked(self) -> None:
         self.assertFalse(wizard.CHANNEL_PRESELECTED["reviews"])
+
+    def test_chat_presets_carry_the_default_guidance_set(self) -> None:
+        wanted = tuple(
+            guidance_id
+            for guidance_id, state in config.CHANNEL_DEFAULTS["chat"]["guidance"].items()
+            if state
+        )
+        for preset in wizard.PRESETS["chat"][:-1]:
+            self.assertEqual(preset.guidance, wanted, preset.label)
+
+    def test_defaults_write_the_default_guidance_set(self) -> None:
+        chat = wizard._default_channels()["chat"]
+        self.assertEqual(
+            sorted(chat["guidance"]),
+            ["alternatives", "assumptions", "recommendations", "verification"],
+        )
+
+    def test_the_guidance_question_preselects_the_channel_default(self) -> None:
+        # The six untaken ids stay one keystroke away: Customize opens with
+        # the same set a no-config install resolves to.
+        defaults = {
+            channel: {
+                index
+                for index, guidance_id in enumerate(wizard.guidance.IDS)
+                if config.CHANNEL_DEFAULTS[channel]["guidance"].get(guidance_id)
+            }
+            for channel in ("chat", "documents", "commits", "reviews")
+        }
+        self.assertEqual(defaults["chat"], {0, 4, 5, 9})
+        self.assertEqual(defaults["documents"], {0})
+        self.assertEqual(defaults["commits"], set())
+        self.assertEqual(defaults["reviews"], {3})
+
+    def test_unticking_a_default_keeps_it_off_after_resolve(self) -> None:
+        # Customize writes every id so resolve cannot resurrect an
+        # unticked default. The comma-list is the non-tty path of the
+        # same question ask_guidance asks.
+        ids = list(wizard.guidance.IDS)
+        options = [prompt.Option(gid, "") for gid in ids]
+        defaults = [
+            index
+            for index, gid in enumerate(ids)
+            if config.CHANNEL_DEFAULTS["chat"]["guidance"].get(gid)
+        ]
+        chosen = prompt.multiselect(
+            "Guidance deliverables (channels.chat.guidance)",
+            options,
+            defaults,
+            stdin=io.StringIO("1,5,6\n"),
+            stdout=io.StringIO(),
+        )
+        written = wizard._guidance_flags(chosen)
+        self.assertFalse(written["verification"])
+        body = wizard._format_config(
+            {
+                "chat": {
+                    "enabled": True,
+                    "style": "plain",
+                    "verbosity": "low",
+                    "guidance": written,
+                },
+                "documents": {"enabled": False},
+                "commits": {"enabled": False},
+                "reviews": {"enabled": False},
+            },
+            ["claude-code"],
+        )
+        resolved = wizard._resolved_from(body)
+        chat = resolved["channels"]["chat"]["guidance"]
+        self.assertFalse(chat.get("verification"))
+        for gid in ("recommendations", "alternatives", "assumptions"):
+            self.assertTrue(chat.get(gid), gid)
 
     def test_every_preset_has_an_example(self) -> None:
         missing = [

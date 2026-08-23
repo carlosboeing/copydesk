@@ -394,6 +394,9 @@ def _extends_list(document: dict, source: Path) -> list[str]:
 CHANNEL_NAMES = ("chat", "documents", "commits", "reviews")
 
 # Every value here is a default the design's Part 2 example states.
+# The chat guidance default is measured, not guessed: the four items render
+# at 65 words against 183 for all ten, and each changes what the agent does
+# rather than how it writes.
 CHANNEL_DEFAULTS = {
     "chat": {
         "enabled": True,
@@ -401,10 +404,9 @@ CHANNEL_DEFAULTS = {
         "verbosity": "low",
         "guidance": {
             "recommendations": True,
-            "direction": True,
-            "progress": True,
-            "pushback": False,
-            "alternatives": False,
+            "alternatives": True,
+            "assumptions": True,
+            "verification": True,
         },
         "match": [],
     },

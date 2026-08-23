@@ -83,6 +83,27 @@ MERGES = {
 }
 
 
+def collapse_members(paragraphs: list[str]) -> list[str]:
+    """Drop a snippet that a merged line in the same file already covers.
+
+    Channels render independently, then join. One can emit a merge while
+    another emits a member of that pair; exact-text dedup keeps both, and
+    the two rules are followed as neither. The merged line wins because
+    that is what `render` would have emitted had the ids sat in one channel.
+    """
+    member_to_merge = {
+        SNIPPETS[name]: merged
+        for combination, merged in MERGES.items()
+        for name in combination
+    }
+    present_merges = {text for text in paragraphs if text in MERGES.values()}
+    return [
+        text
+        for text in paragraphs
+        if member_to_merge.get(text) not in present_merges
+    ]
+
+
 def render(active: dict) -> list[str]:
     """The merged snippets for one channel, in registry order."""
     on = [name for name in IDS if active.get(name)]
