@@ -20,6 +20,7 @@ import config  # noqa: E402
 import config_writer  # noqa: E402
 import guidance  # noqa: E402
 import hook  # noqa: E402
+import install as install_module  # noqa: E402
 import instructions  # noqa: E402
 import linter  # noqa: E402
 import styles  # noqa: E402
@@ -138,15 +139,17 @@ def _handle_report(args: list[str]) -> int:
 
 # Reserved for later releases. Naming them now stops a 0.1.0 flag from claiming
 # a word a subcommand will need, and gives a clear message instead of linting a
-# file that does not exist.
-RESERVED_SUBCOMMANDS = ("install", "learn", "fix", "import")
+# file that does not exist. `install` joined the live commands when it grew
+# --git-hook.
+RESERVED_SUBCOMMANDS = ("learn", "fix", "import")
 
-SUBCOMMANDS = ("check", "doctor", "stats", "report", "set", "setup", "uninstall", "hook")
+SUBCOMMANDS = ("check", "doctor", "stats", "report", "set", "setup", "uninstall", "hook", "install")
 
 USAGE = """usage: copydesk setup [--defaults] [--yes] [--dry-run] [--repair]
        copydesk uninstall [--yes] [--dry-run] [--purge]
        copydesk check <file.md> [...] | -
        copydesk check --commit-msg <path>
+       copydesk check --staged
        copydesk set <key>=<value>
        copydesk doctor [<file>] [--rules]
        copydesk stats [--since <window>] [--json]
@@ -154,6 +157,7 @@ USAGE = """usage: copydesk setup [--defaults] [--yes] [--dry-run] [--repair]
        copydesk hook add [<path>...] [--scan <dir>] [--all] [--yes]
        copydesk hook remove [<path>...] [--all] [--yes]
        copydesk hook list
+       copydesk install --git-hook
        copydesk --version
 
 CopyDesk is a prose gate for AI agents. Run `copydesk doctor` to see which
@@ -455,6 +459,12 @@ def _handle_check(args: list[str]) -> int:
             return 64
         return linter.run_commit_msg(args[1])
 
+    if args[0] == "--staged":
+        if len(args) != 1:
+            print("error: --staged takes no paths; it reads the index", file=sys.stderr)
+            return 64
+        return linter.run_staged()
+
     failed = False
     for source in args:
         if source.startswith("-") and source != "-":
@@ -557,6 +567,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_set(args[1:])
     if command == "hook":
         return hook.run(args[1:])
+    if command == "install":
+        return install_module.run(args[1:])
     if command == "check":
         return _handle_check(args[1:])
 

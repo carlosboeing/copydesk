@@ -41,6 +41,7 @@ from math import sqrt
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -993,9 +994,27 @@ def _compute_edit_origins(
         grown = len(masked_proposed) - len(masked_existing)
         end = start + len(exclude_markdown(old_string)) + max(0, grown)
         changed = [(start, min(end, len(masked_proposed)))]
+    return _attribute_origins(findings, masked_proposed, changed)
+
+
+def _attribute_origins(
+    findings: list[Finding],
+    masked_proposed: str,
+    changed: list[tuple[int, int]],
+) -> list[Finding]:
+    """Mark each finding ``new`` or ``existing`` against changed ranges.
+
+    Shared by the write-time gate, whose ranges come from comparing the
+    existing document against the proposed one, and the staged check, whose
+    ranges come from git's diff hunks when the pair is too large to compare.
+    Both attribute at the same sentence granularity: text is owned when its
+    span overlaps a change or a sentence a change cut into.
+    """
+    if not findings:
+        return []
     owned = list(changed)
     if changed:
-        for record in _sentence_records(exclude_markdown(reconstructed)):
+        for record in _sentence_records(masked_proposed):
             if _overlaps_changed(record.start, record.end, changed):
                 owned.append((record.start, record.end))
     result: list[Finding] = []
@@ -2499,6 +2518,233 @@ def run_commit_msg(path: str) -> int:
         for finding in findings:
             print(finding, file=sys.stderr)
         return 1 if findings else 0
+    except Exception as error:  # noqa: BLE001 - fail open, loudly
+        print(f"copydesk: {type(error).__name__}: {error}", file=sys.stderr)
+        return 70
+
+
+# --- The staged-prose gate -------------------------------------------------
+#
+# A pre-commit hook judges what this commit adds, not the file. The decision
+# is the write gate's, moved to a third pipeline position: findings are
+# attributed to the changed text, document-scoped rules block only when they
+# newly fire against the HEAD version, and a severity of warn never blocks.
+
+
+_HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def _git_output(args: list[str], cwd: Path) -> Optional[str]:
+    """One answer from git, or None when git cannot answer."""
+    try:
+        result = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _staged_markdown(work: Path) -> Optional[list[tuple[str, str]]]:
+    """Staged Markdown as (base_path_in_HEAD_or_empty, index_path) pairs.
+
+    Renames keep their source path so a moved file is judged against what it
+    moved from; without that, a pure rename of an imperfect file would read
+    as brand-new prose. Deletions never appear here.
+    """
+    out = _git_output(
+        ["diff", "--cached", "--name-status", "-z", "--diff-filter=ACMR", "--", "*.md"],
+        work,
+    )
+    if out is None:
+        return None
+    entries = out.split("\0")
+    staged: list[tuple[str, str]] = []
+    index = 0
+    while index < len(entries):
+        token = entries[index]
+        if not token:
+            break
+        status = token[0]
+        index += 1
+        if status in ("R", "C") and index + 1 < len(entries):
+            old_path = entries[index]
+            new_path = entries[index + 1]
+            index += 2
+            staged.append((old_path, new_path))
+            continue
+        if index < len(entries):
+            staged.append(("", entries[index]))
+            index += 1
+    return staged
+
+
+def _added_char_ranges(diff_text: str, masked_proposed: str) -> list[tuple[int, int]]:
+    """Char spans of git's added lines inside the masked staged document.
+
+    ``git diff --cached --unified=0`` is the source when the head/index pair
+    is past the character matcher's cap: hunks are authoritative whatever the
+    document size. A hunk with nothing on the ``+`` side is a deletion; it
+    records a zero-width point at the join so a sentence the deletion merged
+    can still be charged, matching the write-time treatment.
+    """
+    lines = masked_proposed.split("\n")
+    offsets = []
+    total = 0
+    for line in lines:
+        offsets.append(total)
+        total += len(line) + 1
+    ranges: list[tuple[int, int]] = []
+    for header in diff_text.splitlines():
+        match = _HUNK_HEADER.match(header)
+        if match is None:
+            continue
+        start = int(match.group(1))
+        count = int(match.group(2)) if match.group(2) is not None else 1
+        if count == 0:
+            point = offsets[start] if start < len(offsets) else total
+            ranges.append((point, point))
+            continue
+        lo = offsets[start - 1]
+        hi = offsets[start + count - 2] + len(lines[start + count - 2])
+        ranges.append((lo, hi))
+    return ranges
+
+
+def _staged_changed_ranges(
+    base_text: str, staged_text: str, work: Path, index_path: str
+) -> list[tuple[int, int]]:
+    """Where the staged version differs from its HEAD version.
+
+    The character matcher first: it narrows a replaced block to the characters
+    that actually moved, so an untouched sentence sharing a line with an edit
+    is not charged. Past the size cap the diff hunks stand in, the same role
+    the edit's own bounds play for the write-time gate.
+    """
+    masked_base = exclude_markdown(base_text)
+    masked_staged = exclude_markdown(staged_text)
+    try:
+        return _changed_char_ranges(masked_base, masked_staged)
+    except _TooLargeToCompare:
+        diff_text = _git_output(
+            ["diff", "--cached", "--unified=0", "--", index_path], work
+        )
+        if diff_text is None:
+            # Unattributable and unbounded: charge nothing rather than block
+            # on metadata CopyDesk could not read.
+            print(
+                f"warning: {index_path}: too large to compare and no diff available; "
+                "its added lines are not attributed",
+                file=sys.stderr,
+            )
+            return []
+        return _added_char_ranges(diff_text, masked_staged)
+
+
+def run_staged(cwd: Union[str, Path, None] = None) -> int:
+    """Check every staged Markdown file against the text it adds.
+
+    The index is judged, not the working tree: ``git show :path`` reads what
+    will be committed and nothing else. A finding blocks only when the text
+    that carries it is new relative to HEAD, or when a document-scoped rule
+    fires now and did not fire in HEAD. Warn-severity findings report and
+    never block, whatever the channel decides. 0 clean, 1 refused.
+    """
+    work = Path(cwd) if cwd is not None else Path.cwd()
+    try:
+        staged_files = _staged_markdown(work)
+        if staged_files is None:
+            print("error: copydesk check --staged needs a git repository", file=sys.stderr)
+            return 64
+        has_head = _git_output(["rev-parse", "--verify", "HEAD^{commit}"], work) is not None
+
+        refused = False
+        for base_path, path in staged_files:
+            staged = _git_output(["show", f":{path}"], work)
+            if staged is None:
+                print(f"warning: {path}: staged content unreadable; skipped", file=sys.stderr)
+                continue
+            display = str((work / path).resolve())
+            resolved, _ = effective_preset(display)
+            decision = channels.decide(display, resolved)
+            if decision.action == "ignore":
+                print(f"{path}: not checked (paths.ignore)")
+                continue
+
+            t_start = time.time()
+            findings = lint(staged, path=display)
+            duration_ms = round((time.time() - t_start) * 1000, 1)
+
+            base = ""
+            if has_head:
+                base = _git_output(["show", f"HEAD:{base_path or path}"], work) or ""
+            origined = _attribute_origins(
+                findings, exclude_markdown(staged), _staged_changed_ranges(base, staged, work, path)
+            )
+
+            blocking = blocking_findings_for_retry(origined)
+            scoped = [
+                f for f in origined
+                if f.check in DOCUMENT_SCOPED_BLOCKING_RULES and f.severity == "error"
+            ]
+            if scoped and decision.action != "warn":
+                # Document-scoped rules have no hunk to belong to. They block
+                # when they newly fire: absent from lint(HEAD) and present in
+                # the staged text.
+                previous_errors = set()
+                if base:
+                    previous_errors = {
+                        f.check for f in lint(base, path=display) if f.severity == "error"
+                    }
+                blocking = blocking + [f for f in scoped if f.check not in previous_errors]
+            seen: set[Finding] = set()
+            blocking = [f for f in blocking if not (f in seen or seen.add(f))]  # type: ignore[arg-type]
+
+            blocked_here = bool(blocking) and decision.action != "warn"
+            refused = refused or blocked_here
+
+            shown = [f for f in origined if f.origin == "new"] if not blocked_here else list(blocking)
+            if decision.action == "warn":
+                shown = list(origined)
+            if shown:
+                print(f"{path}:")
+                for finding in shown:
+                    print(finding.render())
+            preexisting = sum(
+                1 for f in origined if f.severity == "error" and f.origin != "new" and f not in blocking
+            )
+            if blocked_here:
+                print(
+                    f"{path}: refused. Commit only the lines you wrote; "
+                    "git commit --no-verify skips this check."
+                )
+            if preexisting and (blocked_here or decision.action != "warn"):
+                print(f"{path}: {preexisting} pre-existing finding(s) left alone.")
+
+            doc_bytes = len(staged.encode("utf-8"))
+            body_sentences = len(_sentence_records(exclude_markdown(staged)))
+            rollups = _finding_rollups(origined)
+            _record_event({
+                "ts": round(time.time(), 1),
+                "event": "lint",
+                "surface": "pre-commit",
+                "tool": None,
+                "path": display,
+                "decision": "block" if blocked_here else ("warn" if decision.action == "warn" else "pass"),
+                "streak": 0,
+                "duration_ms": duration_ms,
+                "bytes": doc_bytes,
+                "payload_bytes": doc_bytes,
+                "payload_words": len(staged.split()),
+                "sentences": body_sentences,
+                "findings_total": len(origined),
+                "origin_totals": rollups["origin_totals"],
+                "rule_totals": rollups["rule_totals"],
+                "blocking_origin_totals": rollups["blocking_origin_totals"],
+                "blocking_rule_totals": rollups["blocking_rule_totals"],
+                "findings": _serialize_findings(origined),
+            })
+        return 1 if refused else 0
     except Exception as error:  # noqa: BLE001 - fail open, loudly
         print(f"copydesk: {type(error).__name__}: {error}", file=sys.stderr)
         return 70

@@ -440,7 +440,7 @@ class CommandSurfaceTests(unittest.TestCase):
 
     def test_every_reserved_subcommand_refuses_clearly(self) -> None:
         """Reserving them stops a 0.1.0 flag claiming a word a subcommand needs."""
-        for name in ("install", "learn", "fix", "import"):
+        for name in ("learn", "fix", "import"):
             with self.subTest(subcommand=name):
                 result = self.run_cli(name)
                 self.assertEqual(result.returncode, 64)
