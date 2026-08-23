@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
@@ -183,6 +184,50 @@ class RollbackTests(unittest.TestCase):
         ))
         self.assertFalse(result.ok)
         self.assertEqual(legacy.read_text(encoding="utf-8"), "old\n")
+
+    def test_a_failed_removal_rolls_a_removed_symlink_back_as_a_link(self) -> None:
+        # A user who symlinked a retired style at a file kept elsewhere
+        # must get the same link back. Restoring the target's bytes over
+        # the link path silently forks their file into a stale copy.
+        elsewhere = self.home / "elsewhere"
+        elsewhere.mkdir()
+        kept = elsewhere / "kept-style.md"
+        kept.write_text("old\n", encoding="utf-8")
+        link = self.home / "copydesk-low.md"
+        link.symlink_to(kept)
+        doomed = self.home / "copydesk-high.md"
+        doomed.write_text("old too\n", encoding="utf-8")
+        real_unlink = Path.unlink
+
+        def refuse(path, *args, **kwargs):
+            # Compare by name: resolve() maps /var/... to /private/var/...
+            # on macOS, so an equality check against `doomed` never fires.
+            if path.name == "copydesk-high.md":
+                raise OSError("refused")
+            return real_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "unlink", refuse):
+            result = apply.execute(apply.Plan(
+                writes=[apply.Write(self.home / "copydesk.md", "new")],
+                removes=[link, doomed],
+            ))
+        self.assertFalse(result.ok)
+        self.assertTrue(link.is_symlink(), "rollback left a regular file where the link was")
+        self.assertEqual(Path(os.readlink(link)), kept)
+        self.assertEqual(kept.read_text(encoding="utf-8"), "old\n")
+
+
+class PlanDefaultTests(unittest.TestCase):
+    def test_a_plan_built_without_removes_shares_no_mutable_list(self) -> None:
+        # A list literal on a NamedTuple evaluates once at class definition,
+        # so every plan built without `removes` held one shared list. Setup
+        # deletes files from a user's home directory, so a stray append on
+        # any default-built plan would leak into unrelated plans for the
+        # rest of the process.
+        plan = apply.Plan(writes=[])
+        self.assertEqual(plan.removes, ())
+        with self.assertRaises(AttributeError):
+            plan.removes.append(Path("x"))
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ class Write(NamedTuple):
 
 class Plan(NamedTuple):
     writes: list[Write]
-    removes: "list[Path]" = []  # retired files, deleted once every write lands
+    removes: "Sequence[Path]" = ()  # retired files, deleted once every write lands
 
 
 class Result(NamedTuple):
@@ -103,7 +103,8 @@ def execute(plan: Plan) -> Result:
     fails, rolls back all modified files from that text and removes newly
     created files. Planned removals run last and roll back the same way, so
     a failed plan leaves an install exactly as it was found — including the
-    files it was about to delete.
+    files it was about to delete. A removed path that was a symlink comes
+    back as the same link, never as a regular file holding what it named.
 
     The originals stay in memory and never reach disk. A snapshot beside the
     file would outlive the command that needed it, and these are files such
@@ -121,8 +122,15 @@ def execute(plan: Plan) -> Result:
     created_files: list[Path] = []
     created_dirs: list[Path] = []
     removed_originals: dict[Path, Optional[str]] = {}
+    removed_symlinks: dict[Path, Path] = {}
     for p in plan.removes:
         real_p = _real_of(p)
+        if real_p.is_symlink():
+            try:
+                removed_symlinks[real_p] = Path(os.readlink(real_p))
+            except OSError:
+                pass
+            continue
         if real_p.is_file():
             try:
                 removed_originals[real_p] = real_p.read_text(encoding="utf-8")
@@ -181,6 +189,13 @@ def execute(plan: Plan) -> Result:
             try:
                 if d.exists() and not list(d.iterdir()):
                     d.rmdir()
+            except OSError:
+                pass
+
+        for link, target in removed_symlinks.items():
+            try:
+                if not link.is_symlink():
+                    link.symlink_to(target)
             except OSError:
                 pass
 
