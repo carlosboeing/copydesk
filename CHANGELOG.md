@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.0]
+
 ### Changed
 
 - **Chat guidance defaults to four items instead of ten.** The full set rendered at 183 words, more than half the output style's footprint, for the part a first-time user is least likely to have considered. The default is now `recommendations`, `alternatives`, `assumptions` and `verification` — measured through `guidance.render` at 65 words, because `recommendations` and `alternatives` merge into one line. Each of the four changes what the agent does rather than how it writes: a ranked pick instead of a survey, an assumption stated before the work, a verification named beside a completion claim. A config that names a guidance set keeps it; only the unnamed default moves. The wizard's chat presets carry the same four, and its Customize question opens with the channel's defaults ticked, so the other six stay one keystroke away.
