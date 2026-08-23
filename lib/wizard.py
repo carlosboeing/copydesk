@@ -878,7 +878,10 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
             out_stream.write(f"error  {hook_plan.message}\n")
             return 1
         if hook_plan.write is not None:
-            plan = apply.Plan(writes=[*plan.writes, hook_plan.write])
+            plan = apply.Plan(
+                writes=[*plan.writes, hook_plan.write],
+                removes=plan.removes,
+            )
 
     # Review panel
     out_stream.write("Configured tools:\n")

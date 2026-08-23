@@ -786,6 +786,31 @@ class MigrationTests(unittest.TestCase):
         self.assertIn("copydesk-medium.md", result.stdout)
         self.assertEqual(sorted(p.name for p in self.styles_dir.glob("*")), before)
 
+    def test_retired_files_leave_when_the_commit_hook_joins_the_plan(self) -> None:
+        # Setup inside a repository adds the commit-msg write by rebuilding
+        # the plan. The rebuild must keep `removes`, or the three retired
+        # files survive every upgrade that also installs the hook.
+        subprocess.run(["git", "init", "-q"], cwd=self.home, check=True, env=CLEAN_ENV)
+        self._seed_settings("CopyDesk medium")
+        git_dir = str(Path(shutil.which("git") or "/usr/bin/git").parent)
+        env = dict(
+            CLEAN_ENV,
+            COPYDESK_HOME=str(self.home),
+            XDG_CONFIG_HOME=str(self.home / "config"),
+            XDG_STATE_HOME=str(self.home / "state"),
+            PATH=os.pathsep.join([str(self.home / "nothing"), git_dir]),
+        )
+        env.pop("COPYDESK_STATE_DIR", None)
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", "--repair", "--yes"],
+            cwd=self.home, capture_output=True, text=True, env=env, input="",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("(removed)", result.stdout)
+        installed = sorted(p.name for p in self.styles_dir.glob("*"))
+        self.assertEqual(installed, ["copydesk.md"])
+        self.assertTrue((self.home / ".git" / "hooks" / "commit-msg").is_file())
+
 
 class ActiveStyleTests(unittest.TestCase):
     """Setup offers to make CopyDesk the active style; nothing writes the
