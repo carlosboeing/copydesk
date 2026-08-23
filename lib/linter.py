@@ -67,6 +67,10 @@ STATE_TTL_SECONDS = 24 * 60 * 60
 HOOK_REGISTRY_NAME = "hooks.json"
 ROTATION_SIZE_BYTES = 8 * 1024 * 1024  # 8 MB
 MAX_STORED_FINDINGS = 20
+# Inner character-level SequenceMatcher is quadratic. Replaced blocks larger
+# than this fall back to the whole block so the PreToolUse hook cannot stall.
+# Over-attribution blocks rather than fail-open.
+INNER_DIFF_CHAR_CAP = 4096
 # Whitespace-delimited words emitted by hooks/reminder.sh on every user prompt.
 # tests/test_telemetry.py reads the hook and fails if this drifts from the text.
 REMINDER_WORD_COUNT = 49
@@ -78,8 +82,9 @@ class Finding:
 
     ``span_start`` and ``span_end`` locate the flagged text inside the masked
     document, so edit attribution can compare characters rather than guess
-    from line numbers. A finding without a span is unattributable and never
-    blocks, because the gate fails open.
+    from line numbers. A finding without a span is unattributable by overlap
+    and is marked existing; document-scoped rules can still block when they
+    newly fire.
     """
 
     line: int
@@ -513,9 +518,9 @@ def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error", max
             if record.line not in item_lines
         ]
         if len(paragraph_sentences) > max_sentences:
-            # Deliberately span-less: density is a property the document
-            # accumulates, so the gate charges it on Write and reports it on
-            # Edit rather than blaming whichever neighbouring word moved.
+            # Span-less: density is a property the document accumulates, so
+            # origin overlap never charges it. DOCUMENT_SCOPED_BLOCKING_RULES
+            # blocks when the rule newly fires on Edit, and always on Write.
             line = _line_number(text, max(0, position))
             findings.append(Finding(line, "paragraph-length", _excerpt(paragraph), severity))
     return findings
@@ -790,11 +795,10 @@ def lint(
     return sorted(findings, key=lambda finding: (finding.line, finding.severity != "error", finding.check, finding.excerpt))
 
 
-# long-sentence-rate is the one blocking rule computed over the whole document.
-# It is always reported at line 1, so origin filtering cannot place it: filtering
-# by origin would make it block only when line 1 happens to sit inside an edit,
-# which is arbitrary. It blocks when it newly fires instead.
-DOCUMENT_SCOPED_BLOCKING_RULES = frozenset({"long-sentence-rate"})
+# Rules computed over a span origin filtering cannot place. long-sentence-rate
+# is always reported at line 1; paragraph-length is deliberately span-less so
+# a neighbouring word is not blamed. Both block when they newly fire instead.
+DOCUMENT_SCOPED_BLOCKING_RULES = frozenset({"long-sentence-rate", "paragraph-length"})
 
 
 def blocking_findings_for_retry(findings: Iterable[Finding]) -> list[Finding]:
@@ -824,12 +828,33 @@ def has_ai_tell_finding(text: str, findings: Iterable[Finding]) -> bool:
     return any(pattern.phrase in AI_TELL_PHRASES and pattern.regex.search(text) for pattern in RULE_PATTERNS)
 
 
+def _overlaps_changed(start: int, end: int, ranges: list[tuple[int, int]]) -> bool:
+    """True when a half-open span overlaps a changed range or contains a join.
+
+    A deletion in proposed space is stored as a zero-width point ``(p, p)``.
+    Strict containment (``start < p < end``) charges a sentence the deletion
+    joined without blaming a neighbour that only abuts the point.
+    """
+    for cs, ce in ranges:
+        if cs == ce:
+            if start < cs < end:
+                return True
+        elif max(start, cs) < min(end, ce):
+            return True
+    return False
+
+
 def _changed_char_ranges(existing: str, proposed: str) -> list[tuple[int, int]]:
     """Half-open proposed-space character ranges where the two documents differ.
 
     The comparison runs on line-level opcodes first and narrows each replaced
     block by characters, so untouched context inside a replacement costs
     nothing and identical text is never attributed to the edit.
+
+    A deletion leaves no proposed text, so it is recorded as a zero-width join
+    at the point where the remaining sides now meet. Replaced blocks larger
+    than ``INNER_DIFF_CHAR_CAP`` keep the whole block rather than running the
+    quadratic inner matcher.
     """
     a_lines = existing.split("\n")
     b_lines = proposed.split("\n")
@@ -841,8 +866,11 @@ def _changed_char_ranges(existing: str, proposed: str) -> list[tuple[int, int]]:
     ranges: list[tuple[int, int]] = []
     matcher = difflib.SequenceMatcher(None, a_lines, b_lines, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag in ("equal", "delete"):
-            # Deletions leave no text behind, so nothing in proposed space owns them.
+        if tag == "equal":
+            continue
+        if tag == "delete":
+            point = b_starts[j1] if j1 < len(b_starts) else total
+            ranges.append((point, point))
             continue
         lo = b_starts[j1]
         hi = b_starts[j2 - 1] + len(b_lines[j2 - 1])
@@ -851,9 +879,16 @@ def _changed_char_ranges(existing: str, proposed: str) -> list[tuple[int, int]]:
             continue
         chunk_a = "\n".join(a_lines[i1:i2])
         chunk_b = "\n".join(b_lines[j1:j2])
+        if len(chunk_a) + len(chunk_b) > INNER_DIFF_CHAR_CAP:
+            ranges.append((lo, hi))
+            continue
         inner = difflib.SequenceMatcher(None, chunk_a, chunk_b, autojunk=False)
         for inner_tag, _a1, _a2, bj1, bj2 in inner.get_opcodes():
-            if inner_tag != "equal":
+            if inner_tag == "equal":
+                continue
+            if bj1 == bj2:
+                ranges.append((lo + bj1, lo + bj1))
+            else:
                 ranges.append((lo + bj1, lo + bj2))
     return ranges
 
@@ -877,9 +912,10 @@ def _compute_edit_origins(
     them belongs to the edit: the model wrote part of it, so the sentence as
     it now stands is partly authored prose and must pass the rules. Its
     findings are attributed at sentence granularity, which also charges a
-    rule a rewrite carries over inside a sentence it reworded. A change
-    landing immediately after a sentence's final character leaves that
-    sentence untouched.
+    rule a rewrite carries over inside a sentence it reworded. A deletion
+    that joins two sentences is a zero-width point the merged sentence
+    contains; a change landing immediately after a sentence's final
+    character leaves that sentence untouched.
     """
 
     def all_existing() -> list[Finding]:
@@ -887,9 +923,6 @@ def _compute_edit_origins(
 
     if not findings:
         return []
-    if not new_string:
-        # Pure deletion: no lines inserted, all remaining findings are existing
-        return all_existing()
     if not existing or old_string not in existing:
         # The file moved between reads: unattributable, so nothing blocks.
         return all_existing()
@@ -898,14 +931,14 @@ def _compute_edit_origins(
     owned = list(changed)
     if changed:
         for record in _sentence_records(exclude_markdown(reconstructed)):
-            if any(max(record.start, cs) < min(record.end, ce) for cs, ce in changed):
+            if _overlaps_changed(record.start, record.end, changed):
                 owned.append((record.start, record.end))
     result: list[Finding] = []
     for f in findings:
         if f.span_start is None or f.span_end is None:
             result.append(Finding(f.line, f.check, f.excerpt, f.severity, origin="existing"))
             continue
-        is_new = any(max(f.span_start, cs) < min(f.span_end, ce) for cs, ce in owned)
+        is_new = _overlaps_changed(f.span_start, f.span_end, owned)
         result.append(Finding(f.line, f.check, f.excerpt, f.severity, origin="new" if is_new else "existing"))
     return result
 
@@ -1240,19 +1273,19 @@ def run_hook(raw_payload: str) -> int:
         # is unaffected: every Write finding is already marked new above.
         blocking = blocking_findings_for_retry(findings_with_origin)
 
-        # long-sentence-rate is document-scoped, so it blocks when it newly fires:
-        # absent from lint(existing) and present in lint(proposed). The extra lint
-        # runs only when there is nothing else to block on, so the common path
+        # Document-scoped rules block when they newly fire: absent from
+        # lint(existing) and present in lint(proposed). The extra lint runs
+        # only when there is nothing else to block on, so the common path
         # keeps its measured 17 ms median.
         if not blocking:
-            rate_findings = [f for f in findings if f.check in DOCUMENT_SCOPED_BLOCKING_RULES and f.severity == "error"]
-            if rate_findings:
+            scoped = [f for f in findings if f.check in DOCUMENT_SCOPED_BLOCKING_RULES and f.severity == "error"]
+            if scoped:
                 if tool_name == "Write":
-                    blocking = rate_findings
+                    blocking = scoped
                 else:
                     previous = lint(existing, path=file_path) if existing else []
                     already = {f.check for f in previous if f.severity == "error"}
-                    blocking = [f for f in rate_findings if f.check not in already]
+                    blocking = [f for f in scoped if f.check not in already]
 
         preexisting_errors = sum(
             1

@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -161,6 +162,26 @@ class GateScopeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("sentence-length", result.stderr)
 
+    def test_deleting_a_full_stop_that_joins_two_sentences_blocks(self) -> None:
+        """A deletion-only inner opcode must still own the join it creates."""
+        first = " ".join(["alpha"] * 24) + " here."
+        second = "Then " + " ".join(["bravo"] * 24) + "."
+        path = self.write("d7.md", first + " " + second + "\n")
+        result = self.gate(
+            self.edit_payload(path, "here. Then", "here Then", session="issue8f")
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("sentence-length", result.stderr)
+
+    def test_deleting_a_period_line_that_joins_two_sentences_blocks(self) -> None:
+        """A line-level delete that joins two sentences owns the join point."""
+        first = " ".join(["alpha"] * 24) + " here"
+        second = "Then " + " ".join(["bravo"] * 24) + "."
+        path = self.write("d8.md", first + "\n.\n" + second + "\n")
+        result = self.gate(self.edit_payload(path, "\n.\n", "\n", session="issue8g"))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("sentence-length", result.stderr)
+
     def test_a_pure_deletion_passes(self) -> None:
         path = self.write("e.md", BANNED + "\n\nAnother line sits here quietly.\n")
         result = self.gate(
@@ -207,6 +228,37 @@ class GateScopeTests(unittest.TestCase):
         path = self.write("i.md", body + "\n")
         result = self.gate(
             self.edit_payload(path, "Another line sits here quietly.", "Another line sits here calmly.", session="e7")
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_an_edit_that_newly_trips_paragraph_length_blocks(self) -> None:
+        """paragraph-length is span-less, so it blocks when it newly fires."""
+        four = (
+            "One short sentence sits here now. Two more words follow along. "
+            "Three keeps under the word cap. Four finishes this paragraph cleanly."
+        )
+        path = self.write("p1.md", four + "\n")
+        result = self.gate(
+            self.edit_payload(
+                path,
+                "Four finishes this paragraph cleanly.",
+                "Four finishes this paragraph cleanly. Five adds one more sentence here.",
+                session="e6p",
+            )
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("paragraph-length", result.stderr)
+
+    def test_a_pre_existing_paragraph_length_does_not_block_an_unrelated_edit(self) -> None:
+        five = (
+            "One short sentence sits here now. Two more words follow along. "
+            "Three keeps under the word cap. Four finishes this paragraph cleanly. "
+            "Five was already over the cap."
+        )
+        body = five + "\n\nAnother line sits here quietly."
+        path = self.write("p2.md", body + "\n")
+        result = self.gate(
+            self.edit_payload(path, "Another line sits here quietly.", "Another line sits here calmly.", session="e7p")
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -268,8 +320,30 @@ class DecisionHelperTests(unittest.TestCase):
         self.assertEqual([f.line for f in blocking], [2])
 
     def test_the_document_scoped_rule_is_excluded_from_origin_filtering(self) -> None:
-        findings = [linter.Finding(1, "long-sentence-rate", "x", "error", origin="new")]
+        findings = [
+            linter.Finding(1, "long-sentence-rate", "x", "error", origin="new"),
+            linter.Finding(2, "paragraph-length", "y", "error", origin="new"),
+        ]
         self.assertEqual(linter.blocking_findings_for_retry(findings), [])
+
+    def test_inner_narrowing_excludes_unchanged_context(self) -> None:
+        existing = "unchanged prefix XXX unchanged suffix"
+        proposed = "unchanged prefix YYY unchanged suffix"
+        ranges = linter._changed_char_ranges(existing, proposed)
+        self.assertEqual(len(ranges), 1)
+        lo, hi = ranges[0]
+        self.assertGreaterEqual(lo, proposed.index("YYY"))
+        self.assertLessEqual(hi, proposed.index("YYY") + 3)
+
+    def test_a_large_replaced_block_falls_back_without_stalling(self) -> None:
+        n = 20000
+        existing = "a" * n
+        proposed = "b" * n
+        start = time.perf_counter()
+        ranges = linter._changed_char_ranges(existing, proposed)
+        elapsed = time.perf_counter() - start
+        self.assertLess(elapsed, 2.0)
+        self.assertEqual(ranges, [(0, n)])
 
 
 class RoutingTests(unittest.TestCase):
