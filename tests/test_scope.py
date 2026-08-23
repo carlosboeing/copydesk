@@ -268,6 +268,19 @@ class GateScopeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("paragraph-length", result.stderr)
 
+    def test_deleting_a_paragraph_break_owns_the_merged_paragraph(self) -> None:
+        # A deletion is a zero-width point that falls between two counted
+        # sentences by definition, so per-sentence ranges alone never see it.
+        # Removing text there is exactly what merges two paragraphs into one
+        # over the cap.
+        doc = ("One short line here. Two short lines here. Three short lines here.\n\n"
+               "Four short lines here. Five short lines here.")
+        path = self.write("pl5.md", doc + "\n")
+        result = self.gate(self.edit_payload(
+            path, "here.\n\nFour", "here. Four", session="pl5"))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("paragraph-length", result.stderr)
+
     def test_a_bullet_between_counted_sentences_is_not_blamed(self) -> None:
         # The outer bounds run from the first counted sentence to the last, so
         # a bullet sitting between two of them falls inside them. The finding
@@ -410,9 +423,27 @@ class DecisionHelperTests(unittest.TestCase):
         )
         changed = paragraphs.replace("ordinary", "different")
         started = time.time()
-        ranges = linter._changed_char_ranges(paragraphs, changed)
+        with self.assertRaises(linter._TooLargeToCompare):
+            linter._changed_char_ranges(paragraphs, changed)
         self.assertLess(time.time() - started, 2.0, "the line matcher ran uncapped")
-        self.assertEqual(ranges, [(0, len(changed) + 1)])
+
+    def test_a_long_document_charges_only_the_edit(self) -> None:
+        # Charging the whole document past the cap refused every pre-existing
+        # error in the file, which is the symptom this attribution removes.
+        paragraphs = "\n\n".join(
+            f"Paragraph {i} sits here with a few ordinary words." for i in range(1600)
+        )
+        old = "Paragraph 800 sits here with a few ordinary words."
+        new = "Paragraph 800 sits here with several different words."
+        proposed = paragraphs.replace(old, new)
+        findings = [
+            linter.Finding(1, "banned-word", "x", "error", span_start=0, span_end=5),
+            linter.Finding(2, "banned-word", "y", "error",
+                           span_start=paragraphs.find(old), span_end=paragraphs.find(old) + 10),
+        ]
+        placed = linter._compute_edit_origins(findings, paragraphs, old, proposed)
+        self.assertEqual(placed[0].origin, "existing", "a far-away finding was charged")
+        self.assertEqual(placed[1].origin, "new", "the edited text was not charged")
 
     def test_a_large_replaced_block_falls_back_without_stalling(self) -> None:
         n = 20000

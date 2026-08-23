@@ -33,9 +33,9 @@ Algorithmic rules evaluating length, structure, and vocabulary:
 
 ## Notes on specific rules
 
-- **`long-sentence-rate`**: Evaluated across the entire file. Blocks on edit when the edit introduces a rate violation.
+- **`long-sentence-rate`**, **`avg-sentence-length`**, **`sentence-variation`**, **`list-dominated`**: Evaluated across the entire file. None points at any text, so an edit cannot be compared against them position by position. Each blocks on edit when the edit introduces a violation the existing file did not have. `rules/editorial.json` ships `sentence-variation` and `list-dominated` at `error`.
 - **`paragraph-length`**: Evaluated per paragraph. Blocks on edit when the edit touches the sentences the rule counted, whether the paragraph was already over the cap or not. List item lines are excluded from the count and from that comparison, so rewording a bullet inside an over-long block does not block.
-- **`list-dominated`**: Acts as an exemption filter. Documents composed predominantly of lists skip paragraph and sentence variation checks.
+- **`list-dominated`** as an exemption filter: documents composed predominantly of lists skip paragraph and sentence variation checks.
 - **`unglossed-term`**: Flags capitalized terms without nearby explanations on their first use. Merges terms across base preset, user configuration, and project configuration.
 
 ## Vocabulary lists for `unglossed-term`

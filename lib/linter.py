@@ -878,6 +878,18 @@ def _overlaps_changed(start: int, end: int, ranges: list[tuple[int, int]]) -> bo
     return False
 
 
+class _TooLargeToCompare(Exception):
+    """The document pair is past ``OUTER_DIFF_LINE_CAP``.
+
+    Raised rather than returned so a caller cannot mistake the fallback for a
+    real comparison. The caller knows the edit's own bounds and uses them.
+    """
+
+    def __init__(self, total: int) -> None:
+        super().__init__(total)
+        self.total = total
+
+
 def _changed_char_ranges(existing: str, proposed: str) -> list[tuple[int, int]]:
     """Half-open proposed-space character ranges where the two documents differ.
 
@@ -900,10 +912,11 @@ def _changed_char_ranges(existing: str, proposed: str) -> list[tuple[int, int]]:
         total += len(line) + 1
     ranges: list[tuple[int, int]] = []
     if len(a_lines) + len(b_lines) > OUTER_DIFF_LINE_CAP:
-        # Too large to diff inside a hook's timeout. Charge the whole proposed
-        # document to the edit: over-attribution refuses a write that might
-        # have been innocent, where a timed-out gate lets every write through.
-        return [(0, total)] if total else []
+        # Too large to compare inside a hook's timeout. The caller supplies the
+        # edit's own footprint instead: charging the whole document would
+        # refuse every pre-existing error in the file, which is the symptom
+        # this attribution exists to remove.
+        raise _TooLargeToCompare(total)
     matcher = difflib.SequenceMatcher(None, a_lines, b_lines, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
@@ -966,7 +979,20 @@ def _compute_edit_origins(
         # The file moved between reads: unattributable, so nothing blocks.
         return all_existing()
 
-    changed = _changed_char_ranges(exclude_markdown(existing), exclude_markdown(reconstructed))
+    masked_existing = exclude_markdown(existing)
+    masked_proposed = exclude_markdown(reconstructed)
+    try:
+        changed = _changed_char_ranges(masked_existing, masked_proposed)
+    except _TooLargeToCompare:
+        # The replaced region runs from where old_string sat to the end of
+        # whatever replaced it. Length change gives the second bound without
+        # a comparison, so a long document still charges only its own edit.
+        start = masked_existing.find(exclude_markdown(old_string))
+        if start < 0:
+            return all_existing()
+        grown = len(masked_proposed) - len(masked_existing)
+        end = start + len(exclude_markdown(old_string)) + max(0, grown)
+        changed = [(start, min(end, len(masked_proposed)))]
     owned = list(changed)
     if changed:
         for record in _sentence_records(exclude_markdown(reconstructed)):
@@ -977,8 +1003,17 @@ def _compute_edit_origins(
         if f.span_start is None or f.span_end is None:
             result.append(Finding(f.line, f.check, f.excerpt, f.severity, origin="existing"))
             continue
+        # A range edit tests each part the rule measured, so rewording a list
+        # item cannot own a paragraph it was never counted in. A deletion is a
+        # zero-width point and tests the whole extent: the point falls between
+        # parts by definition, and removing text there is what merges two
+        # paragraphs into one that breaks the cap.
         tested = f.spans or ((f.span_start, f.span_end),)
-        is_new = any(_overlaps_changed(lo, hi, owned) for lo, hi in tested)
+        points = [(lo, hi) for lo, hi in owned if lo == hi]
+        widths = [(lo, hi) for lo, hi in owned if lo != hi]
+        is_new = any(_overlaps_changed(lo, hi, widths) for lo, hi in tested)
+        if not is_new and points:
+            is_new = _overlaps_changed(f.span_start, f.span_end, points)
         result.append(Finding(f.line, f.check, f.excerpt, f.severity, origin="new" if is_new else "existing"))
     return result
 
@@ -1316,24 +1351,33 @@ def run_hook(raw_payload: str) -> int:
         # lint(existing) and present in lint(proposed). The extra lint runs
         # only when there is nothing else to block on, so the common path
         # keeps its measured 17 ms median.
-        if not blocking:
-            scoped = [
-                f
-                for f in findings_with_origin
-                if f.check in DOCUMENT_SCOPED_BLOCKING_RULES and f.severity == "error"
-            ]
-            if scoped:
-                if tool_name == "Write":
-                    blocking = scoped
-                else:
-                    previous = lint(existing, path=file_path) if existing else []
-                    already = {f.check for f in previous if f.severity == "error"}
-                    blocking = [f for f in scoped if f.check not in already]
+        scoped = [
+            f
+            for f in findings_with_origin
+            if f.check in DOCUMENT_SCOPED_BLOCKING_RULES and f.severity == "error"
+        ]
+        newly_fired: list[Finding] = []
+        if scoped:
+            # The extra lint runs only when a whole-document rule is present,
+            # so the common path keeps its measured 17 ms median.
+            if tool_name == "Write":
+                newly_fired = scoped
+            else:
+                previous = lint(existing, path=file_path) if existing else []
+                already = {f.check for f in previous if f.severity == "error"}
+                newly_fired = [f for f in scoped if f.check not in already]
+        # Always join the block, not only when nothing else blocked. Landing in
+        # the pre-existing count told the model an error it had just written
+        # needed no change, and rules/editorial.json ships two of these at
+        # error severity.
+        blocking = blocking + [f for f in newly_fired if f not in blocking]
 
         preexisting_errors = sum(
             1
             for finding in findings_with_origin
-            if finding.severity == "error" and finding not in blocking
+            if finding.severity == "error"
+            and finding not in blocking
+            and finding.check not in DOCUMENT_SCOPED_BLOCKING_RULES
         )
 
         if not blocking:
