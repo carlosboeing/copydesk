@@ -21,6 +21,13 @@ import linter  # noqa: E402
 
 BANNED = "The design is robust."
 CLEAN = "A short sentence has enough words here."
+LONG_ERROR = (
+    "This entry carries a pre-existing sentence that runs far past every limit "
+    "the gate enforces because it keeps adding clause after clause after clause "
+    "without ever reaching a proper stopping point, and it continues past every "
+    "natural pause, piling subordinate clause on subordinate clause until the "
+    "reader quite loses the thread of the entire thing altogether."
+)
 
 
 class GateScopeTests(unittest.TestCase):
@@ -88,6 +95,71 @@ class GateScopeTests(unittest.TestCase):
             self.edit_payload(path, "Another line sits here quietly.", "Another line sits here calmly.", session="e2")
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    # --- issue 8: pre-existing sentences must never carry the block ----------
+
+    def test_an_unchanged_line_inside_old_string_does_not_block(self) -> None:
+        """The replacement span includes context lines; identical text is not authored."""
+        path = self.write("d2.md", f"- {LONG_ERROR}\n- A short bullet sits below.\n")
+        result = self.gate(
+            self.edit_payload(
+                path,
+                f"- {LONG_ERROR}\n- A short bullet sits below.",
+                f"- {LONG_ERROR}\n- A short bullet reworded here.",
+                session="issue8a",
+            )
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_the_pre_existing_sentence_is_reported_while_a_new_error_blocks(self) -> None:
+        """The block names only the new text; the old error is counted, not charged."""
+        path = self.write("d6.md", f"- {LONG_ERROR}\n- A short bullet sits below.\n")
+        result = self.gate(
+            self.edit_payload(
+                path,
+                f"- {LONG_ERROR}\n- A short bullet sits below.",
+                f"- {LONG_ERROR}\n- A short bullet, robust and simple.",
+                session="issue8e",
+            )
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("banned-word", result.stderr)
+        self.assertNotIn(LONG_ERROR[:40], result.stderr)
+        self.assertIn("pre-existing error", result.stderr)
+        self.assertIn("need no change", result.stderr)
+
+    def test_a_pre_existing_sentence_sharing_the_edited_line_passes(self) -> None:
+        """Two sentences share one physical line; editing one must not block the other."""
+        path = self.write("d3.md", f"Opening short line here. Second up, {LONG_ERROR[0].lower()}{LONG_ERROR[1:]}\n")
+        result = self.gate(
+            self.edit_payload(path, "Opening short line here.", "Opening line rewritten.", session="issue8b")
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_control_an_error_written_inside_the_edit_still_blocks(self) -> None:
+        """A fix that stopped blocking on everything would break the gate here."""
+        path = self.write("d4.md", "A clean intro line sits here.\n")
+        result = self.gate(
+            self.edit_payload(path, "A clean intro line sits here.", f"A clean intro line sits here. {LONG_ERROR}", session="issue8c")
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("sentence-length", result.stderr)
+
+    def test_an_edit_inside_a_pre_existing_long_sentence_blocks(self) -> None:
+        """A sentence the edit cuts into belongs to the edit: partly authored prose blocks.
+
+        The sentence starts on line one and the replaced word sits on its second
+        line, so anchor-line attribution alone would call it pre-existing.
+        """
+        words = LONG_ERROR.split()
+        cut = len(words) // 2
+        path = self.write("d5.md", " ".join(words[:cut]) + "\n" + " ".join(words[cut:]) + "\n")
+        target = words[cut + 2]
+        result = self.gate(
+            self.edit_payload(path, " " + target + " ", " rewoven ", session="issue8d")
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("sentence-length", result.stderr)
 
     def test_a_pure_deletion_passes(self) -> None:
         path = self.write("e.md", BANNED + "\n\nAnother line sits here quietly.\n")

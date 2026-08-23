@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import datetime
+import difflib
 import fcntl
 import hashlib
 import json
@@ -73,13 +74,21 @@ REMINDER_WORD_COUNT = 49
 
 @dataclass(frozen=True)
 class Finding:
-    """One line-oriented check result for the command or hook."""
+    """One line-oriented check result for the command or hook.
+
+    ``span_start`` and ``span_end`` locate the flagged text inside the masked
+    document, so edit attribution can compare characters rather than guess
+    from line numbers. A finding without a span is unattributable and never
+    blocks, because the gate fails open.
+    """
 
     line: int
     check: str
     excerpt: str
     severity: str
     origin: str = "new"
+    span_start: Optional[int] = None
+    span_end: Optional[int] = None
 
     def render(self) -> str:
         return f"{self.line}:{self.check}:{self.excerpt}"
@@ -91,6 +100,8 @@ class Sentence:
 
     text: str
     line: int
+    start: int = 0
+    end: int = 0
 
     @property
     def words(self) -> int:
@@ -422,12 +433,22 @@ def _sentence_records(text: str, *, subject_is_own_unit: bool = False) -> list[S
     Punctuation now splits inside a unit; structure splits between units.
     """
     lines = text.split("\n")
+    line_offsets = []
+    total = 0
+    for line in lines:
+        line_offsets.append(total)
+        total += len(line) + 1
     ordered = _unit_start_lines(lines, subject_is_own_unit)
     records: list[Sentence] = []
     for position, start in enumerate(ordered):
+        if start >= len(lines):
+            # A commit subject marked as its own unit can sit past the last
+            # line of a one-line message; the empty slice yielded nothing.
+            continue
         end = ordered[position + 1] if position + 1 < len(ordered) else len(lines)
         segment = "\n".join(lines[start:end])
         normalized = _LIST_MARKER.sub(lambda match: " " * len(match.group(0)), segment)
+        base = line_offsets[start]
         cursor = 0
         for part in _SENTENCE_SPLIT.split(normalized):
             offset = normalized.find(part, cursor)
@@ -438,8 +459,9 @@ def _sentence_records(text: str, *, subject_is_own_unit: bool = False) -> list[S
             if len(stripped.split()) < 2:
                 continue
             leading = len(part) - len(part.lstrip())
+            span_start = base + offset + leading
             line = start + normalized.count("\n", 0, offset + leading) + 1
-            records.append(Sentence(stripped, line))
+            records.append(Sentence(stripped, line, span_start, span_start + len(stripped)))
     return records
 
 
@@ -491,6 +513,9 @@ def _paragraph_findings(text: str, *, exempt: bool, severity: str = "error", max
             if record.line not in item_lines
         ]
         if len(paragraph_sentences) > max_sentences:
+            # Deliberately span-less: density is a property the document
+            # accumulates, so the gate charges it on Write and reports it on
+            # Edit rather than blaming whichever neighbouring word moved.
             line = _line_number(text, max(0, position))
             findings.append(Finding(line, "paragraph-length", _excerpt(paragraph), severity))
     return findings
@@ -592,6 +617,7 @@ def _unglossed_findings(text: str, preset: dict, severity: str):
     vocabulary = _vocabulary(preset)
     seen: set = set()
     findings: list[Finding] = []
+    base = 0
     for index, line in enumerate(text.split("\n"), start=1):
         for match in _TERM_CANDIDATE.finditer(line):
             term = match.group(0)
@@ -605,7 +631,17 @@ def _unglossed_findings(text: str, preset: dict, severity: str):
                 continue
             if _term_is_glossed(term, _sentence_around(line, match.start())):
                 continue
-            findings.append(Finding(index, "unglossed-term", f"{term} — first use carries no gloss", severity))
+            findings.append(
+                Finding(
+                    index,
+                    "unglossed-term",
+                    f"{term} — first use carries no gloss",
+                    severity,
+                    span_start=base + match.start(),
+                    span_end=base + match.end(),
+                )
+            )
+        base += len(line) + 1
     return findings
 
 
@@ -619,6 +655,8 @@ def _pattern_findings(text: str, patterns: Optional[tuple[RulePattern, ...]] = N
                     pattern.check,
                     _line_excerpt(text, match.start()),
                     pattern.severity,
+                    span_start=match.start(),
+                    span_end=match.end(),
                 )
             )
     return findings
@@ -626,19 +664,30 @@ def _pattern_findings(text: str, patterns: Optional[tuple[RulePattern, ...]] = N
 
 def _nested_table_findings(text: str) -> Iterable[Finding]:
     # Tables are excluded from prose checks, but this check needs to see their
-    # indentation. All other exclusions stay active.
+    # indentation. All other exclusions stay active. Masking preserves offsets,
+    # so positions here match the masked body every other span uses.
     visible = exclude_markdown(text, exclude_tables=False)
-    lines = visible.splitlines()
+    lines = visible.split("\n")
     findings: list[Finding] = []
+    base = 0
     for index, line in enumerate(lines):
-        if not re.match(r"^[ \t]+\|", line):
-            continue
-        for preceding in reversed(lines[:index]):
-            if not preceding.strip():
-                break
-            if _LIST_LINE.match(preceding):
-                findings.append(Finding(index + 1, "nested-table", _excerpt(line), "error"))
-                break
+        if re.match(r"^[ \t]+\|", line):
+            for preceding in reversed(lines[:index]):
+                if not preceding.strip():
+                    break
+                if _LIST_LINE.match(preceding):
+                    findings.append(
+                        Finding(
+                            index + 1,
+                            "nested-table",
+                            _excerpt(line),
+                            "error",
+                            span_start=base,
+                            span_end=base + len(line),
+                        )
+                    )
+                    break
+        base += len(line) + 1
     return findings
 
 
@@ -684,9 +733,27 @@ def lint(
     if sentence_severity != "off":
         for sentence in records:
             if sentence.words > error_words:
-                findings.append(Finding(sentence.line, "sentence-length", _excerpt(sentence.text), "error"))
+                findings.append(
+                    Finding(
+                        sentence.line,
+                        "sentence-length",
+                        _excerpt(sentence.text),
+                        "error",
+                        span_start=sentence.start,
+                        span_end=sentence.end,
+                    )
+                )
             elif sentence.words > warn_words:
-                findings.append(Finding(sentence.line, "sentence-length", _excerpt(sentence.text), sentence_severity))
+                findings.append(
+                    Finding(
+                        sentence.line,
+                        "sentence-length",
+                        _excerpt(sentence.text),
+                        sentence_severity,
+                        span_start=sentence.start,
+                        span_end=sentence.end,
+                    )
+                )
 
     if paragraph_severity != "off":
         findings.extend(_paragraph_findings(body, exempt=exempt, severity=paragraph_severity, max_sentences=max_sentences))
@@ -757,44 +824,88 @@ def has_ai_tell_finding(text: str, findings: Iterable[Finding]) -> bool:
     return any(pattern.phrase in AI_TELL_PHRASES and pattern.regex.search(text) for pattern in RULE_PATTERNS)
 
 
+def _changed_char_ranges(existing: str, proposed: str) -> list[tuple[int, int]]:
+    """Half-open proposed-space character ranges where the two documents differ.
+
+    The comparison runs on line-level opcodes first and narrows each replaced
+    block by characters, so untouched context inside a replacement costs
+    nothing and identical text is never attributed to the edit.
+    """
+    a_lines = existing.split("\n")
+    b_lines = proposed.split("\n")
+    b_starts = []
+    total = 0
+    for line in b_lines:
+        b_starts.append(total)
+        total += len(line) + 1
+    ranges: list[tuple[int, int]] = []
+    matcher = difflib.SequenceMatcher(None, a_lines, b_lines, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag in ("equal", "delete"):
+            # Deletions leave no text behind, so nothing in proposed space owns them.
+            continue
+        lo = b_starts[j1]
+        hi = b_starts[j2 - 1] + len(b_lines[j2 - 1])
+        if tag == "insert":
+            ranges.append((lo, hi))
+            continue
+        chunk_a = "\n".join(a_lines[i1:i2])
+        chunk_b = "\n".join(b_lines[j1:j2])
+        inner = difflib.SequenceMatcher(None, chunk_a, chunk_b, autojunk=False)
+        for inner_tag, _a1, _a2, bj1, bj2 in inner.get_opcodes():
+            if inner_tag != "equal":
+                ranges.append((lo + bj1, lo + bj2))
+    return ranges
+
+
 def _compute_edit_origins(
     findings: list[Finding],
     existing: str,
     old_string: str,
     new_string: str,
-    replace_all: bool,
     reconstructed: str,
 ) -> list[Finding]:
+    """Attribute each finding to the edit or to the pre-existing document.
+
+    Issue 8: attribution used to mark every finding anchored on a line inside
+    the replacement span as new. The span includes unchanged context, so a
+    pre-existing sentence beside or underneath the edited text blocked the
+    write. Attribution now overlaps each finding's character span with the
+    ranges where proposed actually differs from existing.
+
+    A sentence that starts outside the changed characters but is cut into by
+    them belongs to the edit: the model wrote part of it, so the sentence as
+    it now stands is partly authored prose and must pass the rules. Its
+    findings are attributed at sentence granularity, which also charges a
+    rule a rewrite carries over inside a sentence it reworded. A change
+    landing immediately after a sentence's final character leaves that
+    sentence untouched.
+    """
+
+    def all_existing() -> list[Finding]:
+        return [Finding(f.line, f.check, f.excerpt, f.severity, origin="existing") for f in findings]
+
+    if not findings:
+        return []
     if not new_string:
         # Pure deletion: no lines inserted, all remaining findings are existing
-        return [Finding(f.line, f.check, f.excerpt, f.severity, origin="existing") for f in findings]
+        return all_existing()
+    if not existing or old_string not in existing:
+        # The file moved between reads: unattributable, so nothing blocks.
+        return all_existing()
 
-    occurrences: list[int] = []
-    search_pos = 0
-    while True:
-        idx = existing.find(old_string, search_pos)
-        if idx < 0:
-            break
-        occurrences.append(idx)
-        if not replace_all:
-            break
-        search_pos = idx + len(old_string)
-
-    if not occurrences:
-        return [Finding(f.line, f.check, f.excerpt, f.severity, origin="existing") for f in findings]
-
-    delta = len(new_string) - len(old_string)
-    inserted_line_ranges: list[tuple[int, int]] = []
-    for i, orig_pos in enumerate(occurrences):
-        prop_start = orig_pos + i * delta
-        prop_end = prop_start + len(new_string)
-        start_line = reconstructed.count("\n", 0, prop_start) + 1
-        end_line = reconstructed.count("\n", 0, max(prop_start, prop_end - 1)) + 1
-        inserted_line_ranges.append((start_line, end_line))
-
+    changed = _changed_char_ranges(exclude_markdown(existing), exclude_markdown(reconstructed))
+    owned = list(changed)
+    if changed:
+        for record in _sentence_records(exclude_markdown(reconstructed)):
+            if any(max(record.start, cs) < min(record.end, ce) for cs, ce in changed):
+                owned.append((record.start, record.end))
     result: list[Finding] = []
     for f in findings:
-        is_new = any(start <= f.line <= end for start, end in inserted_line_ranges)
+        if f.span_start is None or f.span_end is None:
+            result.append(Finding(f.line, f.check, f.excerpt, f.severity, origin="existing"))
+            continue
+        is_new = any(max(f.span_start, cs) < min(f.span_end, ce) for cs, ce in owned)
         result.append(Finding(f.line, f.check, f.excerpt, f.severity, origin="new" if is_new else "existing"))
     return result
 
@@ -1079,7 +1190,7 @@ def run_hook(raw_payload: str) -> int:
                 existing = Path(file_path).read_text(encoding="utf-8")
             except OSError:
                 existing = ""
-            findings_with_origin = _compute_edit_origins(findings, existing, old_string, new_string, replace_all, proposed)
+            findings_with_origin = _compute_edit_origins(findings, existing, old_string, new_string, proposed)
             payload_bytes = len(old_string.encode("utf-8")) + len(new_string.encode("utf-8"))
             payload_words = len(old_string.split()) + len(new_string.split())
 

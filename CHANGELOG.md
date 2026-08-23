@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **The gate attributed pre-existing sentences to the edited region.** An edit could be refused three times on `sentence-length` findings in lines it never touched. Attribution marked every finding anchored inside the replacement span as newly written, and that span includes unchanged context: an edit whose `old_string` carried surrounding lines was blocked by their errors, and two sentences sharing one physical line were blocked together when only one was rewritten. `_compute_edit_origins` in `lib/linter.py` now derives the edited region by comparing the existing document against the proposed one, character by character (`_changed_char_ranges`), and charges a finding only when its text overlaps what actually changed. A sentence the edit cuts into belongs to the edit at full sentence granularity, so a rule a rewrite carries over inside a reworded sentence still blocks; text placed immediately after a final full stop leaves the previous sentence untouched.
+
 ## [0.5.0]
 
 ### Changed
