@@ -4,7 +4,7 @@ Published 2026-08-24. This file is the source `copydesk report` names in its Pre
 
 ## Corpus rate
 
-The command below re-measured the captured baseline transcripts under the rules of 2026-08-24. `--measure-only` launches no sessions: it re-runs the measurement phase over any results root holding previously captured transcripts. The transcripts themselves were produced by an earlier confirmed Claude Code run against the pinned target commit, under the controls recorded in `controls.json`.
+The command below re-measured the captured baseline transcripts with the 2026-08-24 word counter and linter. `--measure-only` launches no sessions: it re-runs the measurement phase over any results root holding previously captured transcripts. The transcripts themselves were produced by an earlier confirmed Claude Code run against the pinned target commit, under the controls recorded in `controls.json`.
 
     $ time bash eval/run-corpus.sh --measure-only --harness claude --condition baseline \
           --results-root <captured-transcripts-root>
@@ -17,7 +17,7 @@ The command below re-measured the captured baseline transcripts under the rules 
 | `03-debugging-auth` | 10 | 657 | 6 | 9.13 |
 | **Median** | | | | **8.48** |
 
-Rate is blocking findings per 1,000 qualifying chat words at the final turn. The full per-run detail sits beside this file in `2026-08-24-summary.json`. The prior summary (`2026-08-17-summary.json`, rate 8.09) measured the same transcripts under the rules of its own day; both stay, and `report` reads the newest.
+Rate is blocking findings per 1,000 qualifying chat words at the final turn. The full per-run detail sits beside this file in `2026-08-24-summary.json`. Blocking counts at the final turn are unchanged from 2026-08-17: 4 on `01-implementation-dry-run` and 6 on `03-debugging-auth` (`docs/evidence/baseline-results.md`). The move from 8.09 to 8.48 is the qualifying-word count (542 to 511, and 682 to 657), from `linter.exclude_markdown` plus the `WORD` regex in `eval/run-corpus.sh`, not a rise in blocking findings. The prior summary (`2026-08-17-summary.json`) stays; `report` reads the newest.
 
 ## False-positive criterion
 
