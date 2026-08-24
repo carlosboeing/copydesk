@@ -2560,7 +2560,10 @@ _HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 def _git_output(args: list[str], cwd: Path) -> Optional[str]:
     """One answer from git, or None when git cannot answer."""
     try:
-        result = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True)
+        result = subprocess.run(
+            ["git", *args], cwd=str(cwd), capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
     except OSError:
         return None
     if result.returncode != 0:
@@ -2576,7 +2579,10 @@ def _staged_markdown(work: Path) -> Optional[list[tuple[str, str]]]:
     as brand-new prose. Deletions never appear here.
     """
     out = _git_output(
-        ["diff", "--cached", "--name-status", "-z", "--diff-filter=ACMR", "--", "*.md"],
+        [
+            "diff", "--cached", "--find-renames", "--name-status", "-z",
+            "--diff-filter=ACMR", "--", "*.md",
+        ],
         work,
     )
     if out is None:
@@ -2650,7 +2656,7 @@ def _staged_changed_ranges(
         return _changed_char_ranges(masked_base, masked_staged)
     except _TooLargeToCompare:
         diff_text = _git_output(
-            ["diff", "--cached", "--unified=0", "--", index_path], work
+            ["diff", "--cached", "--find-renames", "--unified=0", "--", index_path], work
         )
         if diff_text is None:
             # Unattributable and unbounded: charge nothing rather than block
@@ -2677,8 +2683,12 @@ def run_staged(cwd: Union[str, Path, None] = None) -> int:
     fire in HEAD. Warn-severity findings report and never block, whatever
     the channel decides. 0 clean, 1 refused.
     """
-    start = Path(cwd) if cwd is not None else Path.cwd()
     try:
+        for stream in (sys.stdout, sys.stderr):
+            reconfigure = getattr(stream, "reconfigure", None)
+            if reconfigure is not None:
+                reconfigure(encoding="utf-8", errors="replace")
+        start = Path(cwd) if cwd is not None else Path.cwd()
         root = _git_output(["rev-parse", "--show-toplevel"], start)
         if root is None:
             print("error: copydesk check --staged needs a git repository", file=sys.stderr)
@@ -2784,4 +2794,3 @@ def run_staged(cwd: Union[str, Path, None] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

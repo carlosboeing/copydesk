@@ -221,6 +221,19 @@ class StagedScopeTests(GitRepositoryTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("sentence-length", result.stdout)
 
+    def test_ascii_locale_handles_utf8_staged_content_and_output(self) -> None:
+        self.commit_initial("a.md", CLEAN + "\n")
+        self.write("a.md", CLEAN + "\n\nThe café design is robust.\n")
+        self.staged("a.md")
+        env = self._env()
+        env.update({"LC_ALL": "C", "PYTHONUTF8": "0"})
+        result = subprocess.run(
+            [str(self.bin_dir / "copydesk"), "check", "--staged"],
+            capture_output=True, cwd=str(self.repo), env=env,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("café", result.stdout.decode("utf-8"))
+
     def test_a_subdirectory_run_judges_the_whole_tree(self) -> None:
         # Git resolves a bare pathspec against the cwd but reports names
         # relative to the repository root, so a run from docs/ must resolve
@@ -353,6 +366,15 @@ class CommitIntegrationTests(GitRepositoryTestCase):
 class RenamedFileTests(GitRepositoryTestCase):
     def test_a_renamed_imperfect_file_is_judged_against_its_source(self) -> None:
         self.commit_initial("a.md", LONG_ERROR + "\n\n" + CLEAN + "\n")
+        self._git("mv", "a.md", "b.md")
+        self.write("b.md", LONG_ERROR + "\n\nA short sentence has enough words now.\n")
+        self._git("add", "b.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_rename_detection_ignores_diff_renames_config(self) -> None:
+        self.commit_initial("a.md", LONG_ERROR + "\n\n" + CLEAN + "\n")
+        self._git("config", "diff.renames", "false")
         self._git("mv", "a.md", "b.md")
         self.write("b.md", LONG_ERROR + "\n\nA short sentence has enough words now.\n")
         self._git("add", "b.md")
