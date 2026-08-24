@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two pages named `baseline-results.md` published different medians with nothing linking them.** `README.md` pointed at `docs/evidence/baseline-results.md` and its 8.09 median, while `copydesk report` printed 8.48 from the new `eval/results/baseline-results.md`. A reader following the README found one number and the tool printed another. The README now lists the prevention baseline beside the gate baseline, and the 2026-08-17 page names its successor and says why the medians differ: the blocking counts are identical, and fewer words qualify under the later counter.
+- **The README's Project status line said `0.2.0` through four releases.** Nothing read the line, so nothing caught it. It now says the current version, and a test reads `VERSION` and fails until a release updates it.
+
+### Changed
+
+- **`copydesk report` reads a Prevention baseline from a CopyDesk checkout when the installed bundle ships none.** The npm allowlist carries no `eval/` directory, so an installed CopyDesk could never see a published corpus result and every report ended at `not measured`. When the bundle holds no readable summary, the reader now falls back to `eval/results/` beside the working directory, and only when that directory sits in a CopyDesk checkout (`lib/linter.py` alongside), so an unrelated project's `eval/` cannot pose as the metric. A newest-file scan also skips summaries without a usable `rate` instead of letting one malformed file hide an older valid baseline behind it.
+
+### Added
+
+- **`eval/run-corpus.sh --measure-only`.** Re-runs the measurement phase over already-captured transcripts and republishes the dated summary JSON, with no harness sessions launched and no settings or target repository required.
+- **A prevention baseline under `eval/results/`.** `baseline-results.md` publishes the 2026-08-24 corpus rate (8.48 blocking findings per 1,000 chat words at the final turn) together with per-rule false-positive rates judged from a five-day telemetry window, stating the criterion and sample sizes; `2026-08-24-summary.json` carries the per-run detail `report` reads.
+
 ## [0.6.0]
 
 ### Changed

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LIB_DIR = REPO_ROOT / "lib"
@@ -420,17 +421,55 @@ class TestTelemetry(unittest.TestCase):
     def test_prevention_metric_real_files_and_fallback(self) -> None:
         summary = linter.get_prevention_summary()
         self.assertIsNotNone(summary)
-        self.assertEqual(summary["rate"], 8.09)
-        self.assertEqual(summary["date"], "2026-08-17")
-        # The evidence page graduated to docs/evidence/ for a public reader; the
-        # summary must name where it actually lives.
-        self.assertEqual(summary["source"], "docs/evidence/baseline-results.md")
+        # The newest tracked summary wins; eval/results/ holds one file per
+        # measurement day and the reader must take the latest.
+        self.assertEqual(summary["rate"], 8.48)
+        self.assertEqual(summary["date"], "2026-08-24")
+        self.assertEqual(summary["source"], "eval/results/baseline-results.md")
 
         # Empty directory fallback
         empty_dir = self.state_dir / "empty_results"
         empty_dir.mkdir()
         fallback = linter.get_prevention_summary(results_dir=empty_dir)
         self.assertIsNone(fallback)
+
+    def test_prevention_reads_newest_valid_summary(self) -> None:
+        """A newer malformed summary must not hide an older readable one."""
+        results = self.state_dir / "results"
+        results.mkdir()
+        (results / "2026-09-01-summary.json").write_text(json.dumps({"date": "2026-09-01"}), encoding="utf-8")
+        (results / "2026-08-01-summary.json").write_text(json.dumps({"rate": 3.21, "date": "2026-08-01"}), encoding="utf-8")
+
+        summary = linter.get_prevention_summary(results_dir=results)
+        self.assertEqual(summary["rate"], 3.21)
+
+    def test_prevention_falls_back_to_a_checkout_in_the_cwd(self) -> None:
+        """An installed bundle ships no eval directory, so a report run inside
+        a CopyDesk checkout reads that checkout's own results instead of
+        ending at not measured. An unrelated project's eval directory must
+        not pose as this metric."""
+        with tempfile.TemporaryDirectory() as temporary:
+            checkout = Path(temporary)
+            results = checkout / "eval" / "results"
+            results.mkdir(parents=True)
+            (results / "2026-08-01-summary.json").write_text(
+                json.dumps({"rate": 3.21, "date": "2026-08-01"}), encoding="utf-8"
+            )
+            marker = checkout / "lib" / "linter.py"
+            marker.parent.mkdir()
+            marker.write_text("# checkout marker\n", encoding="utf-8")
+
+            with patch.object(linter, "__file__", str(checkout / "installed" / "lib" / "linter.py")):
+                summary = linter.get_prevention_summary(cwd=checkout)
+            self.assertIsNotNone(summary)
+            self.assertEqual(summary["rate"], 3.21)
+
+            # Without the checkout marker (lib/linter.py beside eval/), the
+            # same directory answers nothing.
+            marker.unlink()
+            with patch.object(linter, "__file__", str(checkout / "installed" / "lib" / "linter.py")):
+                guarded = linter.get_prevention_summary(cwd=checkout)
+            self.assertIsNone(guarded)
 
     def test_summariser_edge_cases_and_filtering(self) -> None:
         # Empty events
