@@ -127,6 +127,15 @@ class InstallCommandTests(GitRepositoryTestCase):
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertIn("already installed", again.stdout)
 
+    def test_install_restores_a_hook_executable_bit(self) -> None:
+        self.cli("install", "--git-hook")
+        hook_file = self.repo / ".git" / "hooks" / "pre-commit"
+        hook_file.chmod(0o644)
+        result = self.cli("install", "--git-hook")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(os.stat(hook_file).st_mode & stat.S_IXUSR)
+        self.assertIn("restored the executable bit", result.stdout)
+
     def test_install_refreshes_a_drifted_copydesk_hook(self) -> None:
         self.cli("install", "--git-hook")
         hook_file = self.repo / ".git" / "hooks" / "pre-commit"
@@ -194,6 +203,16 @@ class StagedScopeTests(GitRepositoryTestCase):
         result = self.cli("check", "--staged")
         self.assertEqual(result.returncode, 1)
         self.assertIn("banned-word", result.stdout)
+
+    def test_an_in_progress_merge_skips_staged_prose(self) -> None:
+        self.commit_initial("a.md", CLEAN + "\n")
+        head = self._git("rev-parse", "HEAD").stdout.strip()
+        (self.repo / ".git" / "MERGE_HEAD").write_text(head + "\n", encoding="ascii")
+        self.write("a.md", CLEAN + "\n\n" + BANNED + "\n")
+        self.staged("a.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("merge in progress; staged prose was not judged", result.stdout)
 
     def test_a_pure_deletion_passes(self) -> None:
         self.commit_initial("a.md", LONG_ERROR + "\n\n" + CLEAN + "\n\nAnother short sentence sits right here.\n")

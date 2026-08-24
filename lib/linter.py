@@ -2735,6 +2735,21 @@ def run_staged(cwd: Union[str, Path, None] = None) -> int:
             print("error: copydesk check --staged needs a git repository", file=sys.stderr)
             return 64
         work = Path(root.strip())
+        operation = next(
+            (
+                name
+                for name, ref in (
+                    ("merge", "MERGE_HEAD"),
+                    ("cherry-pick", "CHERRY_PICK_HEAD"),
+                    ("revert", "REVERT_HEAD"),
+                )
+                if _git_output(["rev-parse", "--verify", "-q", ref], work) is not None
+            ),
+            None,
+        )
+        if operation is not None:
+            print(f"copydesk: {operation} in progress; staged prose was not judged")
+            return 0
         staged_files = _staged_markdown(work)
         if staged_files is None:
             print("error: copydesk check --staged needs a git repository", file=sys.stderr)

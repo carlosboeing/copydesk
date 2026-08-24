@@ -111,7 +111,16 @@ def _install_git_hook(cwd: Path, stdout: TextIO) -> int:
 
     if MARKER_PHRASE in content:
         if content == HOOK_TEMPLATE:
-            stdout.write(f"already installed  {hook_file}\n")
+            try:
+                executable = bool(hook_file.stat().st_mode & 0o111)
+                hook_file.chmod(0o755)
+            except OSError as error:
+                print(f"error: cannot update {hook_file}: {error}", file=sys.stderr)
+                return 1
+            if executable:
+                stdout.write(f"already installed  {hook_file}\n")
+            else:
+                stdout.write(f"restored the executable bit  {hook_file}\n")
             return 0
         try:
             hook_file.write_text(HOOK_TEMPLATE, encoding="utf-8")
