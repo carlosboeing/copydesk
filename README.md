@@ -319,11 +319,12 @@ Where CopyDesk differs:
 ## Evidence
 
 - **[Observational baseline](docs/evidence/observational-baseline.md)**: Analysis across 1,556,107 words of chat and 626,153 words of Markdown.
-- **[Gate baseline](docs/evidence/baseline-results.md)**: Multi-turn session evaluations tracking rule enforcement and instruction decay over time.
+- **[Prevention baseline](eval/results/baseline-results.md)**: The corpus blocking rate and the per-rule false-positive rates. `copydesk report` names this page as the source of its Prevention section.
+- **[Gate baseline](docs/evidence/baseline-results.md)**: Multi-turn session evaluations from 2026-08-17, tracking rule enforcement and instruction decay over time. The prevention baseline re-measures the same transcripts.
 
 ## Project status
 
-**`0.2.0`, pre-1.0.** The CLI commands, config schema, rule identifiers, and channel definitions are stable.
+**`0.6.0`, pre-1.0.** The CLI commands, config schema, rule identifiers, and channel definitions are stable.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for future plans and [CHANGELOG.md](CHANGELOG.md) for release history.
 

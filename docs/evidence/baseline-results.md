@@ -2,6 +2,8 @@
 
 Measured 2026-08-17, before the rule set changed. It records what an agent's chat looked like turn by turn across two continuous ten-turn sequences.
 
+[`eval/results/baseline-results.md`](../../eval/results/baseline-results.md) is the current baseline. It re-measures these transcripts with the 2026-08-24 word counter. The blocking counts are identical; the median moves from 8.09 to 8.48 because fewer words qualify.
+
 The point of this page is the controls. A prose measurement with no record of model, effort and target is not reproducible, and most published claims about AI writing carry none.
 
 ## Controls
