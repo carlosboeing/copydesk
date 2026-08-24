@@ -14,10 +14,12 @@ SEQUENCE=""
 RUNS=""
 PREFLIGHT=false
 CONFIRMED=false
+MEASURE_ONLY=false
 
 usage() {
     printf '%s\n' "Usage: run-corpus.sh --harness claude|codex|kimi --condition LABEL --repo CROSSREV [--confirmed] [--sequence N] [--runs N]"
     printf '%s\n' "       run-corpus.sh --preflight [--settings-root ROOT] [--results-root DIR]"
+    printf '%s\n' "       run-corpus.sh --measure-only --harness claude|codex|kimi --condition LABEL [--results-root DIR]"
 }
 
 die() {
@@ -35,6 +37,9 @@ while [[ $# -gt 0 ]]; do
         --sequence) SEQUENCE="$2"; shift 2 ;;
         --runs) RUNS="$2"; shift 2 ;;
         --preflight) PREFLIGHT=true; shift ;;
+        # Re-runs the measurement phase over already-captured transcripts, so a
+        # baseline can be republished without launching paid sessions again.
+        --measure-only) MEASURE_ONLY=true; shift ;;
         --confirmed) CONFIRMED=true; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown option: $1" ;;
@@ -100,7 +105,15 @@ PY
 # home directory. write_controls used to run first, so on a machine without the
 # three harness config files a refusal exited 1 with a traceback rather than 2
 # with a message.
-if ! "$PREFLIGHT"; then
+if "$MEASURE_ONLY"; then
+    # Nothing launches, so no confirmation guard and no settings to record:
+    # the controls in force were captured alongside the transcripts.
+    case "$HARNESS" in
+        claude|codex|kimi) ;;
+        *) die "--harness must be claude, codex, or kimi" ;;
+    esac
+    [[ -n "$CONDITION" ]] || die "--condition is required"
+elif ! "$PREFLIGHT"; then
     case "$HARNESS" in
         claude|codex|kimi) ;;
         *) die "--harness must be claude, codex, or kimi" ;;
@@ -109,23 +122,27 @@ if ! "$PREFLIGHT"; then
     "$CONFIRMED" || die "refusing to launch a corpus condition without --confirmed"
 fi
 
-write_controls
-if "$PREFLIGHT"; then
-    printf '%s\n' "No corpus launched. Review eval/results/controls.json, then re-run with --confirmed."
-    exit 0
-fi
-[[ -n "$REPO" ]] || die "--repo must name the CrossRev checkout"
-git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "--repo is not a git checkout: $REPO"
-git -C "$REPO" rev-parse --verify "$PINNED_CROSSREV_COMMIT^{commit}" >/dev/null
-
-if [[ -z "$RUNS" ]]; then
-    if [[ "$HARNESS" == "claude" ]]; then
-        RUNS=3
-    else
-        RUNS=1
+if ! "$MEASURE_ONLY"; then
+    write_controls
+    if "$PREFLIGHT"; then
+        printf '%s\n' "No corpus launched. Review eval/results/controls.json, then re-run with --confirmed."
+        exit 0
     fi
+    [[ -n "$REPO" ]] || die "--repo must name the CrossRev checkout"
+    git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "--repo is not a git checkout: $REPO"
+    git -C "$REPO" rev-parse --verify "$PINNED_CROSSREV_COMMIT^{commit}" >/dev/null
+
+    if [[ -z "$RUNS" ]]; then
+        if [[ "$HARNESS" == "claude" ]]; then
+            RUNS=3
+        else
+            RUNS=1
+        fi
+    fi
+    [[ "$RUNS" =~ ^[1-9][0-9]*$ ]] || die "--runs must be a positive integer"
+else
+    RUNS=0
 fi
-[[ "$RUNS" =~ ^[1-9][0-9]*$ ]] || die "--runs must be a positive integer"
 
 reset_crossrev() {
     git -C "$REPO" reset --hard "$PINNED_CROSSREV_COMMIT" >/dev/null
@@ -297,19 +314,23 @@ PY
     reset_crossrev
 }
 
-corpus_files=()
-while IFS= read -r corpus_file; do
-    corpus_files+=("$corpus_file")
-done < <(find "$CORPUS_DIR" -maxdepth 1 -type f -name '[0-9][0-9]-*.txt' -print | sort)
-[[ ${#corpus_files[@]} -eq 8 ]] || die "expected eight corpus sequences, found ${#corpus_files[@]}"
-for corpus in "${corpus_files[@]}"; do
-    if [[ -n "$SEQUENCE" && "$(basename "$corpus")" != "$SEQUENCE"* ]]; then
-        continue
-    fi
-    for ((run_number = 1; run_number <= RUNS; run_number++)); do
-        run_sequence "$corpus" "$run_number"
+if "$MEASURE_ONLY"; then
+    [[ -d "$RESULTS_ROOT/$CONDITION/$HARNESS" ]] || die "no captured transcripts under $RESULTS_ROOT/$CONDITION/$HARNESS"
+else
+    corpus_files=()
+    while IFS= read -r corpus_file; do
+        corpus_files+=("$corpus_file")
+    done < <(find "$CORPUS_DIR" -maxdepth 1 -type f -name '[0-9][0-9]-*.txt' -print | sort)
+    [[ ${#corpus_files[@]} -eq 8 ]] || die "expected eight corpus sequences, found ${#corpus_files[@]}"
+    for corpus in "${corpus_files[@]}"; do
+        if [[ -n "$SEQUENCE" && "$(basename "$corpus")" != "$SEQUENCE"* ]]; then
+            continue
+        fi
+        for ((run_number = 1; run_number <= RUNS; run_number++)); do
+            run_sequence "$corpus" "$run_number"
+        done
     done
-done
+fi
 
 # Measure this run's blocking-violation rate and emit the summary JSON the
 # telemetry dashboard reads. The rate is derived from the transcripts just
@@ -372,6 +393,9 @@ if not measured:
     raise SystemExit(0)
 
 today = datetime.datetime.now().strftime("%Y-%m-%d")
+# A measure-only pass passes 0 because it launched nothing, so the count
+# comes from the run directories actually measured.
+runs_per_sequence = runs or max(int(str(item["run"]).removeprefix("run-")) for item in measured)
 data = {
     "rate": round(statistics.median([item["rate"] for item in measured]), 2),
     "date": today,
@@ -379,7 +403,7 @@ data = {
     "source": f"eval/results/{condition}-results.md",
     "condition": condition,
     "harness": harness,
-    "runs_per_sequence": runs,
+    "runs_per_sequence": runs_per_sequence,
     "measured": measured,
 }
 # Overwrite rather than skip: a second condition on the same day must not leave

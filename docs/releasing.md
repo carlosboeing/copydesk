@@ -42,6 +42,10 @@ npm version 0.2.0 --no-git-tag-version
 # 2. Move the changelog's Unreleased entries under the new heading.
 $EDITOR CHANGELOG.md
 
+# 2b. Update the Project status line in README.md to the new version.
+#     A test pins it to VERSION, so the suite fails until this is done.
+$EDITOR README.md
+
 # 3. Commit, tag, push.
 git commit -am "chore(release): 0.2.0"
 git tag -a v0.2.0 -m "CopyDesk 0.2.0"

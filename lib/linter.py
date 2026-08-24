@@ -1597,22 +1597,49 @@ def read_events(
     return events
 
 
+def _latest_summary_with_rate(directory: Path) -> Optional[Path]:
+    """Newest summary file that actually carries a rate, or None.
+
+    Validating per file rather than validating only the newest name keeps one
+    malformed or older-schema summary from hiding a readable baseline behind
+    it.
+    """
+    if not directory.is_dir():
+        return None
+    for candidate in sorted(directory.glob("*-summary.json"), reverse=True):
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and "rate" in data:
+            return candidate
+    return None
+
+
 def get_prevention_summary(
     results_dir: Optional[Path] = None,
     now: Optional[float] = None,
+    cwd: Optional[Path] = None,
 ) -> Optional[dict[str, object]]:
-    if results_dir is None:
+    latest_file: Optional[Path] = None
+    if results_dir is not None:
+        latest_file = _latest_summary_with_rate(results_dir)
+    else:
+        # The npm allowlist ships no eval/ directory, so an installed CopyDesk
+        # has no bundled results. A report run inside a CopyDesk checkout then
+        # reads the checkout's own, usually newer, baseline instead of ending
+        # at not measured. The checkout-layout guard stops an unrelated
+        # project's eval directory from posing as this metric.
         bundle_root = Path(__file__).resolve().parents[1]
-        results_dir = bundle_root / "eval" / "results"
+        latest_file = _latest_summary_with_rate(bundle_root / "eval" / "results")
+        if latest_file is None:
+            workdir = cwd if cwd is not None else Path.cwd()
+            if (workdir / "lib" / "linter.py").is_file():
+                latest_file = _latest_summary_with_rate(workdir / "eval" / "results")
 
-    if not results_dir.is_dir():
+    if latest_file is None:
         return None
 
-    summary_files = sorted(results_dir.glob("*-summary.json"))
-    if not summary_files:
-        return None
-
-    latest_file = summary_files[-1]
     try:
         data = json.loads(latest_file.read_text(encoding="utf-8"))
         if isinstance(data, dict) and "rate" in data:

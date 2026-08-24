@@ -410,6 +410,16 @@ class CommandSurfaceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), expected)
 
+    def test_readme_project_status_names_the_current_version(self) -> None:
+        """README's status line went four releases saying 0.2.0.
+
+        Nothing read it, so nothing caught it. A release that bumps VERSION
+        now fails here until the same commit set updates the line.
+        """
+        expected = (REPOSITORY_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        readme = (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"**`{expected}`, pre-1.0.**", readme)
+
     def test_check_accepts_paths(self) -> None:
         result = self.run_cli("check", str(FIXTURES / "good.md"))
         self.assertEqual(result.returncode, 0, result.stderr)

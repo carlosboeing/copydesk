@@ -1,0 +1,27 @@
+{
+  "rate": 8.48,
+  "date": "2026-08-24",
+  "statistic": "median across sequence runs of blocking findings per 1,000 words at the final turn",
+  "source": "eval/results/baseline-results.md",
+  "condition": "baseline",
+  "harness": "claude",
+  "runs_per_sequence": 1,
+  "measured": [
+    {
+      "turn": 10,
+      "words": 511,
+      "blocking": 4,
+      "rate": 7.83,
+      "sequence": "01-implementation-dry-run",
+      "run": "run-1"
+    },
+    {
+      "turn": 10,
+      "words": 657,
+      "blocking": 6,
+      "rate": 9.13,
+      "sequence": "03-debugging-auth",
+      "run": "run-1"
+    }
+  ]
+}
