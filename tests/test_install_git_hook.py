@@ -240,6 +240,33 @@ class StagedScopeTests(GitRepositoryTestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("squash merge in progress; staged prose was not judged", result.stdout)
 
+    def test_a_no_commit_port_skips_staged_prose(self) -> None:
+        """`git cherry-pick -n` sets no ref and leaves no rebase directory,
+        while `git revert -n` does set REVERT_HEAD. The same intent produced
+        opposite outcomes depending only on which command was used."""
+        self.commit_initial("a.md", CLEAN + "\n")
+        (self.repo / ".git" / "MERGE_MSG").write_text("ported\n", encoding="utf-8")
+        self.write("a.md", CLEAN + "\n\n" + BANNED + "\n")
+        self.staged("a.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("cherry-pick or revert in progress", result.stdout)
+
+    def test_a_conflicted_merge_is_named_a_merge(self) -> None:
+        """A conflicted merge leaves MERGE_MSG as well as MERGE_HEAD. The
+        ref checks run first so the message names the operation the user
+        started, not the marker it shares with a --no-commit port."""
+        self.commit_initial("a.md", CLEAN + "\n")
+        head = self._git("rev-parse", "HEAD").stdout.strip()
+        (self.repo / ".git" / "MERGE_HEAD").write_text(head + "\n", encoding="ascii")
+        (self.repo / ".git" / "MERGE_MSG").write_text("merging\n", encoding="utf-8")
+        self.write("a.md", CLEAN + "\n\n" + BANNED + "\n")
+        self.staged("a.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("merge in progress; staged prose was not judged", result.stdout)
+        self.assertNotIn("cherry-pick or revert", result.stdout)
+
     def test_a_finished_rebase_is_judged_again(self) -> None:
         """REBASE_HEAD still resolves after a rebase completes, so the guard
         keys on the directory. Removing it must restore judging."""

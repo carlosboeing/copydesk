@@ -2672,13 +2672,18 @@ def _git_operation_in_progress(work: Path) -> Optional[str]:
 
     Merge, cherry-pick and revert each set a ref while they are stopped. A
     rebase sets none of them and leaves a `rebase-merge` or `rebase-apply`
-    directory; `git merge --squash` sets neither and leaves `SQUASH_MSG`.
-    The manual commit that finishes any of them does run the hook.
+    directory; `git merge --squash` leaves `SQUASH_MSG`; and the
+    `--no-commit` forms of merge, cherry-pick and revert set no ref at all
+    and leave `MERGE_MSG`. The manual commit that finishes any of them does
+    run the hook.
 
-    Both markers are safe signals because git clears them when the commit
-    lands. `REBASE_HEAD` is not, and is deliberately absent here: it still
+    Every marker here is a safe signal because git clears it when the commit
+    lands. `REBASE_HEAD` is not, and is deliberately absent: it still
     resolves after the rebase finishes, so keying on it would silence the
     gate for every commit that followed.
+
+    The ref checks run first, so a conflicted merge is still named a merge
+    rather than falling through to the `MERGE_MSG` it also leaves.
     """
     for name, ref in (
         ("merge", "MERGE_HEAD"),
@@ -2691,6 +2696,7 @@ def _git_operation_in_progress(work: Path) -> Optional[str]:
         ("rebase", "rebase-merge"),
         ("rebase", "rebase-apply"),
         ("squash merge", "SQUASH_MSG"),
+        ("a --no-commit merge, cherry-pick or revert", "MERGE_MSG"),
     ):
         located = _git_output(["rev-parse", "--git-path", marker], work)
         if located is None:
