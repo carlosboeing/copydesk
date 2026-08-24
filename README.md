@@ -10,12 +10,13 @@
 
 It prevents violations before generation, and refuses the write when a violation slips through.
 
-Every other prose tool reads your text after it is saved. CopyDesk works in two earlier moments: it compiles instructions into the model context before generation, and it intercepts file edits to refuse violations at write time.
+Every other prose tool reads your text after it is saved. CopyDesk works in three earlier moments: it compiles instructions into the model context before generation, it intercepts file edits to refuse violations at write time, and a pre-commit hook refuses a commit whose added Markdown breaks the rules.
 
 | When | What happens | Who is there |
 |---|---|---|
 | Before generation | Instructions enter the model context, so bad prose is never produced | **CopyDesk** |
 | At write time | The write is refused and the model revises | **CopyDesk** |
+| Before the commit | The commit is refused when its added Markdown breaks the rules | **CopyDesk** |
 | After the file is saved | The file is scored and a fix requested | sloptrim |
 | In continuous integration | The build reports or fails | Vale |
 
@@ -150,6 +151,26 @@ copydesk hook remove --all        # remove them all
 
 A repository whose commit-msg hook already exists is never overwritten: `hook add` offers to append CopyDesk's block instead, and verifies by a test run that the block is reached. Every install is recorded in `$XDG_STATE_HOME/copydesk/hooks.json`, so `uninstall` can offer to remove the hooks in your other repositories too.
 
+## Managing the pre-commit hook
+
+The commit-msg gate checks message prose. The pre-commit gate checks the Markdown a commit carries:
+
+```bash
+copydesk install --git-hook
+```
+
+The hook runs `copydesk check --staged` before every commit. It judges the lines the commit adds, compared against HEAD: touching a clean paragraph passes no matter what else the file hides, an added banned word refuses the commit, and a deletion blocks only for a rule HEAD did not already break. Staged content is checked, so uncommitted edits in your working tree are not judged.
+
+To commit anyway:
+
+```bash
+git commit --no-verify
+```
+
+The same instruction sits inside the installed hook, so it is there when you need it. Findings at warn severity print but never block, whatever your configuration says about blocking. A missing `copydesk` binary or an internal error lets the commit through rather than bricking the repository.
+
+A `pre-commit` hook CopyDesk did not write is never overwritten: the installer prints the lines to append instead, chaining the check into your own script. Running the command again refreshes a hook CopyDesk wrote. To remove it, delete `.git/hooks/pre-commit`, or the file under `core.hooksPath` if you set one.
+
 ## Channels
 
 CopyDesk divides agent writing into four channels:
@@ -184,6 +205,8 @@ Check files or standard input:
 copydesk check docs/guide.md CHANGELOG.md
 cat draft.md | copydesk check -
 copydesk check --commit-msg .git/COMMIT_EDITMSG
+copydesk check --staged            # lint what the index adds against HEAD
+copydesk install --git-hook        # run that automatically before every commit
 ```
 
 Inspect rules and resolution:
@@ -305,6 +328,7 @@ Every rule and parameter is documented in [docs/rules.md](docs/rules.md).
 |---|---|---|
 | Before generation | Instructions enter the model context | **CopyDesk** |
 | At write time | The write is refused | **CopyDesk** |
+| Before the commit | The commit is refused when its added Markdown breaks the rules | **CopyDesk** |
 | After the file is saved | The file is scored | sloptrim |
 | In continuous integration | The build reports or fails | Vale |
 

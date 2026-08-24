@@ -692,6 +692,30 @@ class TestTelemetry(unittest.TestCase):
         # Linter wall time still covers every surface it ran on.
         self.assertEqual(summary["time"]["runs"], 2)
 
+    def test_pre_commit_lints_excluded_from_gate_metrics(self) -> None:
+        events = [
+            {
+                "ts": 1700000000.0, "event": "lint", "surface": "gate", "tool": "Write",
+                "path": "/p/a.md", "decision": "block", "streak": 1, "payload_words": 10,
+                "origin_totals": {"new": 1}, "rule_totals": {"banned-word": 1},
+                "findings": [{"rule": "banned-word", "severity": "error", "origin": "new"}],
+                "session_id": "s1",
+            },
+            {
+                "ts": 1700000100.0, "event": "lint", "surface": "pre-commit", "tool": None,
+                "path": "/p/c.md", "decision": "block", "streak": 0, "payload_words": 300,
+                "rule_totals": {"banned-word": 1},
+                "findings": [{"rule": "banned-word", "severity": "error", "origin": "new"}],
+            },
+        ]
+        summary = linter.summarize_events(events)
+        self.assertEqual(summary["work"]["total_writes"], 1)
+        self.assertEqual(summary["work"]["blocked"], 1)
+        self.assertEqual(summary["blocks_by_origin"]["new_only"], 1)
+        self.assertEqual([r["rule"] for r in summary["rework_by_rule"]], ["banned-word"])
+        self.assertEqual(summary["precommit"], {"lints": 1, "blocked": 1, "words": 300})
+        self.assertEqual(summary["time"]["runs"], 2)
+
     def test_rework_words_charge_the_retry_not_the_first_attempt(self) -> None:
         def gate(ts: float, decision: str, streak: int, words: int, rules: list[str]) -> dict:
             return {
