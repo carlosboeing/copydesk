@@ -468,6 +468,24 @@ class RenamedFileTests(GitRepositoryTestCase):
         result = self.cli("check", "--staged")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_a_rename_past_the_line_cap_is_not_charged_whole(self) -> None:
+        """Past OUTER_DIFF_LINE_CAP the hunk fallback stands in for the
+        character matcher. A pathspec naming only the new path filters the
+        old path's deletion out before git can pair the two, so git reports
+        a new file and one hunk covering all of it."""
+        blocks = [BANNED]
+        blocks += [f"Paragraph {i} sits here." for i in range(2, 2600)]
+        self.commit_initial("a.md", "\n\n".join(blocks) + "\n")
+        edited = "\n\n".join(blocks).replace(
+            "Paragraph 1500 sits here.", "Paragraph 1500 sits right here."
+        )
+        self._git("mv", "a.md", "b.md")
+        self.write("b.md", edited + "\n")
+        self._git("add", "b.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("pre-existing finding(s) left alone", result.stdout)
+
     def test_rename_detection_ignores_diff_renames_config(self) -> None:
         self.commit_initial("a.md", LONG_ERROR + "\n\n" + CLEAN + "\n")
         self._git("config", "diff.renames", "false")

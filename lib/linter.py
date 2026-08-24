@@ -2667,8 +2667,21 @@ def _added_char_ranges(diff_text: str, masked_proposed: str) -> list[tuple[int, 
     return ranges
 
 
+def _staged_pathspec(index_path: str, base_path: str) -> list[str]:
+    """Both sides of a rename, because git needs both to detect one.
+
+    Rename detection pairs a deletion with an addition, and a pathspec naming
+    only the new path filters the deletion out before the pairing runs. Git
+    then reports the file as new and emits one hunk covering all of it, so
+    every line of a renamed document reads as added.
+    """
+    if base_path and base_path != index_path:
+        return [index_path, base_path]
+    return [index_path]
+
+
 def _staged_changed_ranges(
-    base_text: str, staged_text: str, work: Path, index_path: str
+    base_text: str, staged_text: str, work: Path, index_path: str, base_path: str = ""
 ) -> list[tuple[int, int]]:
     """Where the staged version differs from its HEAD version.
 
@@ -2683,7 +2696,9 @@ def _staged_changed_ranges(
         return _changed_char_ranges(masked_base, masked_staged)
     except _TooLargeToCompare:
         diff_text = _git_output(
-            ["diff", "--cached", "--find-renames", "--unified=0", "--", index_path], work
+            ["diff", "--cached", "--find-renames", "--unified=0", "--",
+             *_staged_pathspec(index_path, base_path)],
+            work,
         )
         if diff_text is None:
             # Unattributable and unbounded: charge nothing rather than block
@@ -2697,18 +2712,33 @@ def _staged_changed_ranges(
         return _added_char_ranges(diff_text, masked_staged)
 
 
-def _staged_adds_lines(work: Path, index_path: str) -> bool:
-    """Whether the staged diff adds lines, failing safe toward checking."""
-    numstat = _git_output(["diff", "--cached", "--numstat", "--", index_path], work)
+def _staged_adds_lines(work: Path, index_path: str, base_path: str = "") -> bool:
+    """Whether the staged diff adds lines, failing safe toward checking.
+
+    Both paths and rename detection, for the same reason the hunk fallback
+    needs them: without the old path a rename reads as a deletion line and an
+    addition line, and the first of those says nothing was added.
+    """
+    numstat = _git_output(
+        ["diff", "--cached", "--find-renames", "--numstat", "--",
+         *_staged_pathspec(index_path, base_path)],
+        work,
+    )
     if numstat is None:
         return True
-    additions = numstat.split("\t", 1)[0]
-    if additions == "-":
-        return True
-    try:
-        return int(additions) > 0
-    except ValueError:
-        return True
+    total, seen = 0, False
+    for line in numstat.splitlines():
+        if not line.strip():
+            continue
+        seen = True
+        additions = line.split("\t", 1)[0]
+        if additions == "-":
+            return True
+        try:
+            total += int(additions)
+        except ValueError:
+            return True
+    return True if not seen else total > 0
 
 
 def run_staged(cwd: Union[str, Path, None] = None) -> int:
@@ -2777,14 +2807,15 @@ def run_staged(cwd: Union[str, Path, None] = None) -> int:
             if has_head:
                 base = _git_output(["show", f"HEAD:{base_path or path}"], work) or ""
             origined = _attribute_origins(
-                findings, exclude_markdown(staged), _staged_changed_ranges(base, staged, work, path)
+                findings, exclude_markdown(staged),
+                _staged_changed_ranges(base, staged, work, path, base_path)
             )
 
             scoped = [
                 f for f in origined
                 if f.check in DOCUMENT_SCOPED_BLOCKING_RULES and f.severity == "error"
             ]
-            adds_lines = _staged_adds_lines(work, path)
+            adds_lines = _staged_adds_lines(work, path, base_path)
             # lint(HEAD) is the expensive half of this loop, so read it only
             # where a decision below turns on it.
             wants_previous = bool(base) and (
