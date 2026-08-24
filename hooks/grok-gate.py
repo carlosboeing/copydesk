@@ -16,6 +16,12 @@ Translation is envelope-only:
   open past the gate.
 - ``sessionId`` gains a ``grok-`` prefix, which gives Grok its own retry
   state files instead of sharing three-strike counters with Claude Code.
+- A relative ``file_path`` is resolved against the payload's
+  ``workspaceRoot``. Grok's own tool declaration says the model may send
+  "a relative path in the workspace or an absolute path", and Grok's hook
+  contract names no working directory for the runner, so an unresolved
+  relative path reaches linter.py as a path that may not exist. The read
+  then fails, the gate exits 0, and the write lands unjudged.
 
 Decisions follow Grok's documented hook contract: exit 2 with stderr as the
 deny reason, or stdout JSON ``{"decision": "deny", "reason": ...}``. The
@@ -55,6 +61,24 @@ def _linter_path() -> Path | None:
     return None
 
 
+def _workspace_root(payload: dict) -> Path | None:
+    """Where a relative file_path is anchored.
+
+    The payload carries both keys in a grok 1.0.5 capture. The environment
+    variables are the documented fallback: Grok injects them for hooks and
+    guarantees no working directory of its own.
+    """
+    for key in ("workspaceRoot", "cwd"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return Path(value)
+    for name in ("GROK_WORKSPACE_ROOT", "CLAUDE_PROJECT_DIR"):
+        value = os.environ.get(name)
+        if value:
+            return Path(value)
+    return None
+
+
 def translate(payload: object) -> dict | None:
     """Map Grok's PreToolUse payload to the CopyDesk envelope, or None."""
     if not isinstance(payload, dict):
@@ -68,6 +92,14 @@ def translate(payload: object) -> dict | None:
     if not isinstance(session_id, str) or not session_id:
         return None
     translated_input = dict(tool_input)
+    file_path = translated_input.get("file_path")
+    if isinstance(file_path, str) and file_path and not os.path.isabs(file_path):
+        root = _workspace_root(payload)
+        if root is not None:
+            translated_input["file_path"] = str(root / file_path)
+        # With no root to anchor it, the path passes through as it arrived.
+        # That is what happened before this resolution existed, so the gate
+        # is never worse off than it was.
     if mapped == "Edit" and "replace_all" not in translated_input:
         translated_input["replace_all"] = False
     return {

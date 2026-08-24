@@ -78,6 +78,47 @@ class TranslateTests(unittest.TestCase):
         }
         self.assertIs(grok_gate.translate(payload)["tool_input"]["replace_all"], True)
 
+    def test_a_relative_path_is_anchored_to_the_workspace_root(self) -> None:
+        """Grok's own tool declaration lets the model send "a relative path
+        in the workspace", and its hook contract names no working directory
+        for the runner. Without anchoring, linter.py resolves the path
+        against whatever directory the runner happens to use."""
+        payload = _write_payload()
+        payload["workspaceRoot"] = "/ws"
+        payload["cwd"] = "/elsewhere"
+        payload["toolInput"] = {"file_path": "docs/note.md", "content": "hello\n"}
+        translated = grok_gate.translate(payload)
+        self.assertEqual(translated["tool_input"]["file_path"], "/ws/docs/note.md")
+
+    def test_cwd_anchors_when_the_payload_carries_no_workspace_root(self) -> None:
+        payload = _write_payload()
+        payload["cwd"] = "/elsewhere"
+        payload["toolInput"] = {"file_path": "note.md", "content": "hello\n"}
+        translated = grok_gate.translate(payload)
+        self.assertEqual(translated["tool_input"]["file_path"], "/elsewhere/note.md")
+
+    def test_the_environment_anchors_when_the_payload_carries_neither(self) -> None:
+        payload = _write_payload()
+        payload["toolInput"] = {"file_path": "note.md", "content": "hello\n"}
+        with mock.patch.dict(os.environ, {"GROK_WORKSPACE_ROOT": "/env-root"}):
+            translated = grok_gate.translate(payload)
+        self.assertEqual(translated["tool_input"]["file_path"], "/env-root/note.md")
+
+    def test_an_absolute_path_is_left_alone(self) -> None:
+        payload = _write_payload()
+        payload["workspaceRoot"] = "/ws"
+        translated = grok_gate.translate(payload)
+        self.assertEqual(translated["tool_input"]["file_path"], "/tmp/note.md")
+
+    def test_an_unanchorable_relative_path_passes_through(self) -> None:
+        """No root to anchor it, so the path arrives as it was sent. That is
+        the behaviour before this resolution existed."""
+        payload = _write_payload()
+        payload["toolInput"] = {"file_path": "note.md", "content": "hello\n"}
+        with mock.patch.dict(os.environ, {}, clear=True):
+            translated = grok_gate.translate(payload)
+        self.assertEqual(translated["tool_input"]["file_path"], "note.md")
+
     def test_other_tools_translate_to_nothing(self) -> None:
         payload = {"sessionId": "abc", "toolName": "read_file", "toolInput": {}}
         self.assertIsNone(grok_gate.translate(payload))
@@ -117,13 +158,16 @@ class EndToEndTests(unittest.TestCase):
         self.state_dir = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.state_dir)
 
-    def _run(self, payload: dict) -> subprocess.CompletedProcess:
+    def _run(self, payload: dict, cwd: Path | None = None) -> subprocess.CompletedProcess:
         env = dict(os.environ)
         env["COPYDESK_LINTER"] = str(ROOT / "lib" / "linter.py")
         env["COPYDESK_STATE_DIR"] = str(self.state_dir)
+        env.pop("GROK_WORKSPACE_ROOT", None)
+        env.pop("CLAUDE_PROJECT_DIR", None)
         return subprocess.run(
             [sys.executable, str(ROOT / "hooks" / "grok-gate.py")],
             input=json.dumps(payload), capture_output=True, text=True, env=env,
+            cwd=str(cwd) if cwd is not None else None,
         )
 
     def test_a_violating_write_returns_a_deny_decision_on_exit_zero(self) -> None:
@@ -142,6 +186,37 @@ class EndToEndTests(unittest.TestCase):
         decision = json.loads(result.stdout)
         self.assertEqual(decision["decision"], "deny")
         self.assertIn("orphan-pointer", decision["reason"])
+
+    def test_a_relative_path_write_is_denied_from_another_directory(self) -> None:
+        """The runner's own directory must not decide whether the gate sees
+        the file. This runs the wrapper from a directory that is not the
+        workspace root, exactly as Grok gives no guarantee it will not."""
+        workspace = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, workspace)
+        elsewhere = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, elsewhere)
+        # An edit, not a write: the linter reads the existing file from disk
+        # to build the proposed document, so an unanchored relative path is
+        # the case that fails. A write carries its content in the payload and
+        # would block either way, proving nothing.
+        (workspace / "dirty.md").write_text("One short line.\n", encoding="utf-8")
+        payload = _write_payload()
+        payload["toolName"] = "search_replace"
+        payload["workspaceRoot"] = str(workspace)
+        payload["toolInput"] = {
+            "file_path": "dirty.md",
+            "old_string": "One short line.",
+            "new_string": (
+                "This is definitely just a quick update in order to fix the "
+                "issue at hand. Additionally it actually utilises several "
+                "banned words that should absolutely trigger a block decision."
+            ),
+        }
+        result = self._run(payload, cwd=elsewhere)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.strip(), "the gate said nothing at all")
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["decision"], "deny")
 
     def test_a_clean_write_is_allowed_in_silence(self) -> None:
         payload = _write_payload()
