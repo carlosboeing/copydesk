@@ -1713,9 +1713,12 @@ def summarize_events(
     lint_events = [e for e in events if e.get("event") == "lint"]
     turn_events = [e for e in events if e.get("event") == "turn"]
     # A CLI lint blocks no write and identifies no changed region, so it cannot
-    # answer whether the gate helped. Gate effectiveness reads gate events only.
-    gate_events = [e for e in lint_events if str(e.get("surface", "gate")) != "cli"]
+    # answer whether the gate helped. Gate effectiveness reads gate events only:
+    # a pre-commit refusal stops a commit, not a write, so it is bucketed beside
+    # the CLI's rather than counted as gate activity.
+    gate_events = [e for e in lint_events if str(e.get("surface", "gate")) == "gate"]
     cli_events = [e for e in lint_events if str(e.get("surface", "gate")) == "cli"]
+    precommit_events = [e for e in lint_events if str(e.get("surface", "gate")) == "pre-commit"]
 
     if events:
         min_ts = min(float(e.get("ts", current_time)) for e in events)
@@ -1932,6 +1935,11 @@ def summarize_events(
             "blocked": cli_blocked,
             "words": cli_words,
         },
+        "precommit": {
+            "lints": len(precommit_events),
+            "blocked": sum(1 for e in precommit_events if e.get("decision") == "block"),
+            "words": sum(int(e.get("payload_words", 0)) for e in precommit_events),
+        },
         "cost": {
             "reminder_turns": len(turn_events),
             "reminder_word_count": REMINDER_WORD_COUNT,
@@ -2025,6 +2033,13 @@ def format_stats_terminal(summary: dict[str, object]) -> str:
     if isinstance(cli, dict) and int(cli.get("lints", 0)) > 0:
         lines.append("CLI lints (not gate activity)")
         lines.append(f"  {cli['lints']} runs, {cli['blocked']} with blocking findings, {int(cli['words']):,} words linted")
+        lines.append("  Excluded from the work, origin and rework figures above.")
+        lines.append("")
+
+    precommit = summary.get("precommit")
+    if isinstance(precommit, dict) and int(precommit.get("lints", 0)) > 0:
+        lines.append("Pre-commit lints (not gate activity)")
+        lines.append(f"  {precommit['lints']} runs, {precommit['blocked']} refusing the commit, {int(precommit['words']):,} words checked")
         lines.append("  Excluded from the work, origin and rework figures above.")
         lines.append("")
 
@@ -2154,6 +2169,14 @@ def format_report_markdown(summary: dict[str, object], source: Optional[Path] = 
         lines.append("")
         lines.append(f"{cli['lints']} runs, {cli['blocked']} with blocking findings, {int(cli['words']):,} words linted.")
         lines.append("A CLI run blocks no write and identifies no changed region, so it is excluded from the figures above.")
+        lines.append("")
+
+    precommit = summary.get("precommit")
+    if isinstance(precommit, dict) and int(precommit.get("lints", 0)) > 0:
+        lines.append("## Pre-commit lints")
+        lines.append("")
+        lines.append(f"{precommit['lints']} runs, {precommit['blocked']} refusing the commit, {int(precommit['words']):,} words checked.")
+        lines.append("A pre-commit refusal stops a commit, not a write, so it is excluded from the figures above.")
         lines.append("")
 
     rework_by_rule = summary.get("rework_by_rule", [])
@@ -2645,13 +2668,22 @@ def run_staged(cwd: Union[str, Path, None] = None) -> int:
     """Check every staged Markdown file against the text it adds.
 
     The index is judged, not the working tree: ``git show :path`` reads what
-    will be committed and nothing else. A finding blocks only when the text
-    that carries it is new relative to HEAD, or when a document-scoped rule
-    fires now and did not fire in HEAD. Warn-severity findings report and
-    never block, whatever the channel decides. 0 clean, 1 refused.
+    will be committed and nothing else. Git resolves a bare pathspec against
+    the current directory but reports names relative to the repository root,
+    so the root is resolved once and every call - the pathspec, the blob
+    reads, the display path - runs from there, whatever directory started
+    the command. A finding blocks only when the text that carries it is new
+    relative to HEAD, or when a document-scoped rule fires now and did not
+    fire in HEAD. Warn-severity findings report and never block, whatever
+    the channel decides. 0 clean, 1 refused.
     """
-    work = Path(cwd) if cwd is not None else Path.cwd()
+    start = Path(cwd) if cwd is not None else Path.cwd()
     try:
+        root = _git_output(["rev-parse", "--show-toplevel"], start)
+        if root is None:
+            print("error: copydesk check --staged needs a git repository", file=sys.stderr)
+            return 64
+        work = Path(root.strip())
         staged_files = _staged_markdown(work)
         if staged_files is None:
             print("error: copydesk check --staged needs a git repository", file=sys.stderr)

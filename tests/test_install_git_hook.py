@@ -90,10 +90,10 @@ class GitRepositoryTestCase(unittest.TestCase):
             raise AssertionError(f"git {args} failed: {result.stderr}")
         return result
 
-    def cli(self, *args: str) -> subprocess.CompletedProcess:
+    def cli(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(
             [str(self.bin_dir / "copydesk"), *args],
-            capture_output=True, text=True, cwd=str(self.repo), env=self._env(),
+            capture_output=True, text=True, cwd=str(cwd or self.repo), env=self._env(),
         )
 
     def write(self, name: str, content: str) -> Path:
@@ -220,6 +220,23 @@ class StagedScopeTests(GitRepositoryTestCase):
         result = self.cli("check", "--staged")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("sentence-length", result.stdout)
+
+    def test_a_subdirectory_run_judges_the_whole_tree(self) -> None:
+        # Git resolves a bare pathspec against the cwd but reports names
+        # relative to the repository root, so a run from docs/ must resolve
+        # the root itself or it sees only the subtree and doubles the path.
+        self.commit_initial("a.md", CLEAN + "\n")
+        (self.repo / "docs").mkdir()
+        self.write("docs/b.md", CLEAN + "\n\n" + BANNED + "\n")
+        self.staged("docs/b.md")
+        result = self.cli("check", "--staged", cwd=self.repo / "docs")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("banned-word", result.stdout)
+        recorded = [
+            event["path"] for event in linter.read_events(self.state)
+            if event.get("surface") == "pre-commit"
+        ]
+        self.assertEqual(recorded, [str(self.repo / "docs" / "b.md")])
 
 
 class DocumentScopedRuleTests(GitRepositoryTestCase):
