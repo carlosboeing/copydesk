@@ -2671,10 +2671,14 @@ def _git_operation_in_progress(work: Path) -> Optional[str]:
     """The operation replaying someone else's prose, or None.
 
     Merge, cherry-pick and revert each set a ref while they are stopped. A
-    rebase sets none of them: it leaves a `rebase-merge` or `rebase-apply`
-    directory instead, and the manual commit that resolves a conflict does
-    run the hook. `REBASE_HEAD` is no use as the signal, because it still
-    resolves after the rebase finishes.
+    rebase sets none of them and leaves a `rebase-merge` or `rebase-apply`
+    directory; `git merge --squash` sets neither and leaves `SQUASH_MSG`.
+    The manual commit that finishes any of them does run the hook.
+
+    Both markers are safe signals because git clears them when the commit
+    lands. `REBASE_HEAD` is not, and is deliberately absent here: it still
+    resolves after the rebase finishes, so keying on it would silence the
+    gate for every commit that followed.
     """
     for name, ref in (
         ("merge", "MERGE_HEAD"),
@@ -2683,15 +2687,19 @@ def _git_operation_in_progress(work: Path) -> Optional[str]:
     ):
         if _git_output(["rev-parse", "--verify", "-q", ref], work) is not None:
             return name
-    for marker in ("rebase-merge", "rebase-apply"):
+    for name, marker in (
+        ("rebase", "rebase-merge"),
+        ("rebase", "rebase-apply"),
+        ("squash merge", "SQUASH_MSG"),
+    ):
         located = _git_output(["rev-parse", "--git-path", marker], work)
         if located is None:
             continue
         candidate = Path(located.strip())
         if not candidate.is_absolute():
             candidate = work / candidate
-        if candidate.is_dir():
-            return "rebase"
+        if candidate.exists():
+            return name
     return None
 
 

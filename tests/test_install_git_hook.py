@@ -228,6 +228,18 @@ class StagedScopeTests(GitRepositoryTestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("rebase in progress; staged prose was not judged", result.stdout)
 
+    def test_a_squash_merge_skips_staged_prose(self) -> None:
+        """`git merge --squash` sets none of the three refs and leaves no
+        rebase directory. It writes SQUASH_MSG, and git clears that when the
+        commit lands, which is what makes it a safe signal."""
+        self.commit_initial("a.md", CLEAN + "\n")
+        (self.repo / ".git" / "SQUASH_MSG").write_text("squashed\n", encoding="utf-8")
+        self.write("a.md", CLEAN + "\n\n" + BANNED + "\n")
+        self.staged("a.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("squash merge in progress; staged prose was not judged", result.stdout)
+
     def test_a_finished_rebase_is_judged_again(self) -> None:
         """REBASE_HEAD still resolves after a rebase completes, so the guard
         keys on the directory. Removing it must restore judging."""
