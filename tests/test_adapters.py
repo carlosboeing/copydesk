@@ -72,6 +72,30 @@ class AdapterTests(unittest.TestCase):
         adapter = adapters.REGISTRY["claude-code"]
         self.assertIn(adapter.instruction_file, adapter.installs)
 
+    def test_a_gate_verified_adapter_says_so_in_its_installs_line(self) -> None:
+        """`gate_verified` has no reader outside this test. The docstring
+        presents it as what governs a gate claim, and the user-visible half
+        is the `installs` string, so the two are tied here rather than left
+        free to drift."""
+        for name, adapter in adapters.REGISTRY.items():
+            if not adapter.gate_verified:
+                continue
+            self.assertTrue(
+                "gate" in adapter.installs or "hook" in adapter.installs,
+                f"{name} claims a verified gate and names nothing that enforces one",
+            )
+
+    def test_an_unverified_adapter_promises_no_gate(self) -> None:
+        """The `git` adapter installs a commit-msg hook and is not gate
+        verified, so the word tested here is `gate`, not `hook`."""
+        for name, adapter in adapters.REGISTRY.items():
+            if adapter.gate_verified:
+                continue
+            self.assertNotIn(
+                "gate", adapter.installs,
+                f"{name} promises a gate its transcript has not proved",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
