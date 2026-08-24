@@ -76,6 +76,17 @@ if (fs.readFileSync(marker(), "utf8") !== "x") {
 process.env.FAKE_EXIT = "0";
 await handler({ tool: "write", callID: "call-pass", sessionID: "ses-1" }, { args });
 
+// Edit stays ungated until a live OpenCode payload confirms its argument shape.
+process.env.FAKE_EXIT = "2";
+await handler(
+  { tool: "edit", callID: "call-edit", sessionID: "ses-1" },
+  { args: { filePath: "/tmp/proof.md", oldString: "hello", newString: "goodbye" } },
+);
+if (fs.readFileSync(marker(), "utf8") !== "xx") {
+  console.error("the unverified edit tool invoked the linter");
+  process.exit(1);
+}
+
 // A non-Markdown target is none of the gate's business even when the fake
 // linter would block.
 process.env.FAKE_EXIT = "2";

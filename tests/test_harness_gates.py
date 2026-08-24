@@ -84,6 +84,25 @@ class HarnessGatePlanTests(unittest.TestCase):
         self.assertEqual(registered["hooks"]["PreToolUse"][0]["matcher"], "Write|Edit")
         self.assertTrue((self.home / ".grok" / "hooks" / "copydesk" / "rules" / "plain.json").is_file())
 
+    def test_setup_makes_the_grok_gate_executable_with_claude_selected(self) -> None:
+        (self.home / ".grok").mkdir()
+        (self.home / ".claude").mkdir()
+        env = dict(os.environ)
+        env.update({
+            "COPYDESK_HOME": str(self.home),
+            "XDG_CONFIG_HOME": str(self.home / "config"),
+            "XDG_STATE_HOME": str(self.home / "state"),
+            "PATH": str(self.home / "nothing"),
+        })
+        env.pop("COPYDESK_STATE_DIR", None)
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", "--defaults", "--yes"],
+            cwd=self.home, capture_output=True, text=True, env=env, input="",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        gate = self.home / ".grok" / "hooks" / "copydesk" / "grok-gate.py"
+        self.assertTrue(os.access(gate, os.X_OK), result.stdout)
+
     def test_the_opencode_plan_installs_one_plugin_and_a_bundle(self) -> None:
         with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.home / "config")}):
             writes = self._writes(self._plan(["opencode"]))

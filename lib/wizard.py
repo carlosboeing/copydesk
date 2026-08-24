@@ -1031,6 +1031,17 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
         # it visible to `copydesk hook list` rather than silently absent.
         hook.record_repository(repository, "skipped")
 
+    if "grok" in selected_tools:
+        # A gate script without the executable bit fails open: the hook
+        # runner records a spawn failure and lets every write through.
+        grok_gate = copydesk_home / ".grok" / "hooks" / "copydesk" / "grok-gate.py"
+        if grok_gate.is_file():
+            try:
+                os.chmod(grok_gate, 0o755)
+            except OSError as error:
+                out_stream.write(f"error  cannot make {grok_gate} executable: {error}\n")
+                return 1
+
     if "claude-code" in selected_tools:
         gate_path = copydesk_home / ".claude" / "hooks" / "copydesk" / "gate.sh"
         reminder_path = copydesk_home / ".claude" / "hooks" / "copydesk" / "reminder.sh"
@@ -1045,16 +1056,6 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
         else:
             out_stream.write(f"Setup complete, but proof run failed: {reason}. Run copydesk doctor for details.\n")
     else:
-        if "grok" in selected_tools:
-            # A gate script without the executable bit fails open: the hook
-            # runner records a spawn failure and lets every write through.
-            grok_gate = copydesk_home / ".grok" / "hooks" / "copydesk" / "grok-gate.py"
-            if grok_gate.is_file():
-                try:
-                    os.chmod(grok_gate, 0o755)
-                except OSError as error:
-                    out_stream.write(f"error  cannot make {grok_gate} executable: {error}\n")
-                    return 1
         out_stream.write(COPY["outro_success"] + "\n")
 
     out_stream.flush()

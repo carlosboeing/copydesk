@@ -8,12 +8,8 @@
 //
 // The envelope translation mirrors hooks/grok-gate.py:
 //
-//   - tool names `write` / `edit` map to `Write` / `Edit`; the camelCase
-//     arguments (filePath, content, oldString, newString) map to the
-//     snake_case keys linter.py reads.
-//   - `edit` carries no replace_all in practice; linter.py refuses to guess,
-//     so a missing one is injected as false rather than letting the edit
-//     fail open past the gate.
+//   - tool name `write` maps to `Write`; the camelCase arguments (filePath,
+//     content) map to the snake_case keys linter.py reads.
 //   - the session id gains an `opencode-` prefix, which gives OpenCode its
 //     own retry state files instead of sharing three-strike counters with
 //     other harnesses.
@@ -35,7 +31,6 @@ import { fileURLToPath } from "node:url"
 
 const TOOL_NAMES = {
   write: "Write",
-  edit: "Edit",
 }
 
 function linterPath() {
@@ -62,13 +57,6 @@ function translate(input, args) {
   if (toolName === "Write") {
     if (typeof args.content !== "string") return null
     toolInput.content = args.content
-  } else {
-    if (typeof args.oldString !== "string" || typeof args.newString !== "string") return null
-    toolInput.old_string = args.oldString
-    toolInput.new_string = args.newString
-    toolInput.replace_all =
-      typeof args.replaceAll === "boolean" ? args.replaceAll :
-      typeof args.replace_all === "boolean" ? args.replace_all : false
   }
   return {
     tool_name: toolName,
