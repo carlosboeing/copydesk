@@ -76,14 +76,36 @@ if (fs.readFileSync(marker(), "utf8") !== "x") {
 process.env.FAKE_EXIT = "0";
 await handler({ tool: "write", callID: "call-pass", sessionID: "ses-1" }, { args });
 
-// Edit stays ungated until a live OpenCode payload confirms its argument shape.
+// An edit reaches the linter and is denied. OpenCode 1.18.21 declares the
+// edit parameters as filePath, oldString, newString and an optional
+// replaceAll, so those are the names translated here.
+process.env.FAKE_EXIT = "2";
+let editDenied = false;
+try {
+  await handler(
+    { tool: "edit", callID: "call-edit", sessionID: "ses-1" },
+    { args: { filePath: "/tmp/proof.md", oldString: "hello", newString: "goodbye" } },
+  );
+} catch {
+  editDenied = true;
+}
+if (!editDenied) {
+  console.error("an edit carrying a finding was not denied");
+  process.exit(1);
+}
+if (fs.readFileSync(marker(), "utf8") !== "xxx") {
+  console.error("the edit tool never reached the linter");
+  process.exit(1);
+}
+
+// An edit missing oldString cannot be translated and must not be judged.
 process.env.FAKE_EXIT = "2";
 await handler(
-  { tool: "edit", callID: "call-edit", sessionID: "ses-1" },
-  { args: { filePath: "/tmp/proof.md", oldString: "hello", newString: "goodbye" } },
+  { tool: "edit", callID: "call-edit-partial", sessionID: "ses-1" },
+  { args: { filePath: "/tmp/proof.md", newString: "goodbye" } },
 );
-if (fs.readFileSync(marker(), "utf8") !== "xx") {
-  console.error("the unverified edit tool invoked the linter");
+if (fs.readFileSync(marker(), "utf8") !== "xxx") {
+  console.error("an untranslatable edit reached the linter");
   process.exit(1);
 }
 
