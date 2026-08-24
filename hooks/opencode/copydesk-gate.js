@@ -85,7 +85,21 @@ function translate(input, args) {
 // user-visible write consumes two three-strike attempts and the escape's
 // allow is immediately re-judged as a fresh block. The verdict cache keeps
 // the decision stable should both passes ever carry a callID.
+//
+// The plugin lives as long as the OpenCode server, and each entry holds a
+// full findings text, so the map is bounded. Only the passes of one call
+// read a key, and insertion order makes the oldest the first to go.
 const VERDICTS = new Map()
+const VERDICT_LIMIT = 64
+
+function rememberVerdict(key, denial) {
+  VERDICTS.set(key, denial)
+  while (VERDICTS.size > VERDICT_LIMIT) {
+    const oldest = VERDICTS.keys().next()
+    if (oldest.done) break
+    VERDICTS.delete(oldest.value)
+  }
+}
 
 export const CopydeskGate = async () => ({
   "tool.execute.before": async (input, output) => {
@@ -134,7 +148,7 @@ export const CopydeskGate = async () => ({
       denial = null // fail open on any internal error
     }
     try {
-      VERDICTS.set(cacheKey, denial)
+      rememberVerdict(cacheKey, denial)
     } catch { } // an uncacheable verdict still applies to this call
     if (denial !== null) {
       throw new Error(`CopyDesk denied this Markdown write:\n${denial}`)

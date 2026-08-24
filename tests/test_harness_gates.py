@@ -53,9 +53,11 @@ class HarnessGatePlanTests(unittest.TestCase):
         self.assertGreaterEqual(handler["timeout"], 10)
 
     def test_the_grok_gate_source_carries_the_executable_bit(self) -> None:
-        # Setup chmods the installed copy after apply.execute, and git
-        # preserves this mode on checkout, so a fresh clone installs a
-        # runnable gate even before setup's own chmod runs.
+        # The installed copy takes its mode from setup's chmod alone:
+        # apply.execute writes every planned file with Path.write_text
+        # (lib/apply.py), which creates it at the process umask and never
+        # copies the source mode. This bit matters when the gate runs
+        # straight from a checkout.
         source = ROOT / "hooks" / "grok-gate.py"
         self.assertTrue(source.exists())
         self.assertTrue(os.access(source, os.X_OK))

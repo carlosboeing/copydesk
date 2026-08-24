@@ -117,12 +117,25 @@ await handler(
   { args: { command: "ls" } },
 );
 
+// The verdict cache is bounded. Fill it past its limit with distinct calls,
+// then re-run the first callID: its entry is gone, so the linter runs again.
+process.env.FAKE_EXIT = "0";
+for (let i = 0; i < 80; i++) {
+  await handler({ tool: "write", callID: `fill-${i}`, sessionID: "ses-1" }, { args });
+}
+const beforeEviction = fs.readFileSync(marker(), "utf8").length;
+await handler({ tool: "write", callID: "fill-0", sessionID: "ses-1" }, { args });
+if (fs.readFileSync(marker(), "utf8").length !== beforeEviction + 1) {
+  console.error("the oldest verdict was still cached after 80 calls");
+  process.exit(1);
+}
+
 console.log("PLUGIN-OK");
 """
 
 HEADER = 'import * as fs from "node:fs";\n'
 MARKER_FN = "const marker = () => process.env.MARKER;\n"
-RUNNER_SOURCE = HEADER + MARKER_FN + RUNNER.replace("fs.readFileSync(marker()", "fs.readFileSync(marker()")
+RUNNER_SOURCE = HEADER + MARKER_FN + RUNNER
 
 
 class OpenCodePluginTests(unittest.TestCase):
