@@ -115,6 +115,36 @@ class HarnessGatePlanTests(unittest.TestCase):
         plugin_names = [p.name for p in writes if p.parent.name == "plugins"]
         self.assertEqual(plugin_names, ["copydesk-gate.js"])
 
+    def test_the_opencode_block_lands_beside_its_plugin_under_xdg(self) -> None:
+        """The gate resolved the OpenCode root through XDG_CONFIG_HOME while
+        the instruction file expanded the literal ~/.config, so on a machine
+        that sets the variable the block landed in a file OpenCode never
+        reads and uninstall looked for it in the same unread place."""
+        xdg = self.home / "elsewhere"
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(xdg)}):
+            writes = self._writes(self._plan(["opencode"]))
+        plugin = xdg / "opencode" / "plugins" / "copydesk-gate.js"
+        # Instruction targets are coalesced through Path.resolve, so the
+        # comparison resolves too — on macOS /var is a link to /private/var.
+        block = (xdg / "opencode" / "AGENTS.md").resolve()
+        self.assertIn(plugin, writes)
+        self.assertIn(block, writes)
+        stale = (self.home / ".config" / "opencode" / "AGENTS.md").resolve()
+        self.assertNotIn(stale, writes)
+
+    def test_a_literal_harness_home_ignores_xdg(self) -> None:
+        """~/.claude and ~/.grok are not XDG base directories, and the tools
+        that own them do not relocate on the variable."""
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.home / "elsewhere")}):
+            self.assertEqual(
+                wizard._adapter_home(wizard.adapters.REGISTRY["grok"], self.home),
+                self.home / ".grok",
+            )
+            self.assertEqual(
+                wizard._adapter_home(wizard.adapters.REGISTRY["claude-code"], self.home),
+                self.home / ".claude",
+            )
+
     def test_an_unrelated_tool_plans_neither_gate(self) -> None:
         writes = self._writes(self._plan(["cursor"]))
         for path in writes:

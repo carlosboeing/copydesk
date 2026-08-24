@@ -448,7 +448,7 @@ def instruction_targets(
         adapter = adapters.REGISTRY.get(tool)
         if not adapter or not adapter.instruction_file:
             continue
-        declared = home / adapter.home.replace("~/", "") / adapter.instruction_file
+        declared = _adapter_home(adapter, home) / adapter.instruction_file
         try:
             exists = declared.exists()
         except OSError:
@@ -487,6 +487,23 @@ def _bundle_writes(writes: list["apply.Write"], target: Path) -> None:
 def _xdg_config(home: Path) -> Path:
     """The config root setup writes into, honouring XDG_CONFIG_HOME."""
     return Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")).expanduser()
+
+
+def _adapter_home(adapter: "adapters.Adapter", home: Path) -> Path:
+    """Where a harness keeps its own files.
+
+    ``~/.claude`` and ``~/.grok`` are literal paths their tools do not
+    relocate. Anything under ``~/.config`` is an XDG base directory and
+    follows XDG_CONFIG_HOME instead: OpenCode reads that variable, so
+    resolving it here keeps the plugin, the linter bundle and AGENTS.md
+    under one root. Expanding the literal path in one place and the XDG
+    path in another wrote the instruction block to a file OpenCode never
+    reads.
+    """
+    relative = adapter.home.replace("~/", "")
+    if relative == ".config" or relative.startswith(".config/"):
+        return _xdg_config(home) / relative[len(".config"):].lstrip("/")
+    return home / relative
 
 
 def _build_plan(
@@ -1082,7 +1099,7 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
     for name, adapter in adapters.REGISTRY.items():
         if name == "git" or not adapter.instruction_file:
             continue
-        inst_file = copydesk_home / adapter.home.replace("~/", "") / adapter.instruction_file
+        inst_file = _adapter_home(adapter, copydesk_home) / adapter.instruction_file
         if inst_file.is_file():
             try:
                 text = inst_file.read_text(encoding="utf-8")
@@ -1188,7 +1205,7 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
     # Every harness home the prune must stop below, plus the config root.
     # A directory CopyDesk created and emptied goes; ~/.claude never does.
     homes = [
-        copydesk_home / adapter.home.replace("~/", "")
+        _adapter_home(adapter, copydesk_home)
         for adapter in adapters.REGISTRY.values()
         if adapter.home != "."
     ]
