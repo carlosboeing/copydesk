@@ -466,6 +466,29 @@ def instruction_targets(
     return list(grouped.values())
 
 
+def _bundle_writes(writes: list["apply.Write"], target: Path) -> None:
+    """Plan the linter bundle beside a gate: every lib module and rule preset.
+
+    The gate scripts import lib/linter.py from beside themselves once
+    installed, and linter.py compiles rules/plain.json at import. A bundle
+    missing either raises PresetNotFound inside the hook, which fails open —
+    so an incomplete bundle would silently switch a harness's gate off.
+    """
+    writes.append(apply.Write(target / "linter.py", (BUNDLE_ROOT / "lib" / "linter.py").read_text(encoding="utf-8")))
+    for py_file in sorted((BUNDLE_ROOT / "lib").glob("*.py")):
+        if py_file.name != "linter.py":
+            writes.append(apply.Write(target / py_file.name, py_file.read_text(encoding="utf-8")))
+    rules_dir = BUNDLE_ROOT / "rules"
+    if rules_dir.is_dir():
+        for json_file in sorted(rules_dir.glob("*.json")):
+            writes.append(apply.Write(target / "rules" / json_file.name, json_file.read_text(encoding="utf-8")))
+
+
+def _xdg_config(home: Path) -> Path:
+    """The config root setup writes into, honouring XDG_CONFIG_HOME."""
+    return Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")).expanduser()
+
+
 def _build_plan(
     home: Path,
     config_path: Path,
@@ -488,15 +511,7 @@ def _build_plan(
         writes.append(apply.Write(hooks_dir / "gate.sh", gate_src.read_text(encoding="utf-8")))
         writes.append(apply.Write(hooks_dir / "reminder.sh", reminder_src.read_text(encoding="utf-8")))
 
-        lib_dir = BUNDLE_ROOT / "lib"
-        if lib_dir.is_dir():
-            for py_file in lib_dir.glob("*.py"):
-                writes.append(apply.Write(hooks_dir / py_file.name, py_file.read_text(encoding="utf-8")))
-
-        rules_dir = BUNDLE_ROOT / "rules"
-        if rules_dir.is_dir():
-            for json_file in rules_dir.glob("*.json"):
-                writes.append(apply.Write(hooks_dir / "rules" / json_file.name, json_file.read_text(encoding="utf-8")))
+        _bundle_writes(writes, hooks_dir)
 
         # Rendered from the settings this run is about to write, never copied
         # from the repository. A copy carries the default style whatever the
@@ -552,6 +567,47 @@ def _build_plan(
         hooks["UserPromptSubmit"] = prompt_submit
 
         writes.append(apply.Write(settings_path, json.dumps(settings_doc, indent=2) + "\n"))
+
+    if "grok" in selected_tools:
+        # Grok Build TUI takes Claude-schema hook files. The global
+        # ~/.grok/hooks/ layer is always trusted, so no per-project trust step
+        # rides on the install, and [compat.claude] hooks stays off: this
+        # registration is Grok-native, not Claude ingest.
+        grok_dir = home / ".grok" / "hooks" / "copydesk"
+        writes.append(apply.Write(
+            grok_dir / "grok-gate.py",
+            (BUNDLE_ROOT / "hooks" / "grok-gate.py").read_text(encoding="utf-8"),
+        ))
+        _bundle_writes(writes, grok_dir)
+        registration = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Write|Edit",
+                        "hooks": [{
+                            "type": "command",
+                            "command": str(grok_dir / "grok-gate.py"),
+                            "timeout": 30,
+                        }],
+                    }
+                ]
+            }
+        }
+        writes.append(apply.Write(
+            home / ".grok" / "hooks" / "copydesk.json",
+            json.dumps(registration, indent=2) + "\n",
+        ))
+
+    if "opencode" in selected_tools:
+        # OpenCode loads plugin modules from its config directory. One
+        # registration only: naming the same module twice makes both copies
+        # fire per tool call and corrupts the shared retry state.
+        opencode_root = _xdg_config(home) / "opencode"
+        writes.append(apply.Write(
+            opencode_root / "plugins" / "copydesk-gate.js",
+            (BUNDLE_ROOT / "hooks" / "opencode" / "copydesk-gate.js").read_text(encoding="utf-8"),
+        ))
+        _bundle_writes(writes, opencode_root / "copydesk")
 
     # One instruction file per harness, coalesced by real path. Which
     # channels a file carries is decided after symlinks resolve: where two
@@ -989,6 +1045,16 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
         else:
             out_stream.write(f"Setup complete, but proof run failed: {reason}. Run copydesk doctor for details.\n")
     else:
+        if "grok" in selected_tools:
+            # A gate script without the executable bit fails open: the hook
+            # runner records a spawn failure and lets every write through.
+            grok_gate = copydesk_home / ".grok" / "hooks" / "copydesk" / "grok-gate.py"
+            if grok_gate.is_file():
+                try:
+                    os.chmod(grok_gate, 0o755)
+                except OSError as error:
+                    out_stream.write(f"error  cannot make {grok_gate} executable: {error}\n")
+                    return 1
         out_stream.write(COPY["outro_success"] + "\n")
 
     out_stream.flush()
@@ -1028,6 +1094,23 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
     hooks_dir = copydesk_home / ".claude" / "hooks" / "copydesk"
     if hooks_dir.exists():
         targets.append(apply.Target(real=hooks_dir, kind="created"))
+
+    # 2b. Grok hook bundle and its registration file
+    grok_hooks_dir = copydesk_home / ".grok" / "hooks" / "copydesk"
+    if grok_hooks_dir.exists():
+        targets.append(apply.Target(real=grok_hooks_dir, kind="created"))
+    grok_registration = copydesk_home / ".grok" / "hooks" / "copydesk.json"
+    if grok_registration.is_file():
+        targets.append(apply.Target(real=grok_registration, kind="created"))
+
+    # 2c. OpenCode plugin module and linter bundle
+    opencode_root = _xdg_config(copydesk_home) / "opencode"
+    opencode_plugin = opencode_root / "plugins" / "copydesk-gate.js"
+    if opencode_plugin.is_file():
+        targets.append(apply.Target(real=opencode_plugin, kind="created"))
+    opencode_bundle = opencode_root / "copydesk"
+    if opencode_bundle.exists():
+        targets.append(apply.Target(real=opencode_bundle, kind="created"))
 
     # 3. Output styles: the one file the current version writes, plus the
     # retired per-level names an install may still carry.
@@ -1109,6 +1192,10 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
         if adapter.home != "."
     ]
     homes.append(config_file.parent.parent)
+    # The OpenCode plugin root joins the prune list: a plugins directory
+    # CopyDesk emptied should not survive as litter, one holding other
+    # plugins is left alone by remove_owned.
+    homes.append(opencode_root)
     if repository_hooks is not None:
         # git owns its hooks directory. Removing the last hook in it must not
         # take the directory with it.

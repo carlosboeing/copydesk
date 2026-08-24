@@ -47,7 +47,8 @@ REGISTRY = {
     ),
     "opencode": Adapter(
         name="opencode", label="OpenCode",
-        installs="adds a block to AGENTS.md", gate_verified=False,
+        installs="installs a blocking write-gate plugin and adds a block to AGENTS.md",
+        gate_verified=True,
         repeat_closer=False, home="~/.config/opencode", instruction_file="AGENTS.md",
     ),
     "antigravity": Adapter(
@@ -57,7 +58,8 @@ REGISTRY = {
     ),
     "grok": Adapter(
         name="grok", label="Grok Build",
-        installs="adds a block to shared instructions", gate_verified=False,
+        installs="installs a blocking PreToolUse gate and adds a block to shared instructions",
+        gate_verified=True,
         repeat_closer=False, home="~/.grok", instruction_file="AGENTS.md",
     ),
     "git": Adapter(
