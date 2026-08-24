@@ -2667,6 +2667,34 @@ def _added_char_ranges(diff_text: str, masked_proposed: str) -> list[tuple[int, 
     return ranges
 
 
+def _git_operation_in_progress(work: Path) -> Optional[str]:
+    """The operation replaying someone else's prose, or None.
+
+    Merge, cherry-pick and revert each set a ref while they are stopped. A
+    rebase sets none of them: it leaves a `rebase-merge` or `rebase-apply`
+    directory instead, and the manual commit that resolves a conflict does
+    run the hook. `REBASE_HEAD` is no use as the signal, because it still
+    resolves after the rebase finishes.
+    """
+    for name, ref in (
+        ("merge", "MERGE_HEAD"),
+        ("cherry-pick", "CHERRY_PICK_HEAD"),
+        ("revert", "REVERT_HEAD"),
+    ):
+        if _git_output(["rev-parse", "--verify", "-q", ref], work) is not None:
+            return name
+    for marker in ("rebase-merge", "rebase-apply"):
+        located = _git_output(["rev-parse", "--git-path", marker], work)
+        if located is None:
+            continue
+        candidate = Path(located.strip())
+        if not candidate.is_absolute():
+            candidate = work / candidate
+        if candidate.is_dir():
+            return "rebase"
+    return None
+
+
 def _staged_pathspec(index_path: str, base_path: str) -> list[str]:
     """Both sides of a rename, because git needs both to detect one.
 
@@ -2765,18 +2793,7 @@ def run_staged(cwd: Union[str, Path, None] = None) -> int:
             print("error: copydesk check --staged needs a git repository", file=sys.stderr)
             return 64
         work = Path(root.strip())
-        operation = next(
-            (
-                name
-                for name, ref in (
-                    ("merge", "MERGE_HEAD"),
-                    ("cherry-pick", "CHERRY_PICK_HEAD"),
-                    ("revert", "REVERT_HEAD"),
-                )
-                if _git_output(["rev-parse", "--verify", "-q", ref], work) is not None
-            ),
-            None,
-        )
+        operation = _git_operation_in_progress(work)
         if operation is not None:
             print(f"copydesk: {operation} in progress; staged prose was not judged")
             return 0

@@ -214,6 +214,30 @@ class StagedScopeTests(GitRepositoryTestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("merge in progress; staged prose was not judged", result.stdout)
 
+    def test_a_stopped_rebase_skips_staged_prose(self) -> None:
+        """A rebase sets none of the three refs. It leaves a rebase-merge
+        directory instead, and the manual commit that resolves a conflict
+        does run the hook, so the replayed prose reads as newly written
+        against an upstream that has moved."""
+        self.commit_initial("a.md", CLEAN + "\n")
+        marker = self.repo / ".git" / "rebase-merge"
+        marker.mkdir()
+        self.write("a.md", CLEAN + "\n\n" + BANNED + "\n")
+        self.staged("a.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("rebase in progress; staged prose was not judged", result.stdout)
+
+    def test_a_finished_rebase_is_judged_again(self) -> None:
+        """REBASE_HEAD still resolves after a rebase completes, so the guard
+        keys on the directory. Removing it must restore judging."""
+        self.commit_initial("a.md", CLEAN + "\n")
+        self.write("a.md", CLEAN + "\n\n" + BANNED + "\n")
+        self.staged("a.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("banned-word", result.stdout)
+
     def test_a_pure_deletion_passes(self) -> None:
         self.commit_initial("a.md", LONG_ERROR + "\n\n" + CLEAN + "\n\nAnother short sentence sits right here.\n")
         self.write("a.md", LONG_ERROR + "\n\n" + CLEAN + "\n")
