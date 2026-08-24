@@ -146,6 +146,20 @@ class InstallCommandTests(GitRepositoryTestCase):
         self.assertIn("skipped", result.stdout)
         self.assertIn("check --staged", result.stdout)
 
+    def test_install_again_preserves_a_foreign_hook_with_a_chained_block(self) -> None:
+        import install as install_module
+
+        hook_file = self.repo / ".git" / "hooks" / "pre-commit"
+        foreign = "#!/bin/sh\necho foreign\n"
+        hook_file.write_text(foreign + install_module.CHAINED_BLOCK, encoding="utf-8")
+        result = self.cli("install", "--git-hook")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            hook_file.read_text(encoding="utf-8"),
+            foreign + install_module.CHAINED_BLOCK,
+        )
+        self.assertIn("already chained", result.stdout)
+
     def test_outside_a_repository_is_an_error(self) -> None:
         outside = self.root / "outside"
         outside.mkdir()
@@ -221,6 +235,19 @@ class StagedScopeTests(GitRepositoryTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("sentence-length", result.stdout)
 
+    def test_warn_path_shows_only_new_findings_and_counts_pre_existing_errors(self) -> None:
+        self.write(
+            "copydesk.config.json",
+            '{"version": 1, "paths": {"warn": ["NOTES.md"]}}',
+        )
+        self.commit_initial("NOTES.md", LONG_ERROR + "\n")
+        self.write("NOTES.md", LONG_ERROR + "\n\n" + LONG_WARN_BAND + "\n")
+        self.staged("NOTES.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.count("sentence-length"), 1)
+        self.assertIn("pre-existing finding(s) left alone", result.stdout)
+
     def test_ascii_locale_handles_utf8_staged_content_and_output(self) -> None:
         self.commit_initial("a.md", CLEAN + "\n")
         self.write("a.md", CLEAN + "\n\nThe café design is robust.\n")
@@ -276,6 +303,15 @@ class DocumentScopedRuleTests(GitRepositoryTestCase):
         base = _short_sentences(26) + "\n" + _long_sentences(3)
         self.commit_initial("a.md", base)
         self.write("a.md", base + "\n\n" + _long_sentences(2))
+        self.staged("a.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("refused", result.stdout)
+
+    def test_rate_newly_firing_after_a_pure_deletion_does_not_block(self) -> None:
+        base = _long_sentences(5) + "\n" + _short_sentences(60)
+        self.commit_initial("a.md", base)
+        self.write("a.md", _long_sentences(5) + "\n" + _short_sentences(30))
         self.staged("a.md")
         result = self.cli("check", "--staged")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

@@ -105,6 +105,10 @@ def _install_git_hook(cwd: Path, stdout: TextIO) -> int:
         print(f"error: cannot read {hook_file}: {error}", file=sys.stderr)
         return 1
 
+    if BLOCK_START in content:
+        stdout.write(f"already chained  {hook_file}\n")
+        return 0
+
     if MARKER_PHRASE in content:
         if content == HOOK_TEMPLATE:
             stdout.write(f"already installed  {hook_file}\n")

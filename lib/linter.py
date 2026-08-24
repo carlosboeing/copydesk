@@ -2670,6 +2670,20 @@ def _staged_changed_ranges(
         return _added_char_ranges(diff_text, masked_staged)
 
 
+def _staged_adds_lines(work: Path, index_path: str) -> bool:
+    """Whether the staged diff adds lines, failing safe toward checking."""
+    numstat = _git_output(["diff", "--cached", "--numstat", "--", index_path], work)
+    if numstat is None:
+        return True
+    additions = numstat.split("\t", 1)[0]
+    if additions == "-":
+        return True
+    try:
+        return int(additions) > 0
+    except ValueError:
+        return True
+
+
 def run_staged(cwd: Union[str, Path, None] = None) -> int:
     """Check every staged Markdown file against the text it adds.
 
@@ -2729,10 +2743,10 @@ def run_staged(cwd: Union[str, Path, None] = None) -> int:
                 f for f in origined
                 if f.check in DOCUMENT_SCOPED_BLOCKING_RULES and f.severity == "error"
             ]
-            if scoped and decision.action != "warn":
+            if scoped and decision.action != "warn" and _staged_adds_lines(work, path):
                 # Document-scoped rules have no hunk to belong to. They block
-                # when they newly fire: absent from lint(HEAD) and present in
-                # the staged text.
+                # when added lines make them newly fire: absent from lint(HEAD)
+                # and present in the staged text. A pure deletion never blocks.
                 previous_errors = set()
                 if base:
                     previous_errors = {
@@ -2746,8 +2760,6 @@ def run_staged(cwd: Union[str, Path, None] = None) -> int:
             refused = refused or blocked_here
 
             shown = [f for f in origined if f.origin == "new"] if not blocked_here else list(blocking)
-            if decision.action == "warn":
-                shown = list(origined)
             if shown:
                 print(f"{path}:")
                 for finding in shown:
@@ -2760,7 +2772,7 @@ def run_staged(cwd: Union[str, Path, None] = None) -> int:
                     f"{path}: refused. Commit only the lines you wrote; "
                     "git commit --no-verify skips this check."
                 )
-            if preexisting and (blocked_here or decision.action != "warn"):
+            if preexisting:
                 print(f"{path}: {preexisting} pre-existing finding(s) left alone.")
 
             doc_bytes = len(staged.encode("utf-8"))
