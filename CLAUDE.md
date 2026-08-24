@@ -2,7 +2,7 @@
 
 Auto-loaded on every session. `AGENTS.md` symlinks here for harnesses that expect that filename.
 
-CopyDesk is a prose gate for AI agents. It occupies two pipeline positions no other tool stands in: rules enter the model's context before generation, and a write is refused at write time so the model must revise. The rule engine is harness-neutral; per-harness adapters translate payloads at the edge.
+CopyDesk is a prose gate for AI agents. It occupies three pipeline positions no other tool stands in: rules enter the model's context before generation, a write is refused at write time so the model must revise, and a pre-commit hook refuses a commit whose added Markdown breaks the rules. The rule engine is harness-neutral; per-harness adapters translate payloads at the edge.
 
 ## How the name is written
 

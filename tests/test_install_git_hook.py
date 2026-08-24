@@ -267,6 +267,28 @@ class StagedScopeTests(GitRepositoryTestCase):
         self.assertIn("merge in progress; staged prose was not judged", result.stdout)
         self.assertNotIn("cherry-pick or revert", result.stdout)
 
+    def test_a_stopped_git_am_is_named_a_patch_application(self) -> None:
+        """`git am` shares the rebase-apply directory and marks itself with
+        an `applying` file, so the message names the command the user ran."""
+        self.commit_initial("a.md", CLEAN + "\n")
+        marker = self.repo / ".git" / "rebase-apply"
+        marker.mkdir()
+        (marker / "applying").write_text("", encoding="utf-8")
+        self.write("a.md", CLEAN + "\n\n" + BANNED + "\n")
+        self.staged("a.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("patch application in progress", result.stdout)
+
+    def test_a_stopped_rebase_without_applying_is_named_a_rebase(self) -> None:
+        self.commit_initial("a.md", CLEAN + "\n")
+        (self.repo / ".git" / "rebase-apply").mkdir()
+        self.write("a.md", CLEAN + "\n\n" + BANNED + "\n")
+        self.staged("a.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("rebase in progress", result.stdout)
+
     def test_a_finished_rebase_is_judged_again(self) -> None:
         """REBASE_HEAD still resolves after a rebase completes, so the guard
         keys on the directory. Removing it must restore judging."""
