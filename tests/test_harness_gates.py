@@ -86,6 +86,35 @@ class HarnessGatePlanTests(unittest.TestCase):
         self.assertEqual(registered["hooks"]["PreToolUse"][0]["matcher"], "Write|Edit")
         self.assertTrue((self.home / ".grok" / "hooks" / "copydesk" / "rules" / "plain.json").is_file())
 
+    def test_setup_installs_the_opencode_plugin_end_to_end(self) -> None:
+        """OpenCode was covered at plan level only. The last confirmed defect
+        on this branch was a root mismatch between the plan and the file the
+        harness reads, which no plan-level test can see."""
+        xdg = self.home / "config"
+        (xdg / "opencode").mkdir(parents=True)
+        env = dict(os.environ)
+        env.update({
+            "COPYDESK_HOME": str(self.home),
+            "XDG_CONFIG_HOME": str(xdg),
+            "XDG_STATE_HOME": str(self.home / "state"),
+            "PATH": str(self.home / "nothing"),
+        })
+        env.pop("COPYDESK_STATE_DIR", None)
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "copydesk"), "setup", "--defaults", "--yes"],
+            cwd=self.home, capture_output=True, text=True, env=env, input="",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        plugin = xdg / "opencode" / "plugins" / "copydesk-gate.js"
+        linter = xdg / "opencode" / "copydesk" / "linter.py"
+        preset = xdg / "opencode" / "copydesk" / "rules" / "plain.json"
+        block = xdg / "opencode" / "AGENTS.md"
+        for path in (plugin, linter, preset, block):
+            self.assertTrue(path.is_file(), f"{path} missing\n{result.stdout}")
+        # The root the plan chose is the root on disk, and nothing landed in
+        # the literal ~/.config the block used to expand to.
+        self.assertFalse((self.home / ".config" / "opencode").exists(), result.stdout)
+
     def test_setup_makes_the_grok_gate_executable_with_claude_selected(self) -> None:
         (self.home / ".grok").mkdir()
         (self.home / ".claude").mkdir()
@@ -131,6 +160,16 @@ class HarnessGatePlanTests(unittest.TestCase):
         self.assertIn(block, writes)
         stale = (self.home / ".config" / "opencode" / "AGENTS.md").resolve()
         self.assertNotIn(stale, writes)
+
+    def test_an_empty_xdg_value_falls_back_to_the_default_root(self) -> None:
+        """A shell that exports XDG_CONFIG_HOME empty is common. The
+        two-argument environ.get returns "" for it, and Path("") is Path("."),
+        which would resolve every OpenCode path against the working
+        directory."""
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": ""}):
+            resolved = wizard._adapter_home(wizard.adapters.REGISTRY["opencode"], self.home)
+        self.assertEqual(resolved, self.home / ".config" / "opencode")
+        self.assertTrue(resolved.is_absolute())
 
     def test_a_literal_harness_home_ignores_xdg(self) -> None:
         """~/.claude and ~/.grok are not XDG base directories, and the tools

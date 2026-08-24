@@ -8,6 +8,7 @@ what the adapter installs, and upgrades its own line the day that changes.
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from typing import NamedTuple
@@ -87,6 +88,30 @@ EXECUTABLES = {
 SHARED_HOMES = {"~/.agents"}
 
 
+def config_root(home: Path) -> Path:
+    """The XDG config root, honouring XDG_CONFIG_HOME.
+
+    An empty value falls back, matching `config.user_config_path`. The
+    two-argument form of `environ.get` returns "" for a variable exported
+    empty, and `Path("")` is `Path(".")`.
+    """
+    return Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config").expanduser()
+
+
+def home_dir(adapter: Adapter, home: Path) -> Path:
+    """Where a harness keeps its own files.
+
+    `~/.claude` and `~/.grok` are literal paths their tools do not relocate.
+    Anything under `~/.config` is an XDG base directory and follows
+    XDG_CONFIG_HOME: OpenCode reads that variable, so one resolver serves
+    detection, the plugin, the linter bundle and the instruction file.
+    """
+    relative = adapter.home.replace("~/", "")
+    if relative == ".config" or relative.startswith(".config/"):
+        return config_root(home) / relative[len(".config"):].lstrip("/")
+    return home / relative
+
+
 def detect(name: str, home: Path) -> bool:
     """Whether that harness is installed.
 
@@ -101,4 +126,4 @@ def detect(name: str, home: Path) -> bool:
         return True
     if adapter.home in SHARED_HOMES:
         return False
-    return (home / adapter.home.replace("~/", "")).is_dir()
+    return home_dir(adapter, home).is_dir()

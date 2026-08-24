@@ -484,26 +484,10 @@ def _bundle_writes(writes: list["apply.Write"], target: Path) -> None:
             writes.append(apply.Write(target / "rules" / json_file.name, json_file.read_text(encoding="utf-8")))
 
 
-def _xdg_config(home: Path) -> Path:
-    """The config root setup writes into, honouring XDG_CONFIG_HOME."""
-    return Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")).expanduser()
-
-
-def _adapter_home(adapter: "adapters.Adapter", home: Path) -> Path:
-    """Where a harness keeps its own files.
-
-    ``~/.claude`` and ``~/.grok`` are literal paths their tools do not
-    relocate. Anything under ``~/.config`` is an XDG base directory and
-    follows XDG_CONFIG_HOME instead: OpenCode reads that variable, so
-    resolving it here keeps the plugin, the linter bundle and AGENTS.md
-    under one root. Expanding the literal path in one place and the XDG
-    path in another wrote the instruction block to a file OpenCode never
-    reads.
-    """
-    relative = adapter.home.replace("~/", "")
-    if relative == ".config" or relative.startswith(".config/"):
-        return _xdg_config(home) / relative[len(".config"):].lstrip("/")
-    return home / relative
+# One resolver serves detection, the gate install, the instruction file and
+# the uninstall prune. It lives in adapters because detect() needs it too.
+_xdg_config = adapters.config_root
+_adapter_home = adapters.home_dir
 
 
 def _build_plan(
@@ -1210,10 +1194,10 @@ def run_uninstall(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optio
         if adapter.home != "."
     ]
     homes.append(config_file.parent.parent)
-    # The OpenCode plugin root joins the prune list: a plugins directory
-    # CopyDesk emptied should not survive as litter, one holding other
+    # The OpenCode root is already in `homes`: _adapter_home resolves it for
+    # the adapter whose home is ~/.config/opencode. A plugins directory
+    # CopyDesk emptied should not survive as litter, and one holding other
     # plugins is left alone by remove_owned.
-    homes.append(opencode_root)
     if repository_hooks is not None:
         # git owns its hooks directory. Removing the last hook in it must not
         # take the directory with it.
