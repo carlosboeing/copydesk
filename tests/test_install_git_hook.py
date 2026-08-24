@@ -608,10 +608,13 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("--no-verify", readme)
 
     def test_the_changelog_records_the_surface_addition(self) -> None:
+        """The command surface is a frozen contract item, so the changelog
+        must name both additions somewhere. Scoping this to `[Unreleased]`
+        failed the moment a release moved the entry under its version
+        heading, which made every release break the suite."""
         changelog = (REPOSITORY_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-        unreleased = changelog.split("## [Unreleased]")[1].split("## [")[0]
-        self.assertIn("install --git-hook", unreleased)
-        self.assertIn("--staged", unreleased)
+        self.assertIn("install --git-hook", changelog)
+        self.assertIn("--staged", changelog)
 
     def test_the_installed_hook_carries_the_escape_hatch_itself(self) -> None:
         import install as install_module
