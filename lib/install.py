@@ -11,14 +11,12 @@ append instead, the same policy the commit-msg gate follows.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 from typing import Optional, TextIO
 
 import hook
 
-BUNDLE_ROOT = Path(__file__).resolve().parents[1]
 
 HOOK_NAME = "pre-commit"
 
@@ -32,7 +30,9 @@ BLOCK_END = "# <<< CopyDesk pre-commit gate <<<"
 HOOK_TEMPLATE = f"""#!/bin/sh
 # {MARKER_PHRASE}
 # Checks the Markdown this commit adds, judged against HEAD line by line,
-# so a pre-existing error in the file never blocks this commit.
+# so an error in text this commit does not touch never blocks it. Editing
+# inside a paragraph that was already too long does touch it, and the write
+# gate refuses the same edit for the same reason.
 #
 # Exit 1 refuses the commit. To commit anyway, run:
 #

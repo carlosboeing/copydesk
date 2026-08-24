@@ -221,6 +221,20 @@ class StagedScopeTests(GitRepositoryTestCase):
         result = self.cli("check", "--staged")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_an_edit_inside_an_over_long_paragraph_blocks(self) -> None:
+        """The commit gate and the write gate agree here on purpose.
+        paragraph-length was moved off the document-scoped path so an edit
+        inside an over-long paragraph is refused, and only the deletion case
+        was covered by a test."""
+        paragraph = "\n".join(f"Line {i} is short." for i in range(1, 21)) + "\n"
+        self.commit_initial("a.md", paragraph)
+        edited = paragraph.replace("Line 6 is short.", "Line 6 is quite short.")
+        self.write("a.md", edited)
+        self.staged("a.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("paragraph-length", result.stdout)
+
     def test_a_deletion_inside_an_over_long_paragraph_does_not_block(self) -> None:
         """paragraph-length is not document-scoped, so the earlier
         adds-no-lines guard never reached it. A deletion recorded as a
@@ -500,6 +514,20 @@ class DocumentationTests(unittest.TestCase):
         import install as install_module
 
         self.assertIn("--no-verify", install_module.HOOK_TEMPLATE)
+
+    def test_the_installed_hook_does_not_overpromise(self) -> None:
+        """The header claimed a pre-existing error never blocks. An edit
+        inside an over-long paragraph is refused for paragraph-length, so
+        the claim sent a reader to --no-verify with no explanation."""
+        import install as install_module
+
+        self.assertNotIn(
+            "pre-existing error in the file never blocks", install_module.HOOK_TEMPLATE
+        )
+        self.assertIn(
+            "an error in text this commit does not touch never blocks it",
+            install_module.HOOK_TEMPLATE,
+        )
 
 
 if __name__ == "__main__":
