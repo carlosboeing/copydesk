@@ -31,7 +31,7 @@ contractions, modal verbs, and semicolons because these rules permit all three.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as _replace_field
 import datetime
 import difflib
 import fcntl
@@ -2765,20 +2765,43 @@ def run_staged(cwd: Union[str, Path, None] = None) -> int:
                 findings, exclude_markdown(staged), _staged_changed_ranges(base, staged, work, path)
             )
 
-            blocking = blocking_findings_for_retry(origined)
             scoped = [
                 f for f in origined
                 if f.check in DOCUMENT_SCOPED_BLOCKING_RULES and f.severity == "error"
             ]
-            if scoped and decision.action != "warn" and _staged_adds_lines(work, path):
+            adds_lines = _staged_adds_lines(work, path)
+            # lint(HEAD) is the expensive half of this loop, so read it only
+            # where a decision below turns on it.
+            wants_previous = bool(base) and (
+                not adds_lines or (bool(scoped) and decision.action != "warn")
+            )
+            previous_errors: set[str] = set()
+            if wants_previous:
+                previous_errors = {
+                    f.check for f in lint(base, path=display) if f.severity == "error"
+                }
+
+            if not adds_lines and previous_errors:
+                # A commit that adds no lines wrote no prose, so it answers
+                # only for a rule HEAD did not already break. A deletion that
+                # joins two sentences owns the sentence it made; a paragraph
+                # already over length before the deletion stays pre-existing.
+                # Attribution cannot tell those apart on its own, because a
+                # deletion is a zero-width point and every span containing it
+                # reads as touched. Relabelling rather than filtering keeps
+                # the printed findings and the pre-existing count agreeing
+                # with what blocked.
+                origined = [
+                    _replace_field(f, origin="existing")
+                    if f.origin == "new" and f.check in previous_errors else f
+                    for f in origined
+                ]
+
+            blocking = blocking_findings_for_retry(origined)
+            if scoped and decision.action != "warn" and adds_lines:
                 # Document-scoped rules have no hunk to belong to. They block
                 # when added lines make them newly fire: absent from lint(HEAD)
-                # and present in the staged text. A pure deletion never blocks.
-                previous_errors = set()
-                if base:
-                    previous_errors = {
-                        f.check for f in lint(base, path=display) if f.severity == "error"
-                    }
+                # and present in the staged text.
                 blocking = blocking + [f for f in scoped if f.check not in previous_errors]
             seen: set[Finding] = set()
             blocking = [f for f in blocking if not (f in seen or seen.add(f))]  # type: ignore[arg-type]

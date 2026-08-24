@@ -202,6 +202,33 @@ class StagedScopeTests(GitRepositoryTestCase):
         result = self.cli("check", "--staged")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_a_deletion_inside_an_over_long_paragraph_does_not_block(self) -> None:
+        """paragraph-length is not document-scoped, so the earlier
+        adds-no-lines guard never reached it. A deletion recorded as a
+        zero-width point charges every span containing it, which relabelled
+        the paragraph's pre-existing error as newly written."""
+        paragraph = "\n".join(f"Line {i} is short." for i in range(1, 21)) + "\n"
+        self.commit_initial("a.md", paragraph)
+        kept = [line for i, line in enumerate(paragraph.splitlines()) if i != 9]
+        self.write("a.md", "\n".join(kept) + "\n")
+        self.staged("a.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("pre-existing finding(s) left alone", result.stdout)
+        self.assertNotIn("refused", result.stdout)
+
+    def test_a_deletion_that_joins_two_sentences_still_blocks(self) -> None:
+        """The other half of the rule: a deletion answers for a rule HEAD
+        did not already break."""
+        first = " ".join(f"alpha{i}" for i in range(1, 22))
+        second = " ".join(f"beta{i}" for i in range(1, 22))
+        self.commit_initial("b.md", f"{first}\n.\n{second}.\n")
+        self.write("b.md", f"{first}\n{second}.\n")
+        self.staged("b.md")
+        result = self.cli("check", "--staged")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("sentence-length", result.stdout)
+
     def test_the_working_tree_is_never_judged(self) -> None:
         self.commit_initial("a.md", CLEAN + "\n")
         # Staged: clean. Working tree: a banned word nobody is committing.

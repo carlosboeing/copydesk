@@ -159,7 +159,7 @@ The commit-msg gate checks message prose. The pre-commit gate checks the Markdow
 copydesk install --git-hook
 ```
 
-The hook runs `copydesk check --staged` before every commit. It judges the lines the commit adds, compared against HEAD: touching a clean paragraph passes no matter what else the file hides, an added banned word refuses the commit, and a pure deletion never blocks. Staged content is checked, so uncommitted edits in your working tree are not judged.
+The hook runs `copydesk check --staged` before every commit. It judges the lines the commit adds, compared against HEAD: touching a clean paragraph passes no matter what else the file hides, an added banned word refuses the commit, and a deletion blocks only for a rule HEAD did not already break. Staged content is checked, so uncommitted edits in your working tree are not judged.
 
 To commit anyway:
 
