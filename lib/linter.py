@@ -1667,6 +1667,8 @@ def run_chat_hook(raw_payload: str) -> int:
         _record_event(_event("block", streak))
         for finding in blocking:
             print(finding.render(), file=sys.stderr)
+        if has_ai_tell_finding(message, blocking):
+            print("Run /humanizer for the AI-tell failures before retrying.", file=sys.stderr)
         return 2
     except (OSError, TypeError, ValueError):
         return 0
@@ -1903,6 +1905,9 @@ def summarize_events(
     gate_events = [e for e in lint_events if str(e.get("surface", "gate")) == "gate"]
     cli_events = [e for e in lint_events if str(e.get("surface", "gate")) == "cli"]
     precommit_events = [e for e in lint_events if str(e.get("surface", "gate")) == "pre-commit"]
+    # A chat refusal stops a reply, not a write, so it reports beside the
+    # pre-commit and CLI figures rather than inside the write-gate totals.
+    chat_events = [e for e in lint_events if str(e.get("surface", "gate")) == "chat"]
 
     if events:
         min_ts = min(float(e.get("ts", current_time)) for e in events)
@@ -2124,6 +2129,13 @@ def summarize_events(
             "blocked": sum(1 for e in precommit_events if e.get("decision") == "block"),
             "words": sum(int(e.get("payload_words", 0)) for e in precommit_events),
         },
+        "chat": {
+            "replies": sum(1 for e in chat_events if _event_streak(e) <= 1),
+            "refused": sum(1 for e in chat_events if e.get("decision") == "block" and _event_streak(e) <= 1),
+            "retries": sum(1 for e in chat_events if _event_streak(e) > 1),
+            "escaped": sum(1 for e in chat_events if e.get("decision") == "escape"),
+            "words": sum(int(e.get("payload_words", 0)) for e in chat_events),
+        },
         "cost": {
             "reminder_turns": len(turn_events),
             "reminder_word_count": REMINDER_WORD_COUNT,
@@ -2224,6 +2236,14 @@ def format_stats_terminal(summary: dict[str, object]) -> str:
     if isinstance(precommit, dict) and int(precommit.get("lints", 0)) > 0:
         lines.append("Pre-commit lints (not gate activity)")
         lines.append(f"  {precommit['lints']} runs, {precommit['blocked']} refusing the commit, {int(precommit['words']):,} words checked")
+        lines.append("  Excluded from the work, origin and rework figures above.")
+        lines.append("")
+
+    chat = summary.get("chat")
+    if isinstance(chat, dict) and int(chat.get("replies", 0)) > 0:
+        lines.append("Chat replies (not gate activity)")
+        lines.append(f"  {chat['replies']} replies, {chat['refused']} refused, {int(chat['words']):,} words judged")
+        lines.append(f"  {chat['retries']} rewrites, {chat['escaped']} passed through after the retry limit")
         lines.append("  Excluded from the work, origin and rework figures above.")
         lines.append("")
 
@@ -2361,6 +2381,15 @@ def format_report_markdown(summary: dict[str, object], source: Optional[Path] = 
         lines.append("")
         lines.append(f"{precommit['lints']} runs, {precommit['blocked']} refusing the commit, {int(precommit['words']):,} words checked.")
         lines.append("A pre-commit refusal stops a commit, not a write, so it is excluded from the figures above.")
+        lines.append("")
+
+    chat = summary.get("chat")
+    if isinstance(chat, dict) and int(chat.get("replies", 0)) > 0:
+        lines.append("## Chat replies")
+        lines.append("")
+        lines.append(f"{chat['replies']} replies, {chat['refused']} refused, {int(chat['words']):,} words judged.")
+        lines.append(f"{chat['retries']} rewrites, {chat['escaped']} passed through after the retry limit.")
+        lines.append("A chat refusal stops a reply, not a write, so it is excluded from the figures above.")
         lines.append("")
 
     rework_by_rule = summary.get("rework_by_rule", [])
