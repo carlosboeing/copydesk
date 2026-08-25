@@ -177,10 +177,12 @@ CopyDesk divides agent writing into four channels:
 
 | Channel | Medium | Gate mechanism | Default style |
 |---|---|---|---|
-| `chat` | Terminal conversational replies | Prevention only (context instructions) | `plain` (low verbosity) |
+| `chat` | Terminal conversational replies | `Stop` hook, recording only by default | `plain` (low verbosity) |
 | `documents` | Markdown files on disk | `PreToolUse` write/edit hook | `plain` (high verbosity) |
 | `commits` | Git commit messages | `commit-msg` git hook | `engineer` (low verbosity) |
 | `reviews` | PR and code review markdown | Configured `match` file patterns | `plain` (medium verbosity) |
+
+The `chat` gate records what a reply broke and does not refuse the reply. Claude Code appends a replacement message and leaves the refused one on screen, so a refusal shows the reader the same answer twice. To refuse instead, run `copydesk set channels.chat.gate=block`.
 
 Read more in [docs/channels.md](docs/channels.md).
 
@@ -217,10 +219,11 @@ copydesk doctor docs/guide.md    # explain rules for a specific file
 copydesk doctor --rules          # list all rules and guidance parameters
 ```
 
-Switch chat verbosity quickly:
+Change a chat setting quickly:
 
 ```bash
 copydesk set channels.chat.verbosity=medium
+copydesk set channels.chat.gate=block      # refuse a reply instead of recording it
 ```
 
 View local gate telemetry:

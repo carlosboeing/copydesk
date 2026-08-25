@@ -27,7 +27,10 @@ import styles  # noqa: E402
 import wizard  # noqa: E402
 
 
-SETTABLE_KEYS = {"channels.chat.verbosity": ("low", "medium", "high")}
+SETTABLE_KEYS = {
+    "channels.chat.verbosity": ("low", "medium", "high"),
+    "channels.chat.gate": ("warn", "block"),
+}
 
 
 def _rebuild_static_instructions() -> int:
@@ -45,7 +48,8 @@ def _rebuild_static_instructions() -> int:
 
 def _handle_set(args: list[str]) -> int:
     if len(args) != 1 or "=" not in args[0]:
-        print("usage: copydesk set channels.chat.verbosity=<low|medium|high>", file=sys.stderr)
+        print("usage: copydesk set <key>=<value>. Settable: "
+              + ", ".join(sorted(SETTABLE_KEYS)), file=sys.stderr)
         return 64
     key, _, value = args[0].partition("=")
     allowed = SETTABLE_KEYS.get(key)
@@ -368,7 +372,12 @@ def _doctor_bare() -> int:
             except (OSError, ValueError):
                 pass
             if chat_gate.is_file() and registered:
-                print("  chat is gated by the Stop hook (refuses a reply that breaks the rules).")
+                mode = (channels_cfg.get("chat") or {}).get("gate", "warn")
+                if mode == "block":
+                    print("  chat is gated by the Stop hook (refuses a reply that breaks the rules).")
+                else:
+                    print("  chat is gated by the Stop hook, recording findings without refusing a reply.")
+                    print("  Run copydesk set channels.chat.gate=block to refuse instead.")
             else:
                 print("  chat is prevention-only (no Stop hook installed). Run copydesk setup --repair.")
         elif ch_name == "reviews":

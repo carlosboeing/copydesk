@@ -552,6 +552,13 @@ class TestTelemetry(unittest.TestCase):
         with tempfile.TemporaryDirectory() as config_home, patch.dict(
             os.environ, {"XDG_CONFIG_HOME": config_home}
         ):
+            # Refusing is opt-in, and this test is about the refusal event.
+            settings = Path(config_home) / "copydesk"
+            settings.mkdir(parents=True, exist_ok=True)
+            (settings / "config.json").write_text(
+                json.dumps({"version": 1, "channels": {"chat": {"gate": "block"}}}),
+                encoding="utf-8",
+            )
             blocked = linter.run_chat_hook(json.dumps({
                 "session_id": "chat-telemetry",
                 "last_assistant_message": "The draft carries the answer.",
