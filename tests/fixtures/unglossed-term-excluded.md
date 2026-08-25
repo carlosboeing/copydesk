@@ -1,6 +1,6 @@
 # Kubernetes at the edge
 
-Every capitalised term below sits somewhere the rule must not read.
+Every capitalised term below appears only where the rule must not read.
 
 The team ran `Kubernetes` from a shell alias for a year.
 

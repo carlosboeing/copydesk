@@ -354,10 +354,23 @@ def _doctor_bare() -> int:
     for pattern in paths_cfg.get("warn", []):
         print(f"  {pattern} warns, never blocks.")
 
-    # Channels and Prevention-only status
+    # Channels and gate coverage
     for ch_name in ("chat", "documents", "commits", "reviews"):
         if ch_name == "chat":
-            print("  chat is prevention-only (chat never reaches a gate).")
+            chat_gate = home / ".claude" / "hooks" / "copydesk" / "chat-gate.sh"
+            settings_path = home / ".claude" / "settings.json"
+            registered = False
+            try:
+                settings_doc = json.loads(settings_path.read_text(encoding="utf-8"))
+                for entry in (settings_doc.get("hooks") or {}).get("Stop") or []:
+                    if any("chat-gate.sh" in str(h.get("command", "")) for h in entry.get("hooks", [])):
+                        registered = True
+            except (OSError, ValueError):
+                pass
+            if chat_gate.is_file() and registered:
+                print("  chat is gated by the Stop hook (refuses a reply that breaks the rules).")
+            else:
+                print("  chat is prevention-only (no Stop hook installed). Run copydesk setup --repair.")
         elif ch_name == "reviews":
             rev_match = (channels_cfg.get("reviews") or {}).get("match") or []
             if not rev_match:
@@ -387,7 +400,7 @@ def _doctor_bare() -> int:
 
     print("Hooks")
     hook_dir = home / ".claude" / "hooks" / "copydesk"
-    for name in ("gate.sh", "reminder.sh", "linter.py"):
+    for name in ("gate.sh", "chat-gate.sh", "reminder.sh", "linter.py"):
         installed = hook_dir / name
         print(f"  {name:12} {'installed' if installed.is_file() else 'not installed'}   {installed}")
     hook_preset = hook_dir / "rules" / "plain-english.json"

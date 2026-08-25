@@ -509,8 +509,10 @@ def _build_plan(
         hooks_dir = home / ".claude" / "hooks" / "copydesk"
         gate_src = BUNDLE_ROOT / "hooks" / "gate.sh"
         reminder_src = BUNDLE_ROOT / "hooks" / "reminder.sh"
+        chat_gate_src = BUNDLE_ROOT / "hooks" / "chat-gate.sh"
         writes.append(apply.Write(hooks_dir / "gate.sh", gate_src.read_text(encoding="utf-8")))
         writes.append(apply.Write(hooks_dir / "reminder.sh", reminder_src.read_text(encoding="utf-8")))
+        writes.append(apply.Write(hooks_dir / "chat-gate.sh", chat_gate_src.read_text(encoding="utf-8")))
 
         _bundle_writes(writes, hooks_dir)
 
@@ -566,6 +568,17 @@ def _build_plan(
             "hooks": [{"type": "command", "command": str(hooks_dir / "reminder.sh")}],
         })
         hooks["UserPromptSubmit"] = prompt_submit
+
+        stop = hooks.setdefault("Stop", [])
+        stop = [
+            e for e in stop
+            if not any("copydesk" in str(h.get("command", "")) for h in e.get("hooks", []))
+        ]
+        stop.append({
+            "matcher": "*",
+            "hooks": [{"type": "command", "command": str(hooks_dir / "chat-gate.sh")}],
+        })
+        hooks["Stop"] = stop
 
         writes.append(apply.Write(settings_path, json.dumps(settings_doc, indent=2) + "\n"))
 
@@ -1046,10 +1059,15 @@ def run_setup(argv: list[str], stdin: Optional[TextIO] = None, stdout: Optional[
     if "claude-code" in selected_tools:
         gate_path = copydesk_home / ".claude" / "hooks" / "copydesk" / "gate.sh"
         reminder_path = copydesk_home / ".claude" / "hooks" / "copydesk" / "reminder.sh"
+        chat_gate_path = copydesk_home / ".claude" / "hooks" / "copydesk" / "chat-gate.sh"
         if gate_path.is_file():
             os.chmod(gate_path, 0o755)
         if reminder_path.is_file():
             os.chmod(reminder_path, 0o755)
+        # A gate script without the executable bit fails open: the hook
+        # runner records a spawn failure and lets every turn through.
+        if chat_gate_path.is_file():
+            os.chmod(chat_gate_path, 0o755)
 
         blocked, reason = prove(copydesk_home)
         if blocked:

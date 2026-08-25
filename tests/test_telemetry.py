@@ -545,6 +545,33 @@ class TestTelemetry(unittest.TestCase):
         body = script.split("cat << 'EOF'\n", 1)[1].split("\nEOF", 1)[0]
         self.assertEqual(len(body.split()), linter.REMINDER_WORD_COUNT)
 
+    def test_chat_events_carry_their_own_surface_and_stay_out_of_gate_work(self) -> None:
+        """The chat Stop hook must be countable apart from gate writes."""
+        with tempfile.TemporaryDirectory() as config_home, patch.dict(
+            os.environ, {"XDG_CONFIG_HOME": config_home}
+        ):
+            blocked = linter.run_chat_hook(json.dumps({
+                "session_id": "chat-telemetry",
+                "last_assistant_message": "The draft carries the answer.",
+            }))
+            passed = linter.run_chat_hook(json.dumps({
+                "session_id": "chat-telemetry",
+                "last_assistant_message": "Read the report before approving it.",
+            }))
+
+        self.assertEqual(blocked, 2)
+        self.assertEqual(passed, 0)
+        events = [
+            e for e in linter.read_events(self.state_dir)
+            if e.get("session_id") == "chat-telemetry"
+        ]
+        self.assertEqual([e["surface"] for e in events], ["chat", "chat"])
+        self.assertEqual([e["decision"] for e in events], ["block", "pass"])
+        # Gate effectiveness reads gate-surface events only; chat stays apart.
+        summary = linter.summarize_events(events)
+        self.assertEqual(summary["gate_events_count"], 0)
+        self.assertEqual(summary["work"]["total_writes"], 0)
+
     def test_pass_after_block_records_the_attempt_number(self) -> None:
         target = self.state_dir / "retry_streak.md"
         target.write_text("Placeholder.\n", encoding="utf-8")
@@ -715,6 +742,58 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual([r["rule"] for r in summary["rework_by_rule"]], ["banned-word"])
         self.assertEqual(summary["precommit"], {"lints": 1, "blocked": 1, "words": 300})
         self.assertEqual(summary["time"]["runs"], 2)
+
+    def test_chat_replies_are_counted_and_excluded_from_gate_metrics(self) -> None:
+        """Chat events were recorded and reported nowhere, so a refusal was invisible."""
+        def chat(ts: float, decision: str, streak: int, words: int) -> dict:
+            return {
+                "ts": ts, "event": "lint", "surface": "chat", "tool": None,
+                "decision": decision, "streak": streak, "payload_words": words,
+                "rule_totals": {"verb-jargon": 1},
+                "findings": [{"rule": "verb-jargon", "severity": "error", "origin": "new"}],
+                "session_id": "s1",
+            }
+
+        events = [
+            {
+                "ts": 1700000000.0, "event": "lint", "surface": "gate", "tool": "Write",
+                "path": "/p/a.md", "decision": "block", "streak": 1, "payload_words": 10,
+                "origin_totals": {"new": 1}, "rule_totals": {"banned-word": 1},
+                "findings": [{"rule": "banned-word", "severity": "error", "origin": "new"}],
+                "session_id": "s1",
+            },
+            chat(1700000100.0, "block", 1, 200),
+            chat(1700000200.0, "block", 2, 180),
+            chat(1700000300.0, "escape", 3, 170),
+            chat(1700000400.0, "pass", 0, 90),
+        ]
+        summary = linter.summarize_events(events)
+        # The write-gate figures never see a chat reply.
+        self.assertEqual(summary["work"]["total_writes"], 1)
+        self.assertEqual(summary["work"]["blocked"], 1)
+        self.assertEqual(
+            summary["chat"],
+            {"replies": 2, "refused": 1, "retries": 2, "escaped": 1, "words": 640},
+        )
+        rendered = linter.format_stats_terminal(summary)
+        self.assertIn("Chat replies (not gate activity)", rendered)
+        self.assertIn("2 replies, 1 refused", rendered)
+        report = linter.format_report_markdown(summary)
+        self.assertIn("## Chat replies", report)
+
+    def test_a_log_with_no_chat_events_renders_no_chat_block(self) -> None:
+        """The control: the block must not appear when nothing produced it."""
+        events = [
+            {
+                "ts": 1700000000.0, "event": "lint", "surface": "gate", "tool": "Write",
+                "path": "/p/a.md", "decision": "pass", "streak": 0, "payload_words": 10,
+                "session_id": "s1",
+            },
+        ]
+        summary = linter.summarize_events(events)
+        self.assertEqual(summary["chat"]["replies"], 0)
+        self.assertNotIn("Chat replies", linter.format_stats_terminal(summary))
+        self.assertNotIn("## Chat replies", linter.format_report_markdown(summary))
 
     def test_rework_words_charge_the_retry_not_the_first_attempt(self) -> None:
         def gate(ts: float, decision: str, streak: int, words: int, rules: list[str]) -> dict:

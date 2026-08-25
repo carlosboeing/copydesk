@@ -24,9 +24,9 @@ A user writes `"sentence-length": { "severity": "warn", "max": 30 }` and `"banne
 
 ## Consequences
 
-Data holds most of the rule set, which is where the split belongs.
+Data contains most of the rule set, which is where the split belongs.
 
-Pattern data keeps the shape of Vale's `existence` and `substitution` checks, so an importer stays a translation rather than a redesign. Honouring the shape costs nothing today and is what keeps that option open.
+Pattern data keeps the form of Vale's `existence` and `substitution` checks, so an importer stays a translation rather than a redesign. Honouring that form costs nothing today and is what keeps the option open.
 
 `unglossed-term` is recorded under `rules` and never under `patterns`, even though it has a word list. Its first-use detection, gloss detection and skip rules are algorithm. Recording it as a token list would mislead a later port into treating a heuristic as data.
 

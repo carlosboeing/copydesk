@@ -22,7 +22,7 @@ YAML configuration support was evaluated and dropped: support for comments in JS
 
 - **`copydesk learn`**: Scans committed prose and writes a diff of proposed vocabulary for review. Nothing it proposes applies until a person approves it.
 - **Retry-scope attributing pre-existing sentences ([#8](https://github.com/carlosboeing/copydesk/issues/8))**: Narrowing the remediation scope on edits to avoid false positive blocks on pre-existing text surrounding an edit.
-- **`copydesk import vale <style>`**: Vale's `existence` and `substitution` checks are token lists carrying a message and a severity, matching CopyDesk's pattern format.
+- **`copydesk import vale <style>`**: Vale's `existence` and `substitution` checks are token lists with a message and a severity, matching CopyDesk's pattern format.
 - **Harness adapters beyond Claude Code**: Grok Build TUI and OpenCode ship blocking write-time gates; Cursor, Kimi Code, Codex and Antigravity still receive instruction text only.
 - **A `fix` command**: Mechanically fix straightforward style findings rather than reporting them for manual revision.
 

@@ -4,7 +4,7 @@
 
 Report a vulnerability through GitHub's private advisory form at
 https://github.com/carlosboeing/copydesk/security/advisories/new, or by
-opening an issue if the problem carries no exploitation risk.
+opening an issue if the problem has no exploitation risk.
 
 Expect an acknowledgement within a week. CopyDesk is maintained by one person,
 so please allow time before disclosing publicly.
