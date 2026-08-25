@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-08-26
+
 ### Changed
 
 - **The chat gate records a finding instead of refusing the reply.** Claude Code does not remove or replace a reply its `Stop` hook refused. It appends a new assistant message and leaves the refused one on screen. Every refusal therefore showed the reader the same answer two or three times. Local gate telemetry across 29 real chat turns measured 24 first attempts refused, or 83%, at 2.14 visible messages per turn. Loosening `engineer` earlier in this release took that to 59%. Replaying the same telemetry with `verb-jargon` removed reaches 45%, and with `paragraph-length` removed too it reaches about 34%. No threshold reaches 20%. The structural reason is that the write gate narrows a refusal to newly written text through `blocking_findings_for_retry`, and a chat reply has no prior version to narrow against, so any rule firing anywhere refuses the whole turn. A new `channels.chat.gate` setting takes `warn`, the default, or `block`. `warn` records a telemetry event carrying the same findings the refusal carried, prints nothing, and exits 0, so `copydesk stats` and `copydesk report` keep the measurement. `block` is unchanged: the same findings on standard error, the same retry streak, the same pass-through at `gate.retries`, the same exit 2. `copydesk set channels.chat.gate=block` opts in, and `copydesk doctor` names the mode in force. The `documents`, `commits` and `reviews` gates keep blocking, because a refused write produces no duplicate on screen.

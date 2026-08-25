@@ -351,7 +351,7 @@ Where CopyDesk differs:
 
 ## Project status
 
-**`0.9.1`, pre-1.0.** The CLI commands, config schema, rule identifiers, and channel definitions are stable.
+**`0.9.2`, pre-1.0.** The CLI commands, config schema, rule identifiers, and channel definitions are stable.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for future plans and [CHANGELOG.md](CHANGELOG.md) for release history.
 
