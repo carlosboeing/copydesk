@@ -250,15 +250,14 @@ def _rules_dir() -> Path:
     return _preset_path().parent
 
 
-def effective_preset(path=None) -> tuple[dict, tuple[RulePattern, ...]]:
+def effective_preset(path: Optional[Union[str, Path]] = None, *, channel: Optional[str] = None) -> tuple[dict, tuple[RulePattern, ...]]:
     """The preset for one document, after the config cascade.
+
+    Returns the (preset_dict, compiled_patterns) tuple that applies to `path`.
 
     Fails open. A config error is reported once and the built-in preset is
     used, because a gate that blocks on its own misconfiguration is worse
     than one that lets the write through.
-    """
-def effective_preset(path: Optional[Union[str, Path]] = None, *, channel: Optional[str] = None) -> tuple[dict, tuple[RulePattern, ...]]:
-    """Return the (preset_dict, compiled_patterns) tuple that applies to `path`.
 
     `channel` overrides path routing for a gate that has no file to route,
     as the chat Stop hook does; the chat channel's style then picks its
@@ -1916,9 +1915,14 @@ def summarize_events(
         min_ts = current_time
         max_ts = current_time
 
-    start_date = datetime.datetime.fromtimestamp(min_ts).strftime("%Y-%m-%d")
-    end_date = datetime.datetime.fromtimestamp(max_ts).strftime("%Y-%m-%d")
-    window_days = max(1, round((max_ts - min_ts) / 86400) + 1) if events else 0
+    start_day = datetime.date.fromtimestamp(min_ts)
+    end_day = datetime.date.fromtimestamp(max_ts)
+    start_date = start_day.strftime("%Y-%m-%d")
+    end_date = end_day.strftime("%Y-%m-%d")
+    # Count the calendar days the report prints, inclusive of both ends.
+    # Rounding an elapsed-seconds span reported a single day as two whenever
+    # the events covered more than twelve hours.
+    window_days = ((end_day - start_day).days + 1) if events else 0
 
     # Work counts first attempts alone: a pass at streak 0, a block at streak 1.
     # A retry re-sends a document the gate already saw, so counting it as a new
@@ -1927,7 +1931,14 @@ def summarize_events(
     initial_events = [e for e in gate_events if _event_streak(e) <= 1]
 
     total_writes = len(initial_events)
-    passed_first = sum(1 for e in initial_events if e.get("decision") == "pass" and _event_streak(e) == 0)
+    # A warn is a pass: the write went through, with warnings printed beside it.
+    # Counting it as neither a pass nor a block left the rows short of the total.
+    passed_first = sum(
+        1 for e in initial_events if e.get("decision") in ("pass", "warn") and _event_streak(e) == 0
+    )
+    passed_first_with_warnings = sum(
+        1 for e in initial_events if e.get("decision") == "warn" and _event_streak(e) == 0
+    )
     blocked = sum(1 for e in initial_events if e.get("decision") == "block")
     escaped = sum(1 for e in gate_events if e.get("decision") == "escape")
 
@@ -2101,6 +2112,7 @@ def summarize_events(
             "total_writes": total_writes,
             "passed_first": passed_first,
             "passed_first_rate": passed_first_rate,
+            "passed_first_with_warnings": passed_first_with_warnings,
             "blocked": blocked,
             "blocked_rate": blocked_rate,
             "escaped": escaped,
@@ -2178,20 +2190,30 @@ def _format_bar(rate: float) -> str:
     return "#" * count
 
 
+def _day_count(days: object) -> str:
+    """Render a window length with the right singular or plural noun."""
+    count = int(days)  # type: ignore[arg-type]
+    return f"{count} day" if count == 1 else f"{count} days"
+
+
 def format_stats_terminal(summary: dict[str, object]) -> str:
     lines: list[str] = []
     start_date = summary["start_date"]
     end_date = summary["end_date"]
     days = summary["days"]
 
-    lines.append(f"CopyDesk — {start_date} to {end_date} ({days} days)")
+    lines.append(f"CopyDesk — {start_date} to {end_date} ({_day_count(days)})")
     lines.append("")
 
     work = summary["work"]
     assert isinstance(work, dict)
     lines.append("Work")
     lines.append(f"  Markdown writes seen          {work['total_writes']:>3}   gate first attempts; retries and CLI lints counted separately")
-    lines.append(f"  Passed first time             {work['passed_first']:>3}   {work['passed_first_rate']:>5.1f}%")
+    warned = int(work.get("passed_first_with_warnings", 0))
+    passed_note = f"   {work['passed_first_rate']:>5.1f}%"
+    if warned > 0:
+        passed_note += f"   of which {warned} passed with warnings"
+    lines.append(f"  Passed first time             {work['passed_first']:>3}{passed_note}")
     lines.append(f"  Blocked                        {work['blocked']:>3}   {work['blocked_rate']:>5.1f}%")
     lines.append(f"  Escaped after 3 attempts        {work['escaped']:>3}")
     lines.append("")
@@ -2318,7 +2340,7 @@ def format_report_markdown(summary: dict[str, object], source: Optional[Path] = 
 
     lines.append(f"# CopyDesk telemetry — {report_date}")
     lines.append("")
-    lines.append(f"Window: {start_date} to {end_date} ({days} days)")
+    lines.append(f"Window: {start_date} to {end_date} ({_day_count(days)})")
     lines.append(f"Source: {_display_path(Path(source))} ({lint_count} lint events, {turn_count} turn events)")
     lines.append("")
 
@@ -2335,6 +2357,10 @@ def format_report_markdown(summary: dict[str, object], source: Optional[Path] = 
     lines.append(f"| Blocked | {work['blocked']} | {work['blocked_rate']:.1f}% |")
     lines.append(f"| Escaped after 3 attempts | {work['escaped']} | {work['escaped_rate']:.1f}% |")
     lines.append("")
+    warned = int(work.get("passed_first_with_warnings", 0))
+    if warned > 0:
+        lines.append(f"Of the first-time passes, {warned} passed with warnings printed beside the write.")
+        lines.append("")
 
     origin = summary["blocks_by_origin"]
     assert isinstance(origin, dict)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import datetime
 import io
 import json
 import os
@@ -970,6 +972,109 @@ class TestTelemetry(unittest.TestCase):
             if saved is not None:
                 os.environ["COPYDESK_STATE_DIR"] = saved
         self.assertNotIn(default_events, content)
+
+    def test_a_first_attempt_warn_counts_as_a_first_time_pass(self) -> None:
+        """A warn write was counted in the total and in no row below it."""
+        def gate(ts: float, decision: str, streak: int) -> dict:
+            return {
+                "ts": ts, "event": "lint", "surface": "gate", "tool": "Write",
+                "path": "/p/a.md", "decision": decision, "streak": streak,
+                "payload_words": 10, "session_id": "s1",
+                "origin_totals": {"new": 1}, "rule_totals": {"banned-word": 1},
+                "blocking_origin_totals": {"new": 1},
+                "blocking_rule_totals": {"banned-word": 1},
+                "findings": [],
+            }
+
+        summary = linter.summarize_events([
+            gate(1700000000.0, "pass", 0),
+            gate(1700000010.0, "pass", 0),
+            gate(1700000020.0, "warn", 0),
+            gate(1700000030.0, "block", 1),
+        ])
+        work = summary["work"]
+        self.assertEqual(work["total_writes"], 4)
+        self.assertEqual(work["passed_first"], 3)
+        self.assertEqual(work["blocked"], 1)
+        self.assertEqual(work["passed_first_with_warnings"], 1)
+        # The rows account for every write the gate saw.
+        self.assertEqual(work["passed_first"] + work["blocked"], work["total_writes"])
+        self.assertEqual(work["passed_first_rate"], 75.0)
+        self.assertIn("of which 1 passed with warnings", linter.format_stats_terminal(summary))
+        self.assertIn("1 passed with warnings", linter.format_report_markdown(summary))
+
+        # The control: with no warn event the rows read exactly as before, and
+        # neither renderer mentions warnings.
+        clean = linter.summarize_events([
+            gate(1700000000.0, "pass", 0),
+            gate(1700000030.0, "block", 1),
+        ])
+        self.assertEqual(clean["work"]["passed_first"], 1)
+        self.assertEqual(clean["work"]["blocked"], 1)
+        self.assertEqual(clean["work"]["passed_first_with_warnings"], 0)
+        self.assertNotIn("passed with warnings", linter.format_stats_terminal(clean))
+        self.assertNotIn("passed with warnings", linter.format_report_markdown(clean))
+
+        # A warn on a retry is rework, not a first-time pass.
+        retried = linter.summarize_events([
+            gate(1700000000.0, "block", 1),
+            gate(1700000010.0, "warn", 2),
+        ])
+        self.assertEqual(retried["work"]["total_writes"], 1)
+        self.assertEqual(retried["work"]["passed_first"], 0)
+        self.assertEqual(retried["work"]["passed_first_with_warnings"], 0)
+
+    def test_the_window_counts_calendar_days_not_elapsed_seconds(self) -> None:
+        """Events inside one calendar day rendered as a two-day window."""
+        def gate(ts: float) -> dict:
+            return {
+                "ts": ts, "event": "lint", "surface": "gate", "tool": "Write",
+                "path": "/p/a.md", "decision": "pass", "streak": 0,
+                "payload_words": 10, "session_id": "s1", "findings": [],
+            }
+
+        one_day = [
+            gate(datetime.datetime(2026, 8, 25, 8, 0).timestamp()),
+            gate(datetime.datetime(2026, 8, 25, 21, 56).timestamp()),
+        ]
+        summary = linter.summarize_events(one_day)
+        self.assertEqual(summary["start_date"], "2026-08-25")
+        self.assertEqual(summary["end_date"], "2026-08-25")
+        self.assertEqual(summary["days"], 1)
+        self.assertIn("2026-08-25 to 2026-08-25 (1 day)", linter.format_stats_terminal(summary))
+        self.assertIn("2026-08-25 to 2026-08-25 (1 day)", linter.format_report_markdown(summary))
+
+        # The control: two calendar days two hours apart still read as two days,
+        # where rounding the elapsed span reported one.
+        two_days = [
+            gate(datetime.datetime(2026, 8, 25, 23, 0).timestamp()),
+            gate(datetime.datetime(2026, 8, 26, 1, 0).timestamp()),
+        ]
+        crossing = linter.summarize_events(two_days)
+        self.assertEqual(crossing["days"], 2)
+        self.assertIn("2026-08-25 to 2026-08-26 (2 days)", linter.format_stats_terminal(crossing))
+        self.assertIn("2026-08-25 to 2026-08-26 (2 days)", linter.format_report_markdown(crossing))
+
+        # An empty log has no window at all.
+        self.assertEqual(linter.summarize_events([])["days"], 0)
+
+    def test_effective_preset_is_defined_once(self) -> None:
+        """A dead first definition carried the docstring the live one needed."""
+        source = (REPO_ROOT / "lib" / "linter.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        definitions = [
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "effective_preset"
+        ]
+        self.assertEqual(len(definitions), 1)
+        # The surviving definition is the one that routes a channel and states
+        # the fail-open contract.
+        self.assertIn("channel", [a.arg for a in definitions[0].args.kwonlyargs])
+        self.assertIn("Fails open", ast.get_docstring(definitions[0]) or "")
+        # The control: the module still exposes a callable that resolves a preset.
+        preset, patterns = linter.effective_preset()
+        self.assertIsInstance(preset, dict)
+        self.assertIsInstance(patterns, tuple)
 
 
 class ReminderHeaderTests(unittest.TestCase):
