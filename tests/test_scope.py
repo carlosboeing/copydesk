@@ -23,7 +23,7 @@ import linter  # noqa: E402
 BANNED = "The design is robust."
 CLEAN = "A short sentence has enough words here."
 LONG_ERROR = (
-    "This entry carries a pre-existing sentence that runs far past every limit "
+    "This entry contains a pre-existing sentence that runs far past every limit "
     "the gate enforces because it keeps adding clause after clause after clause "
     "without ever reaching a proper stopping point, and it continues past every "
     "natural pause, piling subordinate clause on subordinate clause until the "
@@ -91,9 +91,9 @@ class GateScopeTests(unittest.TestCase):
 
     def test_an_edit_beside_a_pre_existing_banned_word_passes(self) -> None:
         """205 of 265 files here blocked an edit, and none came from the new text."""
-        path = self.write("d.md", BANNED + "\n\nAnother line sits here quietly.\n")
+        path = self.write("d.md", BANNED + "\n\nAnother line rests here quietly.\n")
         result = self.gate(
-            self.edit_payload(path, "Another line sits here quietly.", "Another line sits here calmly.", session="e2")
+            self.edit_payload(path, "Another line rests here quietly.", "Another line rests here calmly.", session="e2")
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -101,11 +101,11 @@ class GateScopeTests(unittest.TestCase):
 
     def test_an_unchanged_line_inside_old_string_does_not_block(self) -> None:
         """The replacement span includes context lines; identical text is not authored."""
-        path = self.write("d2.md", f"- {LONG_ERROR}\n- A short bullet sits below.\n")
+        path = self.write("d2.md", f"- {LONG_ERROR}\n- A short bullet waits below.\n")
         result = self.gate(
             self.edit_payload(
                 path,
-                f"- {LONG_ERROR}\n- A short bullet sits below.",
+                f"- {LONG_ERROR}\n- A short bullet waits below.",
                 f"- {LONG_ERROR}\n- A short bullet reworded here.",
                 session="issue8a",
             )
@@ -114,11 +114,11 @@ class GateScopeTests(unittest.TestCase):
 
     def test_the_pre_existing_sentence_is_reported_while_a_new_error_blocks(self) -> None:
         """The block names only the new text; the old error is counted, not charged."""
-        path = self.write("d6.md", f"- {LONG_ERROR}\n- A short bullet sits below.\n")
+        path = self.write("d6.md", f"- {LONG_ERROR}\n- A short bullet waits below.\n")
         result = self.gate(
             self.edit_payload(
                 path,
-                f"- {LONG_ERROR}\n- A short bullet sits below.",
+                f"- {LONG_ERROR}\n- A short bullet waits below.",
                 f"- {LONG_ERROR}\n- A short bullet, robust and simple.",
                 session="issue8e",
             )
@@ -139,9 +139,9 @@ class GateScopeTests(unittest.TestCase):
 
     def test_control_an_error_written_inside_the_edit_still_blocks(self) -> None:
         """A fix that stopped blocking on everything would break the gate here."""
-        path = self.write("d4.md", "A clean intro line sits here.\n")
+        path = self.write("d4.md", "A clean intro line waits here.\n")
         result = self.gate(
-            self.edit_payload(path, "A clean intro line sits here.", f"A clean intro line sits here. {LONG_ERROR}", session="issue8c")
+            self.edit_payload(path, "A clean intro line waits here.", f"A clean intro line waits here. {LONG_ERROR}", session="issue8c")
         )
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("sentence-length", result.stderr)
@@ -183,9 +183,9 @@ class GateScopeTests(unittest.TestCase):
         self.assertIn("sentence-length", result.stderr)
 
     def test_a_pure_deletion_passes(self) -> None:
-        path = self.write("e.md", BANNED + "\n\nAnother line sits here quietly.\n")
+        path = self.write("e.md", BANNED + "\n\nAnother line rests here quietly.\n")
         result = self.gate(
-            self.edit_payload(path, "\n\nAnother line sits here quietly.", "", session="e3")
+            self.edit_payload(path, "\n\nAnother line rests here quietly.", "", session="e3")
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -225,10 +225,10 @@ class GateScopeTests(unittest.TestCase):
 
     def test_a_pre_existing_long_sentence_rate_does_not_block_an_unrelated_edit(self) -> None:
         long_sentence = " ".join(["word"] * 30) + "."
-        body = "\n\n".join([long_sentence] * 16 + ["Another line sits here quietly."])
+        body = "\n\n".join([long_sentence] * 16 + ["Another line rests here quietly."])
         path = self.write("i.md", body + "\n")
         result = self.gate(
-            self.edit_payload(path, "Another line sits here quietly.", "Another line sits here calmly.", session="e7")
+            self.edit_payload(path, "Another line rests here quietly.", "Another line rests here calmly.", session="e7")
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -240,7 +240,7 @@ class GateScopeTests(unittest.TestCase):
         list and does not take the newly-fires path.
         """
         four = (
-            "One short sentence sits here now. Two more words follow along. "
+            "One short sentence rests here now. Two more words follow along. "
             "Three keeps under the word cap. Four finishes this paragraph cleanly."
         )
         path = self.write("p1.md", four + "\n")
@@ -262,7 +262,7 @@ class GateScopeTests(unittest.TestCase):
         # one old violation switched the rule off for the whole file.
         over = ("One short line here. Two short lines here. Three short lines here. "
                 "Four short lines here. Five short lines here.")
-        path = self.write("pl1.md", over + "\n\nA separate clean paragraph sits here.\n")
+        path = self.write("pl1.md", over + "\n\nA separate clean paragraph waits here.\n")
         result = self.gate(self.edit_payload(
             path, "Three short lines here.", "Three rewritten lines here.", session="pl1"))
         self.assertEqual(result.returncode, 2, result.stderr)
@@ -286,11 +286,11 @@ class GateScopeTests(unittest.TestCase):
         # a bullet sitting between two of them falls inside them. The finding
         # carries each counted sentence separately for exactly this geometry.
         doc = ("One short line here. Two short lines here.\n"
-               "- bullet sits here now\n"
+               "- bullet rests here now\n"
                "Three short lines here. Four short lines here. Five short lines here.")
         path = self.write("pl4.md", doc + "\n")
         result = self.gate(self.edit_payload(
-            path, "- bullet sits here now", "- bullet reworded here now", session="pl4"))
+            path, "- bullet rests here now", "- bullet reworded here now", session="pl4"))
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rewording_a_bullet_is_not_blamed_for_the_intro(self) -> None:
@@ -299,32 +299,32 @@ class GateScopeTests(unittest.TestCase):
         # would blame one for prose it was never measured against.
         block = ("One short line here. Two short lines here. Three short lines here. "
                  "Four short lines here. Five short lines here.\n"
-                 "- first bullet sits here\n"
-                 "- second bullet sits here")
+                 "- first bullet rests here\n"
+                 "- second bullet rests here")
         path = self.write("pl3.md", block + "\n")
         result = self.gate(self.edit_payload(
-            path, "- second bullet sits here", "- second bullet reworded here", session="pl3"))
+            path, "- second bullet rests here", "- second bullet reworded here", session="pl3"))
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_an_edit_in_another_paragraph_leaves_it_alone(self) -> None:
         over = ("One short line here. Two short lines here. Three short lines here. "
                 "Four short lines here. Five short lines here.")
-        path = self.write("pl2.md", over + "\n\nA separate clean paragraph sits here.\n")
+        path = self.write("pl2.md", over + "\n\nA separate clean paragraph waits here.\n")
         result = self.gate(self.edit_payload(
-            path, "A separate clean paragraph sits here.",
-            "A separate tidy paragraph sits here.", session="pl2"))
+            path, "A separate clean paragraph waits here.",
+            "A separate tidy paragraph waits here.", session="pl2"))
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_a_pre_existing_paragraph_length_does_not_block_an_unrelated_edit(self) -> None:
         five = (
-            "One short sentence sits here now. Two more words follow along. "
+            "One short sentence rests here now. Two more words follow along. "
             "Three keeps under the word cap. Four finishes this paragraph cleanly. "
             "Five was already over the cap."
         )
-        body = five + "\n\nAnother line sits here quietly."
+        body = five + "\n\nAnother line rests here quietly."
         path = self.write("p2.md", body + "\n")
         result = self.gate(
-            self.edit_payload(path, "Another line sits here quietly.", "Another line sits here calmly.", session="e7p")
+            self.edit_payload(path, "Another line rests here quietly.", "Another line rests here calmly.", session="e7p")
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -332,20 +332,20 @@ class GateScopeTests(unittest.TestCase):
 
     def test_only_the_blocking_findings_are_printed(self) -> None:
         """Asking the model to fix text it did not write is what made refusal obstructive."""
-        path = self.write("j.md", "The first design is robust.\n\nAnother line sits here quietly.\n")
+        path = self.write("j.md", "The first design is robust.\n\nAnother line rests here quietly.\n")
         result = self.gate(
-            self.edit_payload(path, "Another line sits here quietly.",
-                              "Another line sits here quietly.\n\nThe second plan is comprehensive.", session="e8")
+            self.edit_payload(path, "Another line rests here quietly.",
+                              "Another line rests here quietly.\n\nThe second plan is comprehensive.", session="e8")
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("comprehensive", result.stderr)
         self.assertNotIn("The first design is robust", result.stderr)
 
     def test_the_pre_existing_count_is_reported_without_asking_for_a_fix(self) -> None:
-        path = self.write("k.md", "The first design is robust.\n\nAnother line sits here quietly.\n")
+        path = self.write("k.md", "The first design is robust.\n\nAnother line rests here quietly.\n")
         result = self.gate(
-            self.edit_payload(path, "Another line sits here quietly.",
-                              "Another line sits here quietly.\n\nThe second plan is comprehensive.", session="e9")
+            self.edit_payload(path, "Another line rests here quietly.",
+                              "Another line rests here quietly.\n\nThe second plan is comprehensive.", session="e9")
         )
         self.assertIn("pre-existing error", result.stderr)
         self.assertIn("need no change", result.stderr)
@@ -364,9 +364,9 @@ class GateScopeTests(unittest.TestCase):
 
     def test_the_telemetry_event_schema_is_unchanged(self) -> None:
         """Origin tracking and rollups already record what the new decision reads."""
-        path = self.write("m.md", BANNED + "\n\nAnother line sits here quietly.\n")
-        self.gate(self.edit_payload(path, "Another line sits here quietly.",
-                                    "Another line sits here calmly.", session="tel"))
+        path = self.write("m.md", BANNED + "\n\nAnother line rests here quietly.\n")
+        self.gate(self.edit_payload(path, "Another line rests here quietly.",
+                                    "Another line rests here calmly.", session="tel"))
         events = [json.loads(line) for line in (self.state / "events.jsonl").read_text(encoding="utf-8").splitlines()]
         lint_events = [e for e in events if e.get("event") == "lint"]
         self.assertTrue(lint_events)
@@ -419,7 +419,7 @@ class DecisionHelperTests(unittest.TestCase):
         # timeout the gate is killed and every write goes through unchecked,
         # so a document pair over the cap is charged whole instead.
         paragraphs = "\n\n".join(
-            f"Paragraph {i} sits here with a few ordinary words." for i in range(1600)
+            f"Paragraph {i} rests here with a few ordinary words." for i in range(1600)
         )
         changed = paragraphs.replace("ordinary", "different")
         started = time.time()
@@ -431,10 +431,10 @@ class DecisionHelperTests(unittest.TestCase):
         # Charging the whole document past the cap refused every pre-existing
         # error in the file, which is the symptom this attribution removes.
         paragraphs = "\n\n".join(
-            f"Paragraph {i} sits here with a few ordinary words." for i in range(1600)
+            f"Paragraph {i} rests here with a few ordinary words." for i in range(1600)
         )
-        old = "Paragraph 800 sits here with a few ordinary words."
-        new = "Paragraph 800 sits here with several different words."
+        old = "Paragraph 800 rests here with a few ordinary words."
+        new = "Paragraph 800 rests here with several different words."
         proposed = paragraphs.replace(old, new)
         findings = [
             linter.Finding(1, "banned-word", "x", "error", span_start=0, span_end=5),

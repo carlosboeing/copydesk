@@ -54,6 +54,7 @@ FILE_STATISTICS_MIN_SENTENCES = 15
 LONG_SENTENCE_WARNING_WORDS = 25
 LONG_SENTENCE_ERROR_WORDS = 40
 LONG_SENTENCE_RATE = 0.10
+EM_DASH_RATE_DEFAULT = 4.0
 AVG_SENTENCE_MIN_WORDS = 12
 AVG_SENTENCE_MAX_WORDS = 20
 MIN_SENTENCE_VARIATION = 4.0
@@ -81,7 +82,7 @@ INNER_DIFF_CHAR_CAP = 4096
 OUTER_DIFF_LINE_CAP = 2000
 # Whitespace-delimited words emitted by hooks/reminder.sh on every user prompt.
 # tests/test_telemetry.py reads the hook and fails if this drifts from the text.
-REMINDER_WORD_COUNT = 51
+REMINDER_WORD_COUNT = 62
 
 
 @dataclass(frozen=True)
@@ -256,8 +257,13 @@ def effective_preset(path=None) -> tuple[dict, tuple[RulePattern, ...]]:
     used, because a gate that blocks on its own misconfiguration is worse
     than one that lets the write through.
     """
-def effective_preset(path: Optional[Union[str, Path]]) -> tuple[dict, tuple[RulePattern, ...]]:
-    """Return the (preset_dict, compiled_patterns) tuple that applies to `path`."""
+def effective_preset(path: Optional[Union[str, Path]] = None, *, channel: Optional[str] = None) -> tuple[dict, tuple[RulePattern, ...]]:
+    """Return the (preset_dict, compiled_patterns) tuple that applies to `path`.
+
+    `channel` overrides path routing for a gate that has no file to route,
+    as the chat Stop hook does; the chat channel's style then picks its
+    preset exactly as it would for a routed document.
+    """
     if config is None:
         return PRESET, RULE_PATTERNS
     try:
@@ -286,16 +292,16 @@ def effective_preset(path: Optional[Union[str, Path]]) -> tuple[dict, tuple[Rule
             _report_config_error(str(error))
             return PRESET, RULE_PATTERNS
 
-    channel = channels.decide(str(path), routing_resolved).channel if path else None
+    resolved_channel = channel or (channels.decide(str(path), routing_resolved).channel if path else None)
 
-    full_key = (root_key, files_key, channel)
+    full_key = (root_key, files_key, resolved_channel)
     cached = _PRESET_CACHE.get(full_key)
     if cached is not None:
         return cached
 
     try:
         resolved = config.resolve(
-            _rules_dir(), path, user_path=user, project_path=project, local_path=local, channel=channel
+            _rules_dir(), path, user_path=user, project_path=project, local_path=local, channel=resolved_channel
         )
         compiled = compile_patterns(resolved)
     except config.ConfigError as error:
@@ -728,13 +734,18 @@ def lint(
     path: Optional[Union[str, Path]] = None,
     *,
     subject_is_own_unit: bool = False,
+    channel: Optional[str] = None,
 ) -> list[Finding]:
     """Return deterministic checks for one Markdown document.
 
     The function is deliberately dependency-free so the CLI, hook, and future
     measurement scripts can import exactly the same exclusions and rules.
+
+    `channel` resolves the preset as if routing had named that channel; the
+    chat gate passes "chat" so a reply is judged by the chat style's own
+    thresholds.
     """
-    preset, patterns = effective_preset(path)
+    preset, patterns = effective_preset(path, channel=channel)
     body = exclude_markdown(text)
     records = _sentence_records(body, subject_is_own_unit=subject_is_own_unit)
 
@@ -744,6 +755,7 @@ def lint(
     avg_min = _rule_number(preset, "avg-sentence-length", "min", AVG_SENTENCE_MIN_WORDS)
     avg_max = _rule_number(preset, "avg-sentence-length", "max", AVG_SENTENCE_MAX_WORDS)
     max_rate = _rule_number(preset, "long-sentence-rate", "maxRate", LONG_SENTENCE_RATE)
+    em_dash_max = _rule_number(preset, "em-dash-rate", "maxPerThousandWords", EM_DASH_RATE_DEFAULT)
     min_stdev = _rule_number(preset, "sentence-variation", "minStdev", MIN_SENTENCE_VARIATION)
     exemption_ratio = _rule_number(preset, "list-dominated", "exemptionRatio", LIST_EXEMPTION_RATIO)
 
@@ -803,6 +815,24 @@ def lint(
                 )
             )
 
+        # Em dashes are counted over the same masked prose the sentence checks
+        # read, so fences, inline code and tables contribute neither dashes nor
+        # words.
+        em_dash_severity = _rule_severity(preset, "em-dash-rate", "warning")
+        em_dash_words = len(body.split())
+        if em_dash_severity != "off" and em_dash_words:
+            em_dash_count = body.count("\u2014")
+            em_dash_per_thousand = em_dash_count / em_dash_words * 1000
+            if em_dash_per_thousand > em_dash_max:
+                findings.append(
+                    Finding(
+                        1,
+                        "em-dash-rate",
+                        f"{em_dash_count} em dashes in {em_dash_words} words ({em_dash_per_thousand:.1f} per 1,000)",
+                        em_dash_severity,
+                    )
+                )
+
         average = sum(sentence.words for sentence in records) / len(records)
         if average_severity != "off" and (average < avg_min or average > avg_max):
             findings.append(
@@ -833,6 +863,7 @@ def lint(
 # takes the ordinary overlap path.
 DOCUMENT_SCOPED_BLOCKING_RULES = frozenset({
     "long-sentence-rate", "avg-sentence-length", "sentence-variation", "list-dominated",
+    "em-dash-rate",
 })
 
 
@@ -1510,6 +1541,132 @@ def run_hook(raw_payload: str) -> int:
             )
         if has_ai_tell_finding(proposed, blocking):
             print("Run /humanizer for the AI-tell failures before retrying.", file=sys.stderr)
+        return 2
+    except (OSError, TypeError, ValueError):
+        return 0
+
+
+def _chat_state_path(session_id: str) -> Path:
+    """Retry state beside the .closer file, keyed on the session alone."""
+    safe_session_id = re.sub(r"[^A-Za-z0-9._-]", "_", session_id)
+    return _state_directory() / "sessions" / f"{safe_session_id}.chat"
+
+
+def _read_chat_state(path: Path, now: float) -> dict[str, object]:
+    try:
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(decoded, dict):
+        return {}
+    updated_at = decoded.get("updated_at")
+    if not isinstance(updated_at, (int, float)) or now - updated_at > STATE_TTL_SECONDS:
+        return {}
+    return decoded
+
+
+def run_chat_hook(raw_payload: str) -> int:
+    """Judge one finished reply for the chat Stop hook. Fails open.
+
+    Every finding is new text — a chat reply has no prior version — so the
+    edit-origin machinery is skipped and `blocking_findings_for_retry`
+    already describes the blocking set. Document-scoped statistical rules
+    drop out because a short reply must not be measured against whole-document
+    minimums, and rate rules stay quiet under the same sentence floor inside
+    lint().
+    """
+    try:
+        payload = json.loads(raw_payload)
+        if not isinstance(payload, dict):
+            return 0
+        session_id = payload.get("session_id")
+        message = payload.get("last_assistant_message")
+        if not isinstance(session_id, str) or not session_id:
+            return 0
+        if not isinstance(message, str) or not message:
+            return 0
+
+        t_start = time.time()
+        findings = lint(message, channel="chat")
+        duration_ms = round((time.time() - t_start) * 1000, 1)
+
+        doc_bytes = len(message.encode("utf-8"))
+        body_sentences = len(_sentence_records(exclude_markdown(message)))
+        findings_total = len(findings)
+        rollups = _finding_rollups(findings)
+        now = time.time()
+
+        def _event(decision: str, streak: int) -> dict[str, object]:
+            return {
+                "ts": round(now, 1),
+                "event": "lint",
+                "surface": "chat",
+                "tool": None,
+                "decision": decision,
+                "streak": streak,
+                "duration_ms": duration_ms,
+                "bytes": doc_bytes,
+                "payload_words": len(message.split()),
+                "sentences": body_sentences,
+                "findings_total": findings_total,
+                "origin_totals": rollups["origin_totals"],
+                "rule_totals": rollups["rule_totals"],
+                "blocking_origin_totals": rollups["blocking_origin_totals"],
+                "blocking_rule_totals": rollups["blocking_rule_totals"],
+                "findings": _serialize_findings(findings),
+                "session_id": session_id,
+            }
+
+        blocking = blocking_findings_for_retry(findings)
+        state_path = _chat_state_path(session_id)
+        state = _read_chat_state(state_path, now)
+
+        if not blocking:
+            # A pass that clears an earlier block is attempt N, not a first-pass
+            # success, matching the write gate's streak bookkeeping.
+            previous_streak = state.get("streak", 0) if isinstance(state, dict) else 0
+            if not isinstance(previous_streak, int) or previous_streak < 1:
+                pass_streak = 0
+            else:
+                pass_streak = previous_streak + 1
+            try:
+                state_path.unlink()
+            except OSError:
+                pass
+            has_warnings = any(finding.severity == "warning" for finding in findings)
+            _record_event(_event("warn" if has_warnings else "pass", pass_streak))
+            return 0
+
+        content_hash = hashlib.sha256(message.encode("utf-8")).hexdigest()
+        previous_hashes = state.get("hashes", []) if isinstance(state, dict) else []
+        if not isinstance(previous_hashes, list):
+            previous_hashes = []
+        hashes = [value for value in previous_hashes if isinstance(value, str)][-2:] + [content_hash]
+        previous_streak_value = state.get("streak", 0) if isinstance(state, dict) else 0
+        streak = previous_streak_value + 1 if isinstance(previous_streak_value, int) else 1
+
+        resolved, _ = effective_preset(channel="chat")
+        retry_limit = _retry_limit(resolved)
+
+        if streak >= retry_limit:
+            try:
+                state_path.unlink()
+            except OSError:
+                pass
+            print(
+                f"CopyDesk chat gate passed after {retry_limit} failed attempts "
+                f"(sha256={', '.join(hashes)}).",
+                file=sys.stderr,
+            )
+            _record_event(_event("escape", streak))
+            return 0
+
+        state_dir = state_path.parent
+        state_dir.mkdir(parents=True, exist_ok=True)
+        _write_state(state_path, {"streak": streak, "hashes": hashes, "updated_at": now})
+        _record_event(_event("block", streak))
+        for finding in blocking:
+            print(finding.render(), file=sys.stderr)
         return 2
     except (OSError, TypeError, ValueError):
         return 0
@@ -2407,6 +2564,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments == ["--hook"]:
         return run_hook(sys.stdin.read())
+    if arguments == ["--chat"]:
+        return run_chat_hook(sys.stdin.read())
     if arguments == ["--reminder"]:
         try:
             payload = {}
@@ -2454,7 +2613,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             pass
         record_turn_event(session_id)
         return 0
-    print("usage: linter.py --hook | --turn | --reminder", file=sys.stderr)
+    print("usage: linter.py --hook | --chat | --turn | --reminder", file=sys.stderr)
     return 64
 
 

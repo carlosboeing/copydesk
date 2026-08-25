@@ -276,6 +276,35 @@ class FlagTests(unittest.TestCase):
         result = self._run("--defaults", "--yes")
         self.assertIn("blocked a sample", result.stdout.lower())
 
+    def test_setup_registers_the_chat_stop_hook_once(self) -> None:
+        """The third hook follows the filter-then-append shape of the other two."""
+        self._run("--defaults", "--yes")
+        document = json.loads((self.home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        stop_entries = document["hooks"]["Stop"]
+        copydesk_entries = [
+            entry for entry in stop_entries
+            if any("copydesk" in str(h.get("command", "")) for h in entry.get("hooks", []))
+        ]
+        self.assertEqual(len(copydesk_entries), 1)
+        commands = [
+            h["command"] for h in copydesk_entries[0]["hooks"] if "chat-gate.sh" in str(h.get("command", ""))
+        ]
+        self.assertEqual(len(commands), 1)
+        # The script itself is installed beside gate.sh.
+        self.assertTrue((self.home / ".claude" / "hooks" / "copydesk" / "chat-gate.sh").is_file())
+
+    def test_a_second_setup_does_not_duplicate_the_chat_hook(self) -> None:
+        self._run("--defaults", "--yes")
+        self._run("--defaults", "--yes")
+        document = json.loads((self.home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        chat_commands = [
+            h.get("command", "")
+            for entry in document["hooks"]["Stop"]
+            for h in entry.get("hooks", [])
+            if "chat-gate.sh" in str(h.get("command", ""))
+        ]
+        self.assertEqual(len(chat_commands), 1)
+
     def test_no_tools_found_takes_the_no_tools_outro(self) -> None:
         empty = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, empty)

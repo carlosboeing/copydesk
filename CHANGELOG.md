@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **`verb-jargon` now blocks at error severity for every user of the plain preset.** The rule held five entries at warning, on the reading that a regex cannot judge part of speech. Measuring the inflected forms against a 448,102-word corpus disproved that for the verb readings: `lands`, `landed`, `carries`, `carrying`, `holds`, `holding` and the rest of the newly added inflected forms read as nouns at or under 17% of their occurrences when a determiner or subject sits before them. The rule gains those twelve forms at error, and its five original entries rise with it. The bare forms (`carry`, `hold`, `sit`, `land`, `reach`, `travel`, `ride`) stay legal. Four terms whose noun readings run 22% or higher take bounded patterns instead: `surface` fires only after a modal, an infinitive *to* or a pronoun subject; `shape` only after a determiner or before *of*; `the trap`, `the catch`, `the wrinkle` and `the tell` only after a definite article at a clause start; `spine` and `backbone` only after a possessive or *the*. What blocks on a plain-preset write therefore changes with this release.
+
+### Added
+
+- **A gate on the `chat` channel.** Chat had instructions and no enforcement, because routing resolves a file path and a chat reply has none. A Stop hook now judges each finished reply through the same `lint()` as the write gate: error-severity findings refuse the stop (exit 2) so the model revises, document-scoped statistical rules drop out because a short reply is not a whole document, rate rules stay quiet under the same sentence floor, and after the configured retries the turn passes through with the escape recorded. Retry state is keyed on session id under the existing state directory's `sessions/`, beside the repeat-closer state. Telemetry records chat events with their own surface, kept apart from gate writes and CLI runs in summaries. Setup registers the hook alongside the write gate and reminder, uninstall removes it by the same copydesk-command filter, and doctor reports the channel as gated once both pieces are installed.
+- **An em-dash rate rule.** `em-dash-rate` counts U+2014 per thousand words of prose after code fences, inline code and tables are masked, reports once per document at warn severity, and defaults to 4 per thousand against a measured baseline near 10. It joins the document-scoped set, so it never blocks a chat turn on its own.
+- **ASD-STE100 and TLDR named in the instruction slots.** The `chat`/`engineer` style line, the preset rules block and the per-turn reminder now name the standard and the summary-first opening shape, transferring a known rule set for roughly a dozen words of context. Every public artifact says the `engineer` style is STE-derived and never says STE-compliant or certified.
+
+### Changed
+
+- **The filler-intensifier ban is retired and two evadable patterns widened.** Twelve filler intensifiers (`actually`, `genuinely`, `simply`, `basically`, `really`, `effectively`, `essentially`, `fundamentally`, `materially`, `arguably`, `meaningfully`, `honestly`) leave the banned-word list as ordinary conversational English, and the instructions' category count drops from four kinds of word to three. In their place, one-part-of-speech enforcement arrives through the verb-jargon changes above, plus `reads as`, `reads like` and `by construction` as plain banned phrases. The `worth noting` token becomes a pattern covering `worth stating`, `worth saying` and `worth flagging`; the contrast-construction pattern widens from the literal *it's not just X — it's Y* to any negated copula, up to seventy characters, an em dash and a resuming pronoun.
+
 ### Fixed
 
 - **A documentation test pinned the git-hook entry to `[Unreleased]`, so every release broke the suite.** Cutting 0.7.0 moved that entry under its version heading and the assertion failed against an empty section. The command surface is a frozen contract item and the changelog must name both additions, which it does wherever they sit, so the test now reads the whole file.

@@ -114,7 +114,7 @@ class CommitMessageTests(unittest.TestCase):
 
     def test_a_banned_word_in_the_body_is_refused_at_its_own_line(self) -> None:
         result = self._commit(
-            "Expire reset tokens after first use\n\nA used token was really valid for an hour."
+            "Expire reset tokens after first use\n\nA used token was crucial for an hour."
         )
         self.assertNotEqual(result.returncode, 0)
         # Line 3 of the message, not line 2 of the body. The subject and the

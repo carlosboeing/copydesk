@@ -545,6 +545,33 @@ class TestTelemetry(unittest.TestCase):
         body = script.split("cat << 'EOF'\n", 1)[1].split("\nEOF", 1)[0]
         self.assertEqual(len(body.split()), linter.REMINDER_WORD_COUNT)
 
+    def test_chat_events_carry_their_own_surface_and_stay_out_of_gate_work(self) -> None:
+        """The chat Stop hook must be countable apart from gate writes."""
+        with tempfile.TemporaryDirectory() as config_home, patch.dict(
+            os.environ, {"XDG_CONFIG_HOME": config_home}
+        ):
+            blocked = linter.run_chat_hook(json.dumps({
+                "session_id": "chat-telemetry",
+                "last_assistant_message": "The draft carries the answer.",
+            }))
+            passed = linter.run_chat_hook(json.dumps({
+                "session_id": "chat-telemetry",
+                "last_assistant_message": "Read the report before approving it.",
+            }))
+
+        self.assertEqual(blocked, 2)
+        self.assertEqual(passed, 0)
+        events = [
+            e for e in linter.read_events(self.state_dir)
+            if e.get("session_id") == "chat-telemetry"
+        ]
+        self.assertEqual([e["surface"] for e in events], ["chat", "chat"])
+        self.assertEqual([e["decision"] for e in events], ["block", "pass"])
+        # Gate effectiveness reads gate-surface events only; chat stays apart.
+        summary = linter.summarize_events(events)
+        self.assertEqual(summary["gate_events_count"], 0)
+        self.assertEqual(summary["work"]["total_writes"], 0)
+
     def test_pass_after_block_records_the_attempt_number(self) -> None:
         target = self.state_dir / "retry_streak.md"
         target.write_text("Placeholder.\n", encoding="utf-8")

@@ -189,6 +189,7 @@ RULE_PARAMETERS = {
     "paragraph-length": {"maxSentences": "integer"},
     "avg-sentence-length": {"min": "integer", "max": "integer"},
     "long-sentence-rate": {"maxRate": "number"},
+    "em-dash-rate": {"maxPerThousandWords": "number"},
     "sentence-variation": {"minStdev": "number"},
     "list-dominated": {"exemptionRatio": "number"},
     "nested-table": {},

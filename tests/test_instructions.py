@@ -115,6 +115,37 @@ class ChatBudgetTests(unittest.TestCase):
             instructions.style_line("chat", "plain-english"), instructions.style_line("chat", "plain")
         )
 
+    def test_the_engineer_chat_style_line_names_the_standard(self) -> None:
+        """Decision: naming ASD-STE100 transfers the whole rule set for ten words."""
+        line = instructions.style_line("chat", "engineer")
+        self.assertIn("ASD-STE100", line)
+        self.assertIn("one word, one meaning, one part of speech", line)
+
+    def test_the_rules_block_names_the_standard_and_the_opening_shape(self) -> None:
+        block = PRESET["instructions"]["rules_block"]
+        self.assertIn("ASD-STE100", block)
+        self.assertIn("TLDR", block)
+
+    def test_no_instruction_prose_uses_the_banned_verb_forms(self) -> None:
+        """A preset that trips its own rule is not defensible.
+
+        Quoted spans and fenced worked examples are stripped before scanning,
+        mirroring what the linter itself exempts; every other occurrence of
+        the inflected verbs in the instruction data is a defect.
+        """
+        for field in ("rules_block", "categories", "reminder"):
+            text = PRESET["instructions"][field]
+            text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+            text = re.sub(r'"[^"]*"', "", text)
+            for pattern in linter.RULE_PATTERNS:
+                if pattern.check != "verb-jargon":
+                    continue
+                match = pattern.regex.search(text)
+                self.assertIsNone(
+                    match,
+                    f"{field} uses the banned form {pattern.phrase!r}",
+                )
+
     def test_guidance_reaches_the_block_merged(self) -> None:
         rendered = instructions.render_chat(resolved())
         self.assertIn("step 3 of 5", rendered)

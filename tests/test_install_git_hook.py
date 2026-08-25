@@ -23,7 +23,7 @@ BANNED = "The design is robust."
 CLEAN = "A short sentence has enough words here."
 
 LONG_ERROR = (
-    "This entry carries a pre-existing sentence that runs far past every limit "
+    "This entry contains a pre-existing sentence that runs far past every limit "
     "the gate enforces because it keeps adding clause after clause after clause "
     "without ever reaching a proper stopping point, and it continues past every "
     "natural pause, piling subordinate clause on subordinate clause until the "
@@ -300,7 +300,7 @@ class StagedScopeTests(GitRepositoryTestCase):
         self.assertIn("banned-word", result.stdout)
 
     def test_a_pure_deletion_passes(self) -> None:
-        self.commit_initial("a.md", LONG_ERROR + "\n\n" + CLEAN + "\n\nAnother short sentence sits right here.\n")
+        self.commit_initial("a.md", LONG_ERROR + "\n\n" + CLEAN + "\n\nAnother short sentence rests right here.\n")
         self.write("a.md", LONG_ERROR + "\n\n" + CLEAN + "\n")
         self.staged("a.md")
         result = self.cli("check", "--staged")
@@ -350,7 +350,7 @@ class StagedScopeTests(GitRepositoryTestCase):
     def test_the_working_tree_is_never_judged(self) -> None:
         self.commit_initial("a.md", CLEAN + "\n")
         # Staged: clean. Working tree: a banned word nobody is committing.
-        self.write("a.md", CLEAN + "\n\nAnother short sentence sits right here.\n")
+        self.write("a.md", CLEAN + "\n\nAnother short sentence rests right here.\n")
         self.staged("a.md")
         self.write("a.md", CLEAN + "\n\n" + BANNED + "\n")
         result = self.cli("check", "--staged")
@@ -559,10 +559,10 @@ class RenamedFileTests(GitRepositoryTestCase):
         old path's deletion out before git can pair the two, so git reports
         a new file and one hunk covering all of it."""
         blocks = [BANNED]
-        blocks += [f"Paragraph {i} sits here." for i in range(2, 2600)]
+        blocks += [f"Paragraph {i} rests here." for i in range(2, 2600)]
         self.commit_initial("a.md", "\n\n".join(blocks) + "\n")
         edited = "\n\n".join(blocks).replace(
-            "Paragraph 1500 sits here.", "Paragraph 1500 sits right here."
+            "Paragraph 1500 rests here.", "Paragraph 1500 rests right here."
         )
         self._git("mv", "a.md", "b.md")
         self.write("b.md", edited + "\n")
@@ -592,10 +592,11 @@ class HunkRangeUnitTests(unittest.TestCase):
         diff = "@@ -2 +1,0 @@\n"
         self.assertEqual(linter._added_char_ranges(diff, masked), [(4, 4)])
 
-    def test_document_scoped_rules_set_holds_the_four_named_rules(self) -> None:
+    def test_document_scoped_rules_set_holds_the_named_rules(self) -> None:
         self.assertEqual(
             linter.DOCUMENT_SCOPED_BLOCKING_RULES,
-            {"long-sentence-rate", "avg-sentence-length", "sentence-variation", "list-dominated"},
+            {"long-sentence-rate", "avg-sentence-length", "sentence-variation", "list-dominated",
+             "em-dash-rate"},
         )
 
 

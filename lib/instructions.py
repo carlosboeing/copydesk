@@ -129,7 +129,7 @@ _COMMITS_VERBOSITY = {
 STYLE_LINES = {
     ("chat", "plain"): "Short sentences. Structure where it helps, prose where it does not.",
     ("chat", "general"): "Short sentences. Gloss every term the reader may not know.",
-    ("chat", "engineer"): "Terse lists and tables. One instruction per sentence.",
+    ("chat", "engineer"): "Terse lists and tables. One instruction per sentence. Write to ASD-STE100: one word, one meaning, one part of speech.",
     ("chat", "editorial"): "Flowing short paragraphs. Lists and tables are rare.",
     ("documents", "plain"): "Prose carries the reasoning. Structure carries the facts.",
     ("documents", "general"): "The explanatory document. Commonest words, nothing assumed.",

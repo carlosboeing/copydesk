@@ -543,6 +543,26 @@
             }
           }
         },
+        "em-dash-rate": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the em-dash-rate rule.",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "off",
+                "warn"
+              ],
+              "description": "error blocks, warn reports, off disables."
+            },
+            "maxPerThousandWords": {
+              "type": "number",
+              "description": "em-dash-rate threshold: maxPerThousandWords."
+            }
+          }
+        },
         "idiom": {
           "type": "object",
           "additionalProperties": false,

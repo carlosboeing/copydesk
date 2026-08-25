@@ -81,6 +81,7 @@ class PlainEnglishCliTests(unittest.TestCase):
             "announcing-opener.md": "announcing-opener",
             "idiom.md": "idiom",
             "nested-table.md": "nested-table",
+            "verb-jargon.md": "verb-jargon",
         }
         for fixture, check in cases.items():
             with self.subTest(fixture=fixture):
@@ -89,7 +90,6 @@ class PlainEnglishCliTests(unittest.TestCase):
     def test_reports_advisory_checks_without_blocking(self) -> None:
         cases = {
             "sentence-length-warning.md": "sentence-length",
-            "verb-jargon.md": "verb-jargon",
             "avg-sentence-length.md": "avg-sentence-length",
             "sentence-variation.md": "sentence-variation",
         }
@@ -260,6 +260,161 @@ class PlainEnglishGateTests(unittest.TestCase):
         self.assertEqual(third.returncode, 0, third.stderr)
         self.assertIn("same content submitted 3 times", third.stderr)
         self.assertIn("sha256=", third.stderr)
+
+
+class PatternBoundaryTests(unittest.TestCase):
+    """Bounded patterns fire on the verb reading and stay quiet on the noun.
+
+    The control for every silent assertion here is the first test: `carries`
+    returns a hit through the same lint call that clears the clean reply.
+    """
+
+    def setUp(self) -> None:
+        """Isolate discovery so the shipped preset judges, not the developer's."""
+        self._config_home = tempfile.TemporaryDirectory()
+        self.addCleanup(self._config_home.cleanup)
+        self._saved_config = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = self._config_home.name
+        self.addCleanup(self._restore_config)
+
+    def _restore_config(self) -> None:
+        if self._saved_config is None:
+            os.environ.pop("XDG_CONFIG_HOME", None)
+        else:
+            os.environ["XDG_CONFIG_HOME"] = self._saved_config
+
+    def _phrases(self, text: str, check: str) -> set[str]:
+        return {
+            pattern.phrase
+            for pattern in linter.RULE_PATTERNS
+            if pattern.check == check and pattern.regex.search(text)
+        }
+
+    def test_the_control_fires_where_clean_text_stays_silent(self) -> None:
+        self.assertIn("carries", self._phrases("The draft carries the answer.", "verb-jargon"))
+        self.assertEqual(
+            [f.check for f in linter.lint("Read the report before approving it.", channel="chat")],
+            [],
+        )
+
+    def test_inflected_forms_fire_while_bare_forms_stay_legal(self) -> None:
+        # lands/landed/landing are matched by the land entry that predates
+        # this design; the rest are their own entries.
+        for verb in ("carries", "carrying", "holds", "holding", "sits", "sitting",
+                     "reaches", "travels", "rides"):
+            with self.subTest(verb=verb):
+                self.assertIn(verb, self._phrases(f"The module {verb} the state.", "verb-jargon"))
+        for verb in ("lands", "landed", "landing"):
+            with self.subTest(verb=verb):
+                self.assertTrue(self._phrases(f"The module {verb} the state.", "verb-jargon"))
+        legal = "Carry the flag, hold the line, sit tight, reach the goal, travel far, ride home."
+        self.assertEqual(self._phrases(legal, "verb-jargon"), set())
+
+    def test_surface_fires_as_a_verb_and_not_as_a_noun(self) -> None:
+        for sentence in (
+            "It surfaces later in the trace.",
+            "This will surface in review.",
+            "I'll surface the findings.",
+            "to surface the cost",
+            "They surfaced the risk early.",
+        ):
+            with self.subTest(sentence=sentence):
+                self.assertIn("surface", self._phrases(sentence, "verb-jargon"))
+        for sentence in ("the review surface", "a surface layer", "Surfaces in the diagram."):
+            with self.subTest(sentence=sentence):
+                self.assertNotIn("surface", self._phrases(sentence, "verb-jargon"))
+
+    def test_shape_fires_bounded_and_the_plural_noun_stays_silent(self) -> None:
+        for sentence in ("the shape of the fix", "that shape again", "its shape"):
+            with self.subTest(sentence=sentence):
+                self.assertIn("shape", self._phrases(sentence, "verb-jargon"))
+        for sentence in ("shapes in the diagram", "reshape the API", "shaped like a ring"):
+            with self.subTest(sentence=sentence):
+                self.assertNotIn("shape", self._phrases(sentence, "verb-jargon"))
+
+    def test_the_trap_family_fires_after_a_definite_article_at_a_clause_start(self) -> None:
+        for sentence in ("The catch is the retry budget.", "Here is the trap.\nThe wrinkle: latency."):
+            with self.subTest(sentence=sentence):
+                self.assertIn("the trap", self._phrases(sentence, "verb-jargon"))
+        for sentence in ("set a trap for it", "catch the exception", "tell me why"):
+            with self.subTest(sentence=sentence):
+                self.assertNotIn("the trap", self._phrases(sentence, "verb-jargon"))
+
+    def test_spine_and_backbone_fire_after_a_possessive_or_the_article(self) -> None:
+        for sentence in ("the spine of the document", "their backbone holds"):
+            with self.subTest(sentence=sentence):
+                self.assertIn("spine", self._phrases(sentence, "verb-jargon"))
+        for sentence in ("a spine diagram", "backbone routers"):
+            with self.subTest(sentence=sentence):
+                self.assertNotIn("spine", self._phrases(sentence, "verb-jargon"))
+
+    def test_the_new_banned_phrases_fire(self) -> None:
+        for sentence, phrase in (
+            ("The diff reads as a rewrite.", "reads as"),
+            ("It reads like a patch.", "reads like"),
+            ("Safe by construction.", "by construction"),
+        ):
+            with self.subTest(sentence=sentence):
+                self.assertIn(phrase, self._phrases(sentence, "banned-word"))
+
+    def test_the_worth_pattern_covers_every_variant(self) -> None:
+        for sentence in (
+            "It's worth noting the cost.",
+            "worth stating plainly",
+            "worth saying once",
+            "worth flagging now",
+        ):
+            with self.subTest(sentence=sentence):
+                self.assertIn("worth noting", self._phrases(sentence, "banned-word"))
+        self.assertNotIn("worth noting", self._phrases("the worth of it", "banned-word"))
+
+    def test_the_contrast_construction_matches_more_than_one_literal_shape(self) -> None:
+        widened = "That is not a coincidence to work around with flags — it is a product difference"
+        self.assertTrue(self._phrases(widened, "contrast-construction"))
+        literal = "It's not just X — it's Y"
+        self.assertTrue(self._phrases(literal, "contrast-construction"))
+        self.assertEqual(
+            self._phrases("This was not an oversight but rather a decision", "contrast-construction"),
+            set(),
+        )
+
+    @staticmethod
+    def _document(word_counts: list[int], dashes: int) -> tuple[str, int]:
+        """One sentence per paragraph; a spaced dash adds exactly one token."""
+        sentences = []
+        for index, words in enumerate(word_counts):
+            if words == 1:
+                sentences.append("Ends.")
+                continue
+            body = f"Point {index} ends" if words == 3 else (
+                f"Point {index} covers item {index} "
+                + " ".join(f"w{index}x{n}" for n in range(words - 5))
+            )
+            sentences.append(body.strip() + ".")
+        text = "\n\n".join(sentences)
+        if dashes:
+            head, _, tail = text.partition("\n\n")
+            text = head + " —\n\n" + tail
+        return text, len(text.split())
+
+    def test_the_em_dash_rate_reports_once_above_the_threshold_only(self) -> None:
+        # 999 prose words + 1 dash = 1000 tokens: 1.0 per thousand, silent.
+        quiet, words = self._document([3] * 333, dashes=1)
+        self.assertEqual(words, 1000)
+        self.assertEqual([f.check for f in linter.lint(quiet) if f.check == "em-dash-rate"], [])
+
+        # 249 prose words + 1 dash = 250 tokens: exactly 4.0, still silent.
+        boundary, words = self._document([3] * 83, dashes=1)
+        self.assertEqual(words, 250)
+        self.assertEqual([f.check for f in linter.lint(boundary) if f.check == "em-dash-rate"], [])
+
+        # 199 prose words + 1 dash = 200 tokens: 5.0 per thousand, reported once.
+        loud, words = self._document([3] * 66 + [1], dashes=1)
+        self.assertEqual(words, 200)
+        found = [f for f in linter.lint(loud) if f.check == "em-dash-rate"]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].severity, "warning")
+        self.assertIn("per 1,000", found[0].excerpt)
 
 
 if __name__ == "__main__":
