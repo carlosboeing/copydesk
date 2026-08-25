@@ -56,8 +56,11 @@ SCHEMA_URL = (
 # measured 236 words. The vocabulary clause then absorbed the shorter gloss
 # line and gave the jargon category a test, taking the block to 267. Nothing
 # outside tests reads this table, so a budget below its own default fails
-# test_the_chat_block_fits_its_budget, never an install.
-BUDGETS = {"chat": 269, "documents": 260, "commits": 25, "reviews": 25}
+# test_the_chat_block_fits_its_budget, never an install. The floor's
+# target-form clause then took the default render to 282: twenty-two words
+# for the two standards that were shipping in the preset and reaching no
+# rendered surface at all.
+BUDGETS = {"chat": 290, "documents": 260, "commits": 25, "reviews": 25}
 
 _STOPPING_RULES = (
     "If the first line answers it, stop. "
@@ -103,6 +106,96 @@ CRAFT = (
     "top to bottom. Follow the repository's own template where it has one."
 )
 
+# The three questions name the three failures no regex catches, measured in
+# one 17,629-word document written with every gate active: a coined term used
+# 49 times and first defined 43% of the way down, one sentence pattern
+# repeated 76 times, and an opening that deferred every claim to a later
+# section. A long document is generated forward once and never read back,
+# which is why the instruction is a second pass rather than another rule.
+SELF_AUDIT = (
+    "A draft past about 1,000 words gets one audit pass before you deliver it. "
+    "Which term did you coin, and does the text define it where it first "
+    "appears? Which sentence pattern did you repeat past the point a reader "
+    "would notice? Does the opening state the answer, or defer it to a section "
+    "further down?"
+)
+
+# Prohibitions alone give the model nothing to generate into, so it falls
+# back on its own default form and dodges the listed words. One pair per
+# rule, ranked by how often that rule fired in the worst document measured:
+# verb-jargon 71, sentence-length 36, banned-word 3, orphan-pointer 2,
+# paragraph-length 1. Every defect line is fenced, and the linter exempts
+# fences, so the examples may quote what they ban.
+EXAMPLES = """## Before and after
+
+The rules name what to avoid. These pairs name what to write. The left line is
+the defect the gate reported, and the right line is the same fact, allowed.
+
+**verb-jargon**, 71 of the 146 findings. Name the actor and the literal action.
+
+```diff
+- The rule data sits beside the linter and travels with every installed copy.
++ The installer copies the rule data next to the linter.
+```
+
+**sentence-length**, 36 findings. The cap is 25 words. Cut at a clause boundary and let the second half stand alone.
+
+```diff
+- The gate refuses the write, prints the findings, records a telemetry event and
+- returns a non-zero exit code so the calling harness knows the attempt failed.
++ The gate refuses the write and prints the findings. It exits non-zero, so the
++ harness knows the attempt failed.
+```
+
+**banned-word**, 3 findings. Replace the quality claim with the evidence you would have cited for it.
+
+```diff
+- This is a robust, comprehensive fix with a clean escape hatch.
++ The fix covers all four channels. Setting the severity to off disables it.
+```
+
+**orphan-pointer**, 2 findings. Replace the pointer with the thing it points at.
+
+```diff
+- As noted above, the latter option needs a schema migration.
++ Adding a fourth severity value needs a schema migration.
+```
+
+**paragraph-length**, 1 finding. Four sentences maximum. Split the paragraph, never merge the sentences.
+
+```diff
+- The gate compiles the preset. It scores the text. It sorts the findings.
+- It prints them. It exits non-zero.
++ The gate compiles the preset. It scores the text. It sorts the findings.
++
++ It prints them, then exits non-zero.
+```"""
+
+# The rules delete patterns, and a model applying them with no counterweight
+# deletes the specifics too. Five items, because a list past five stops being
+# read.
+PRESERVE = """## Keep these
+
+Where a draft already does one of these, leave it alone. Losing one of them to a
+rule costs the reader more than the finding that rule would have reported.
+
+- A specific number, path, version or date. Write `146 findings in 17,629 words`, never `a high failure rate`.
+- A named actor doing a named thing. `The installer copies the file` beats `the file is copied`.
+- Uneven sentence length. A four-word sentence after a twenty-word one is the rhythm the rules ask for.
+- An aside or a self-correction in parentheses, where it records real doubt.
+- A hedge that marks real uncertainty. Deleting it manufactures confidence."""
+
+
+def render_teaching() -> str:
+    """The worked examples and the preserve list, in that order.
+
+    Neither depends on the config: a Before/After pair for a rule is the same
+    pair whatever style renders it. They ship where they are read once per
+    session, never in the per-turn reminder, which is re-sent on every turn.
+    """
+    return EXAMPLES + "\n\n" + PRESERVE
+
+
 _COMMITS = (
     "In a commit message: an imperative subject at most 72 characters, then a "
     "body saying why, not what the diff shows."
@@ -129,7 +222,9 @@ _COMMITS_VERBOSITY = {
 STYLE_LINES = {
     ("chat", "plain"): "Short sentences. Structure where it helps, prose where it does not.",
     ("chat", "general"): "Short sentences. Gloss every term the reader may not know.",
-    ("chat", "engineer"): "Terse lists and tables. One instruction per sentence. Write to ASD-STE100: one word, one meaning, one part of speech.",
+    # ASD-STE100 moved to the floor, so every style names it. Restating it
+    # here would make one style say the same thing twice.
+    ("chat", "engineer"): "Terse lists and tables. One instruction per sentence.",
     ("chat", "editorial"): "Flowing short paragraphs. Lists and tables are rare.",
     ("documents", "plain"): "Prose carries the reasoning. Structure carries the facts.",
     ("documents", "general"): "The explanatory document. Commonest words, nothing assumed.",
@@ -189,7 +284,10 @@ def render_output_style(resolved: dict, writer: str) -> str:
         f" by {writer}. Do not edit by hand. -->\n"
         f"<!-- {FINGERPRINT_MARKER}"
     )
-    tail = f" -->\n\n{RULES_START}\n{body}\n{RULES_END}\n"
+    # The teaching section stays outside the markers. What sits between them
+    # is spliced into instruction files verbatim, and a second copy of the
+    # examples in every one of those files is what the budget exists to stop.
+    tail = f" -->\n\n{RULES_START}\n{body}\n{RULES_END}\n\n{render_teaching()}\n"
     # The placeholder sits on the marker line, which fingerprint drops, so
     # hashing this build hashes the finished file.
     return head + fingerprint(head + "0" * 12 + tail) + tail
@@ -210,6 +308,7 @@ def render_chat(resolved: dict) -> str:
         styles.FLOOR["answer-first"],
         styles.FLOOR["closing-block"],
         styles.FLOOR["say-once"],
+        styles.FLOOR["target-form"],
         style_line("chat", settings.get("style", "plain")),
         _VERBOSITY_LINES.get(settings.get("verbosity", "low"), _VERBOSITY_LINES["low"]),
         inst.get("categories", ""),
@@ -228,6 +327,7 @@ def render_documents(resolved: dict) -> str:
         style_line("documents", settings.get("style", "plain")),
         _VERBOSITY_LINES.get(settings.get("verbosity", "high"), ""),
         CRAFT,
+        SELF_AUDIT,
     ]
     parts.extend(guidance.render(settings.get("guidance") or {}))
     return "\n\n".join(part for part in parts if part)

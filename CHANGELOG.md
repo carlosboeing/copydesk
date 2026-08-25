@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Worked Before/After pairs and a keep-these list in the output style.** The rendered instructions carried zero examples, so the model was told what to avoid and never shown what to write instead. `output-styles/copydesk.md` now ends with one pair per rule, ranked by how often that rule fired in the worst document measured: `verb-jargon` 71, `sentence-length` 36, `banned-word` 3, `orphan-pointer` 2, `paragraph-length` 1. A five-item keep-these list follows, naming what the rules must not flatten — a specific number or path, a named actor, uneven sentence length, a real aside, a hedge that marks real uncertainty. Both sections sit outside the `plain-english-rules` markers, so they reach the output style, which loads once per session, and never the per-turn reminder or a spliced instruction block. Every defect line is fenced, and the linter exempts fences, so the examples quote what they ban without tripping it.
+- **A self-audit pass for long documents.** The `documents` channel now asks for one audit pass on any draft past about 1,000 words, with three questions aimed at failures no regex catches: which term did you coin and where is it defined, which sentence pattern did you repeat, and does the opening state the answer or defer it. One 17,629-word document written with every gate active used a coined term 49 times and first defined it 43% of the way down, repeated one sentence pattern 76 times, and opened by deferring every claim to a later section.
+
+### Changed
+
+- **ASD-STE100 and TLDR reach every style and every rendered surface.** Both were named in the `chat`/`engineer` style line and in the preset's rules block alone. The shipped default is `plain`, so the two instructions that state a target rather than a prohibition rendered into nothing a model reads: `ASD-STE100` and `TLDR` appeared in no generated output style. They are behavioural floor clauses now, immune to style loosening, and the `engineer` line drops its copy so the instruction is delivered once. The chat block's measured budget rises from 269 to 290 words to hold the twenty-two-word clause.
+
 ### Fixed
 
 - **A write that passed with warnings counts as a first-time pass.** `copydesk stats` counted every first attempt in the write total, then counted only `pass` and `block` in the rows below it. A `warn` decision means the write went through with warnings printed beside it, so it fell out of both rows. In one log of 54 writes, 2 warn events were reported nowhere and the pass rate read 79.6% where the true figure was 83.3%. The rows now add up to the total, and both `copydesk stats` and `copydesk report` state how many of the first-time passes came with warnings.

@@ -31,7 +31,8 @@ All styles share a non-negotiable floor that governs agent interactions:
 1. **Answer first**: Provide the core conclusion or answer immediately before offering supporting context or details.
 2. **Closing block reserved**: Only questions and choices requiring reader action belong at the end. Things the agent is doing are never repeated in the closer.
 3. **Say once**: No restating what was just completed, no process narration, and no recaps between turns.
-4. **No conversational filler**: Prohibits conversational openers like "Sure!" and soft closing offers like "Hope this helps!".
+4. **Target form**: Open TLDR-first, summary line then expansion, and write to ASD-STE100 — one word, one meaning, one part of speech.
+5. **No conversational filler**: Prohibits conversational openers like "Sure!" and soft closing offers like "Hope this helps!".
 
 The floor is immune to style loosening; it applies universally across all configured presets.
 

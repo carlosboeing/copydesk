@@ -50,7 +50,10 @@ class FloorTests(unittest.TestCase):
 
     def test_the_behavioural_floor_has_no_config_key(self) -> None:
         # Immune means immune: the three floor clauses are prose, not settings.
-        self.assertEqual(sorted(styles.FLOOR), ["answer-first", "closing-block", "say-once"])
+        self.assertEqual(
+            sorted(styles.FLOOR),
+            ["answer-first", "closing-block", "say-once", "target-form"],
+        )
         for clause in styles.FLOOR.values():
             self.assertNotIn("severity", clause)
 

@@ -77,7 +77,7 @@ class ChatBudgetTests(unittest.TestCase):
         self.assertLessEqual(words, instructions.BUDGETS["chat"])
 
     def test_the_budget_is_the_designed_one(self) -> None:
-        self.assertEqual(instructions.BUDGETS["chat"], 269)
+        self.assertEqual(instructions.BUDGETS["chat"], 290)
 
     def test_no_banned_word_token_list_reaches_the_chat_block(self) -> None:
         rendered = instructions.render_chat(resolved())
@@ -115,11 +115,32 @@ class ChatBudgetTests(unittest.TestCase):
             instructions.style_line("chat", "plain-english"), instructions.style_line("chat", "plain")
         )
 
-    def test_the_engineer_chat_style_line_names_the_standard(self) -> None:
-        """Decision: naming ASD-STE100 transfers the whole rule set for ten words."""
-        line = instructions.style_line("chat", "engineer")
-        self.assertIn("ASD-STE100", line)
-        self.assertIn("one word, one meaning, one part of speech", line)
+    def test_every_style_gets_the_standard_and_the_opening_shape(self) -> None:
+        """Decision: naming ASD-STE100 and TLDR transfers two whole forms for
+        twenty-two words.
+
+        Both used to reach one style line and one preset paragraph. The
+        shipped default is plain, so the two instructions that state a target
+        rather than a prohibition reached no rendered surface at all. They are
+        floor clauses now: no style choice removes them.
+        """
+        for style in ("plain", "general", "engineer", "editorial"):
+            config = resolved()
+            config["channels"]["chat"]["style"] = style
+            rendered = instructions.render_chat(config)
+            self.assertIn("ASD-STE100", rendered, style)
+            self.assertIn("TLDR", rendered, style)
+            self.assertIn("one word, one meaning, one part of speech", rendered, style)
+
+    def test_the_engineer_style_line_no_longer_restates_the_standard(self) -> None:
+        # The floor names it under every style, so the terse style saying it
+        # again would be one instruction delivered twice.
+        self.assertNotIn("ASD-STE100", instructions.style_line("chat", "engineer"))
+
+    def test_the_shipped_output_style_names_both_standards(self) -> None:
+        text = (ROOT / "output-styles" / "copydesk.md").read_text(encoding="utf-8")
+        self.assertIn("ASD-STE100", text)
+        self.assertIn("TLDR", text)
 
     def test_the_rules_block_names_the_standard_and_the_opening_shape(self) -> None:
         block = PRESET["instructions"]["rules_block"]
@@ -158,6 +179,85 @@ class ChatBudgetTests(unittest.TestCase):
             instructions.word_count(instructions.render_chat(off)),
             instructions.word_count(instructions.render_chat(resolved())),
         )
+
+
+class SelfAuditTests(unittest.TestCase):
+    """A long document is generated forward once and never read back.
+
+    The three questions name failures no regex catches: a coined term, a
+    repeated sentence pattern, and an opening that defers the answer.
+    """
+
+    def test_the_documents_channel_asks_for_an_audit_pass(self) -> None:
+        rendered = instructions.render_documents(resolved())
+        self.assertIn("audit pass", rendered)
+        self.assertIn("1,000 words", rendered)
+
+    def test_the_audit_names_the_three_structural_failures(self) -> None:
+        text = instructions.SELF_AUDIT
+        self.assertIn("coin", text)
+        self.assertIn("sentence pattern", text)
+        self.assertIn("state the answer", text)
+
+    def test_the_audit_is_short_enough_for_a_system_prompt(self) -> None:
+        self.assertLessEqual(instructions.word_count(instructions.SELF_AUDIT), 70)
+
+    def test_the_documents_block_still_fits_its_budget(self) -> None:
+        words = instructions.word_count(instructions.render_documents(resolved()))
+        self.assertLessEqual(words, instructions.BUDGETS["documents"])
+
+
+class TeachingSectionTests(unittest.TestCase):
+    """Prohibitions with no target leave the model generating into its own
+    default form. One worked pair per rule gives it one to copy.
+
+    The pairs cost nothing per turn: they render into the output style, which
+    loads once per session, and never into the reminder or the chat block.
+    """
+
+    RANKED_RULES = (
+        "verb-jargon",
+        "sentence-length",
+        "banned-word",
+        "orphan-pointer",
+        "paragraph-length",
+    )
+
+    def test_one_pair_per_ranked_rule(self) -> None:
+        for rule_id in self.RANKED_RULES:
+            self.assertIn(f"**{rule_id}**", instructions.EXAMPLES, rule_id)
+        self.assertEqual(instructions.EXAMPLES.count("```diff"), len(self.RANKED_RULES))
+
+    def test_every_pair_shows_a_defect_and_a_fix(self) -> None:
+        for fence in instructions.EXAMPLES.split("```diff")[1:]:
+            body = fence.split("```", 1)[0]
+            self.assertTrue(any(l.startswith("- ") for l in body.splitlines()), body)
+            self.assertTrue(any(l.startswith("+ ") for l in body.splitlines()), body)
+
+    def test_the_preserve_list_holds_five_items(self) -> None:
+        items = [l for l in instructions.PRESERVE.splitlines() if l.startswith("- ")]
+        self.assertEqual(len(items), 5)
+
+    def test_the_examples_stay_out_of_the_per_turn_surfaces(self) -> None:
+        # The reminder is re-sent on every user turn. Nothing long joins it.
+        self.assertNotIn("```diff", PRESET["instructions"]["reminder"])
+        self.assertNotIn("```diff", instructions.render_chat(resolved()))
+
+    def test_the_output_style_carries_the_teaching_outside_the_markers(self) -> None:
+        rendered = instructions.render_output_style(resolved(), writer="copydesk setup")
+        self.assertIn("## Before and after", rendered)
+        self.assertIn("## Keep these", rendered)
+        self.assertGreater(
+            rendered.index("## Before and after"), rendered.index(instructions.RULES_END)
+        )
+
+    def test_the_teaching_never_reaches_a_spliced_instruction_block(self) -> None:
+        # What sits between the markers is written into every instruction
+        # file. A second copy of the examples in each of them is what the
+        # chat budget exists to stop.
+        block = instructions.render_agents_block(resolved(), include_chat=True)
+        self.assertNotIn("## Before and after", block)
+        self.assertNotIn("```diff", block)
 
 
 class OneInstructionPerFactTests(unittest.TestCase):
