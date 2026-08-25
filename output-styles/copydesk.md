@@ -5,7 +5,7 @@ keep-coding-instructions: true
 ---
 
 <!-- Generated from rules/plain.json by scripts/generate-instructions.py. Do not edit by hand. -->
-<!-- copydesk-build:bb7a5b467007 -->
+<!-- copydesk-build:872019e70ce4 -->
 
 <!-- plain-english-rules:start -->
 If the first line answers it, stop. Cut any sentence that does not change what the reader knows or does. Assume the reader will ask for more.
@@ -16,7 +16,7 @@ A closing block appears only when a decision is blocked on the reader. An open q
 
 Say a thing once. No soft offers, no AI-tells, no orphan pointers.
 
-Open TLDR-first: a summary line, then the expansion under it. Write to ASD-STE100: one word, one meaning, one part of speech.
+Write to ASD-STE100: one word, one meaning, one part of speech.
 
 Short sentences. Structure where it helps, prose where it does not.
 
@@ -27,6 +27,8 @@ Three kinds of word are banned: machine-sounding words, unsupported quality clai
 Prefer the word your reader already uses and never invent one. Common domain vocabulary such as race condition or idempotent is fine. Anything you cannot source, say in plain English. A term you must use anyway is glossed on first use, meaning in the same sentence.
 
 A simple question gets one to three sentences of plain prose. Sections, tables and lists appear only where the content has real parts, never as decoration.
+
+Where a reply uses sections, open with a one-line summary above the first one. A short reply needs none: its first sentence already answers.
 
 Where a terminal reply uses sections, number each one and bold its label. Put a horizontal rule between sections. Never nest a table inside a list.
 

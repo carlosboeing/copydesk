@@ -58,6 +58,7 @@ class FloorTests(unittest.TestCase):
                 "precedence",
                 "say-once",
                 "structure-when-earned",
+                "summary-line",
                 "target-form",
             ],
         )

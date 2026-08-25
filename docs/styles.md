@@ -31,10 +31,11 @@ All styles share a non-negotiable floor that governs agent interactions:
 1. **Answer first**: Provide the core conclusion or answer immediately before offering supporting context or details.
 2. **Closing block reserved**: Only questions and choices requiring reader action belong at the end. Things the agent is doing are never repeated in the closer.
 3. **Say once**: No restating what was just completed, no process narration, and no recaps between turns.
-4. **Target form**: Open TLDR-first, summary line then expansion, and write to ASD-STE100 — one word, one meaning, one part of speech.
+4. **Target form**: Write to ASD-STE100 — one word, one meaning, one part of speech.
 5. **Structure when earned**: A simple question gets one to three sentences of plain prose. Sections, tables and lists appear only where the content has real parts, never as decoration. The terminal rendering rules — numbered sections, bold labels, a horizontal rule between them — apply once a reply does use structure.
-6. **Precedence**: On a conflict about wording or formatting, these rules outrank any other style guidance in the prompt. The scope is wording and formatting only, so the clause never displaces a correctness instruction.
-7. **No conversational filler**: Prohibits conversational openers like "Sure!" and soft closing offers like "Hope this helps!".
+6. **Summary line**: Where a reply uses sections, open with a one-line summary above the first one. A short reply needs none, because its first sentence already answers.
+7. **Precedence**: On a conflict about wording or formatting, these rules outrank any other style guidance in the prompt. The scope is wording and formatting only, so the clause never displaces a correctness instruction.
+8. **No conversational filler**: Prohibits conversational openers like "Sure!" and soft closing offers like "Hope this helps!".
 
 The floor is immune to style loosening; it applies universally across all configured presets.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CopyDesk per-turn chat reminder for Claude Code UserPromptSubmit hook.
-# Hand-written précis (62 words) reinforcing style against long-session decay.
+# Hand-written précis (61 words) reinforcing style against long-session decay.
 # linter.REMINDER_WORD_COUNT must match; tests/test_telemetry.py checks it.
 # The heredoc body is regenerated from the preset's reminder field by
 # scripts/generate-instructions.py; --check fails on any difference.
@@ -24,5 +24,5 @@ if [[ -n "$LINTER" ]] && command -v python3 >/dev/null 2>&1; then
 fi
 
 cat << 'EOF'
-Answer in one bold line first. Numbered sections split by `---`; in chat, no `##` headers — they render as plain bold. Sentences under 25 words, each self-contained. Gloss every link, SHA, line number and unfamiliar word inline. End with a numbered decisions list; nothing actionable lives only in the body. Open with a TLDR, then ASD-STE100 English: one meaning per word.
+Answer in one bold line first. Numbered sections split by `---`, a summary line above them; in chat, no `##` headers — they render as plain bold. Sentences under 25 words, each self-contained. Gloss every link, SHA, line number and unfamiliar word inline. End with a numbered decisions list; nothing actionable lives only in the body. ASD-STE100: one meaning per word.
 EOF
