@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-08-26
+
 ### Fixed
 
 - **The summary opening produced a literal `TLDR:` label on replies with nothing to summarise.** 0.9.0 told the model to open every reply TLDR-first, with no condition on it. Across a whole session that rendered as a `TLDR:` heading above three-line answers, and it duplicated the answer-first clause two lines above it. It also contradicted `structure-when-earned`, shipped in the same release, which bans decoration on a short reply. The clause splits: `target-form` keeps the ASD-STE100 standard, and a new `summary-line` clause states the condition `structure-when-earned` already tests — where a reply uses sections, open with a one-line summary above the first one, and a short reply needs none. It renders one line below that condition in the chat block, and no rendered surface names the label any more. The measured chat block moves from 328 to 342 words against a 350-word budget.
