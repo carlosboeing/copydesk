@@ -598,7 +598,11 @@ def resolve(
         doc = next((d for p, d in layers if p == path), None)
         if doc is None:
             continue
-        layer_root = str(path.parent) if kind in ("project", "local") else base_root
+        # A project or local file's `scratch/**` means that file's own
+        # directory. A user file is machine-wide and belongs to no directory,
+        # so its patterns are matched against the absolute path. An empty
+        # root is how `channels.relative_to` says "leave the path absolute".
+        layer_root = str(path.parent) if kind in ("project", "local") else ""
         layer_paths = doc.get("paths") or {}
         if isinstance(layer_paths, dict):
             for action in ("ignore", "warn", "block"):
