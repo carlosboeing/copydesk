@@ -61,6 +61,7 @@ MIN_SENTENCE_VARIATION = 4.0
 PARAGRAPH_MAX_SENTENCES = 4
 LIST_EXEMPTION_RATIO = 0.5
 RETRY_LIMIT = 3
+CHAT_GATE_DEFAULT = "warn"
 STATE_TTL_SECONDS = 24 * 60 * 60
 # The hook registry shares the state directory with retry session state, and
 # the sweeper below takes stale *.json files. The registry outlives every
@@ -1551,6 +1552,17 @@ def _chat_state_path(session_id: str) -> Path:
     return _state_directory() / "sessions" / f"{safe_session_id}.chat"
 
 
+def _chat_gate_mode(resolved: dict) -> str:
+    """Whether a chat finding refuses the turn or is only recorded.
+
+    Defaults to `warn`. Claude Code appends a replacement reply and leaves the
+    refused one on screen, so every refusal costs the reader a duplicate
+    answer. Blocking is available and opted into.
+    """
+    value = ((resolved.get("channels") or {}).get("chat") or {}).get("gate", CHAT_GATE_DEFAULT)
+    return value if value in ("warn", "block") else CHAT_GATE_DEFAULT
+
+
 def _read_chat_state(path: Path, now: float) -> dict[str, object]:
     try:
         decoded = json.loads(path.read_text(encoding="utf-8"))
@@ -1573,6 +1585,10 @@ def run_chat_hook(raw_payload: str) -> int:
     drop out because a short reply must not be measured against whole-document
     minimums, and rate rules stay quiet under the same sentence floor inside
     lint().
+
+    `channels.chat.gate` decides what a blocking finding does. `warn`, the
+    default, records the event and exits 0 in silence. `block` keeps the
+    retry streak, the escape at the retry limit, and exit 2.
     """
     try:
         payload = json.loads(raw_payload)
@@ -1636,6 +1652,15 @@ def run_chat_hook(raw_payload: str) -> int:
             _record_event(_event("warn" if has_warnings else "pass", pass_streak))
             return 0
 
+        resolved, _ = effective_preset(channel="chat")
+
+        if _chat_gate_mode(resolved) != "block":
+            # The default. Record what the reply broke and say nothing the
+            # reader sees: no stderr, exit 0. A refusal here would leave the
+            # refused answer on screen beside its replacement.
+            _record_event(_event("warn", 0))
+            return 0
+
         content_hash = hashlib.sha256(message.encode("utf-8")).hexdigest()
         previous_hashes = state.get("hashes", []) if isinstance(state, dict) else []
         if not isinstance(previous_hashes, list):
@@ -1644,8 +1669,18 @@ def run_chat_hook(raw_payload: str) -> int:
         previous_streak_value = state.get("streak", 0) if isinstance(state, dict) else 0
         streak = previous_streak_value + 1 if isinstance(previous_streak_value, int) else 1
 
-        resolved, _ = effective_preset(channel="chat")
         retry_limit = _retry_limit(resolved)
+
+        if payload.get("stop_hook_active") is True:
+            # Claude Code is already continuing because a Stop hook asked it
+            # to. The streak file is the only other bound, and it expires, so
+            # refusing again is what leaves the loop unbounded when it is lost.
+            try:
+                state_path.unlink()
+            except OSError:
+                pass
+            _record_event(_event("escape", streak))
+            return 0
 
         if streak >= retry_limit:
             try:

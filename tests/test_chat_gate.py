@@ -29,6 +29,19 @@ class ChatGateTests(unittest.TestCase):
         self._config_home = tempfile.TemporaryDirectory()
         self.addCleanup(self._config_home.cleanup)
 
+    def opt_into_blocking(self) -> None:
+        """Set `channels.chat.gate` to `block` in the isolated user config.
+
+        Every refusal assertion below runs through this, because refusing is
+        opt-in. A test that forgets the call reads exit 0 and fails.
+        """
+        directory = Path(self._config_home.name) / "copydesk"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "config.json").write_text(
+            json.dumps({"version": 1, "channels": {"chat": {"gate": "block"}}}),
+            encoding="utf-8",
+        )
+
     def run_gate(self, payload: object, state_dir: str) -> subprocess.CompletedProcess:
         """Run the real shell wrapper with isolated retry-state storage."""
         environment = os.environ.copy()
@@ -64,10 +77,67 @@ class ChatGateTests(unittest.TestCase):
 
     def test_a_banned_word_refuses_the_stop_and_prints_the_finding(self) -> None:
         """The control for every scan that returns nothing in this file."""
+        self.opt_into_blocking()
         with tempfile.TemporaryDirectory() as state_dir:
             result = self.run_gate(_reply("The draft carries the answer."), state_dir)
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertRegex(result.stderr, r"(?m)^1:verb-jargon:")
+
+    def test_the_default_reports_a_banned_word_and_shows_the_reader_nothing(self) -> None:
+        """The reason for the default: Claude Code leaves a refused reply on
+        screen and appends its replacement, so a refusal duplicates the answer.
+
+        The control is the test above, which feeds the same reply through the
+        same wrapper with `channels.chat.gate` set to `block` and reads exit 2.
+        """
+        with tempfile.TemporaryDirectory() as state_dir:
+            result = self.run_gate(_reply("The draft carries the answer."), state_dir)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(result.stdout, "")
+
+    def test_the_default_records_the_finding_it_did_not_refuse(self) -> None:
+        """Silence to the reader is not silence to telemetry."""
+        with tempfile.TemporaryDirectory() as state_dir:
+            result = self.run_gate(_reply("The draft carries the answer."), state_dir)
+            events = [
+                e for e in linter.read_events(Path(state_dir))
+                if e.get("surface") == "chat"
+            ]
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([e["decision"] for e in events], ["warn"])
+        self.assertEqual(
+            [(f["rule"], f["severity"]) for f in events[0]["findings"]],
+            [("verb-jargon", "error")],
+        )
+        self.assertEqual(events[0]["blocking_rule_totals"], {"verb-jargon": 1})
+
+    def test_the_default_writes_no_retry_state(self) -> None:
+        """Nothing is refused, so nothing is counted towards a retry limit."""
+        with tempfile.TemporaryDirectory() as state_dir:
+            for _ in range(4):
+                result = self.run_gate(_reply("The draft carries the answer."), state_dir)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+            sessions = Path(state_dir) / "sessions"
+            written = sorted(p.name for p in sessions.glob("*.chat")) if sessions.is_dir() else []
+        self.assertEqual(written, [])
+
+    def test_stop_hook_active_passes_the_turn_through(self) -> None:
+        """Claude Code says it is already continuing because of a Stop hook.
+
+        The session state file is the only other bound on the loop and it
+        expires, so refusing again is what leaves the loop unbounded.
+        """
+        self.opt_into_blocking()
+        with tempfile.TemporaryDirectory() as state_dir:
+            without = self.run_gate(_reply("The draft carries the answer."), state_dir)
+            with_flag = self.run_gate(
+                {**_reply("The draft carries the answer."), "stop_hook_active": True},
+                state_dir,
+            )
+        self.assertEqual(without.returncode, 2, without.stderr)
+        self.assertEqual(with_flag.returncode, 0, with_flag.stderr)
 
     def test_a_two_sentence_reply_is_not_judged_by_document_statistics(self) -> None:
         """Rate rules need a whole document; two sentences are not one."""
@@ -108,6 +178,7 @@ class ChatGateTests(unittest.TestCase):
 
     def test_the_third_unresolved_attempt_passes_through_and_records_the_escape(self) -> None:
         """Reusing RETRY_LIMIT means write-gate parity: two refusals, then escape."""
+        self.opt_into_blocking()
         with tempfile.TemporaryDirectory() as state_dir:
             first = self.run_gate(_reply("The draft carries the answer."), state_dir)
             second = self.run_gate(_reply("The draft carries the answer again."), state_dir)
@@ -127,6 +198,7 @@ class ChatGateTests(unittest.TestCase):
         self.assertEqual(fourth.returncode, 2, fourth.stderr)
 
     def test_a_second_sessions_state_does_not_affect_the_first(self) -> None:
+        self.opt_into_blocking()
         with tempfile.TemporaryDirectory() as state_dir:
             first_block = self.run_gate(
                 {**_reply("The draft carries the answer."), "session_id": "session-a"},

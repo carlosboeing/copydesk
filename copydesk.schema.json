@@ -29,6 +29,15 @@
               "description": "Whether this channel's instructions and gate coverage apply.",
               "default": true
             },
+            "gate": {
+              "type": "string",
+              "enum": [
+                "warn",
+                "block"
+              ],
+              "default": "warn",
+              "description": "What a blocking finding does: warn records it, block refuses the reply."
+            },
             "style": {
               "type": "string",
               "enum": [

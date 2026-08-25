@@ -209,8 +209,14 @@ def rule_ids(preset: dict) -> tuple:
 
 _TYPE_CHECKS = {"integer": int, "number": (int, float), "boolean": bool, "string": str}
 
+# What `channels.chat.gate` accepts. The two words are the ones
+# `channels.ACTIONS` already uses for a path verdict: warn reports, block
+# refuses. `ignore` is absent because `channels.chat.enabled` says that.
+CHAT_GATE_MODES = ("warn", "block")
+
 _SHAPES = {
     "enabled": bool,
+    "gate": str,
     "style": str,
     "verbosity": str,
     "match": list,
@@ -274,6 +280,9 @@ def _check_channel(source: Path, name: str, settings: dict) -> None:
             raise ConfigError(f"{source}: channels.{name}.style: {value!r} is not a style.")
         if key == "verbosity" and value not in instructions.VERBOSITY_LEVELS:
             raise ConfigError(f"{source}: channels.{name}.verbosity: {value!r} is not a level.")
+        if key == "gate" and value not in CHAT_GATE_MODES:
+            raise ConfigError(f"{source}: channels.{name}.gate: {value!r} is not a mode. "
+                              f"Allowed: {', '.join(CHAT_GATE_MODES)}.")
         if key == "guidance":
             for guidance_id, state in (value or {}).items():
                 if guidance_id not in guidance.IDS:
@@ -401,6 +410,10 @@ CHANNEL_NAMES = ("chat", "documents", "commits", "reviews")
 CHANNEL_DEFAULTS = {
     "chat": {
         "enabled": True,
+        # A refused chat reply stays on screen next to its replacement,
+        # because Claude Code appends rather than replaces. Reporting is
+        # therefore the default and refusing is opted into.
+        "gate": "warn",
         "style": "plain",
         "verbosity": "low",
         "guidance": {

@@ -63,12 +63,21 @@ def _rule_schema(rule_id: str, preset: dict) -> dict:
 
 
 def _channel_schema(name: str) -> dict:
+    properties = {}
+    if "gate" in config_mod.CHANNEL_DEFAULTS[name]:
+        properties["gate"] = {
+            "type": "string",
+            "enum": list(config_mod.CHAT_GATE_MODES),
+            "default": config_mod.CHANNEL_DEFAULTS[name]["gate"],
+            "description": "What a blocking finding does: warn records it, block refuses the reply.",
+        }
     return {
         "type": "object",
         "description": f"Settings for the {name} channel.",
         "additionalProperties": False,
         "properties": {
             "enabled": {"type": "boolean", "description": "Whether this channel's instructions and gate coverage apply.", "default": True},
+            **properties,
             "style": {"type": "string", "enum": list(styles.STYLE_NAMES), "description": "How writing in this channel reads.", "default": "plain"},
             "verbosity": {"type": "string", "enum": list(instructions.VERBOSITY_LEVELS), "description": "How much this channel says."},
             "guidance": {

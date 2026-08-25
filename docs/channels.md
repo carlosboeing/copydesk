@@ -6,7 +6,7 @@ CopyDesk routes agent prose into four distinct channels. Each channel has its ow
 
 | Channel | Medium | Gate enforcement | Default style | Default verbosity |
 |---|---|---|---|---|
-| `chat` | Conversational output in terminal | Prevention only (context instructions and reminder précis) | `plain` | `low` |
+| `chat` | Conversational output in terminal | `Stop` hook, recording only by default | `plain` | `low` |
 | `documents` | Markdown files written to disk | `PreToolUse` write/edit hook | `plain` | `high` |
 | `commits` | Git commit messages | `commit-msg` git hook | `engineer` | `low` |
 | `reviews` | Review comments and markdown feedback | Matching file paths via `channels.reviews.match` | `plain` | `medium` |
@@ -28,9 +28,39 @@ When determining which channel claims a file, CopyDesk evaluates paths in a fixe
 1. **`reviews`**: Matches files configured under `channels.reviews.match` (e.g. `docs/reviews/**`, `*.review.md`).
 2. **`documents`**: Matches any remaining Markdown file (`*.md`, `*.markdown`) unless ignored by paths configuration.
 3. **`commits`**: Handled via `copydesk check --commit-msg` or git hooks.
-4. **`chat`**: Handled via output styles and session prompt injection.
+4. **`chat`**: Handled via output styles, session prompt injection, and the `Stop` hook described below.
 
 Non-Markdown files (such as `.py`, `.ts`, `.json`) are not claimed by any channel and pass through without linting.
+
+## The chat gate records by default
+
+`channels.chat.gate` takes two values. `warn` is the default.
+
+| Value | What a blocking finding does |
+|---|---|
+| `warn` | Records a telemetry event and exits 0. Nothing is printed and the reply stands. |
+| `block` | Prints the findings, exits 2 so the model revises, and passes the turn through after `gate.retries` attempts. |
+
+Refusing is opt-in because of how Claude Code renders a refused turn. It does not remove or replace the refused reply. It appends a new assistant message and leaves the old one on screen. Every refusal therefore shows the reader the same answer two or three times.
+
+The write gate has no such cost. It narrows a refusal to newly written text and the reader sees a file, not a transcript, so `documents`, `commits` and `reviews` keep blocking.
+
+```bash
+copydesk set channels.chat.gate=block
+```
+
+The same setting can be written to any config layer:
+
+```json
+{
+  "version": 1,
+  "channels": {
+    "chat": { "gate": "block" }
+  }
+}
+```
+
+`warn` is not silent to `copydesk stats` and `copydesk report`. Both read the recorded events, so the measurement survives the change.
 
 ## Path routing and glob syntax
 
@@ -84,6 +114,7 @@ Each channel can configure its style, verbosity, and specific guidance deliverab
     "chat": {
       "style": "plain",
       "verbosity": "low",
+      "gate": "warn",
       "guidance": {
         "direction": true,
         "progress": true,

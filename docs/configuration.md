@@ -43,6 +43,9 @@ Later layers override earlier ones. Personal keys in a project file are ignored 
     "chat": {
       "style": "plain",
       "verbosity": "low",
+
+      // warn records a finding and lets the reply stand; block refuses it
+      "gate": "warn",
       "guidance": {
         "direction": true,
         "progress": true
