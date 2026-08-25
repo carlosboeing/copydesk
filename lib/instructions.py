@@ -62,8 +62,11 @@ SCHEMA_URL = (
 # rendered surface at all. Making structure conditional then cost 46 and
 # took the default to 328: 26 for the structure-when-earned clause, 17 for
 # the precedence clause, and 3 to put a condition on the terminal rendering
-# rules that used to read as an unconditional order to add sections.
-BUDGETS = {"chat": 336, "documents": 260, "commits": 25, "reviews": 25}
+# rules that used to read as an unconditional order to add sections. Putting
+# the same condition on the summary opening cost 14 more and took the default
+# to 342: the clause states its own test now, where the unconditional order
+# it replaces produced a literal label above replies with nothing to summarise.
+BUDGETS = {"chat": 350, "documents": 260, "commits": 25, "reviews": 25}
 
 _STOPPING_RULES = (
     "If the first line answers it, stop. "
@@ -324,6 +327,10 @@ def render_chat(resolved: dict) -> str:
         # governs. Separated, the two read as unrelated instructions and the
         # mechanics win, because they are the concrete pair.
         styles.FLOOR["structure-when-earned"],
+        # Same test, one line later: a reply that earned sections gets a
+        # summary above them. Read anywhere else in the block it reads as an
+        # order to label every reply, which is the defect it replaces.
+        styles.FLOOR["summary-line"],
         _CHAT_STRUCTURE,
     ]
     parts.extend(guidance.render(settings.get("guidance") or {}))

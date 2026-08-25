@@ -82,7 +82,7 @@ INNER_DIFF_CHAR_CAP = 4096
 OUTER_DIFF_LINE_CAP = 2000
 # Whitespace-delimited words emitted by hooks/reminder.sh on every user prompt.
 # tests/test_telemetry.py reads the hook and fails if this drifts from the text.
-REMINDER_WORD_COUNT = 62
+REMINDER_WORD_COUNT = 61
 
 
 @dataclass(frozen=True)

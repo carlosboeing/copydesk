@@ -77,7 +77,7 @@ class ChatBudgetTests(unittest.TestCase):
         self.assertLessEqual(words, instructions.BUDGETS["chat"])
 
     def test_the_budget_is_the_designed_one(self) -> None:
-        self.assertEqual(instructions.BUDGETS["chat"], 336)
+        self.assertEqual(instructions.BUDGETS["chat"], 350)
 
     def test_no_banned_word_token_list_reaches_the_chat_block(self) -> None:
         rendered = instructions.render_chat(resolved())
@@ -116,21 +116,22 @@ class ChatBudgetTests(unittest.TestCase):
         )
 
     def test_every_style_gets_the_standard_and_the_opening_shape(self) -> None:
-        """Decision: naming ASD-STE100 and TLDR transfers two whole forms for
-        twenty-two words.
+        """Decision: naming ASD-STE100 transfers a whole form for eleven words.
 
-        Both used to reach one style line and one preset paragraph. The
-        shipped default is plain, so the two instructions that state a target
-        rather than a prohibition reached no rendered surface at all. They are
-        floor clauses now: no style choice removes them.
+        It used to reach one style line and one preset paragraph. The shipped
+        default is plain, so the one instruction that states a target rather
+        than a prohibition reached no rendered surface at all. It is a floor
+        clause now: no style choice removes it. The summary opening beside it
+        states its own condition, so a short reply gets no summary at all.
         """
         for style in ("plain", "general", "engineer", "editorial"):
             config = resolved()
             config["channels"]["chat"]["style"] = style
             rendered = instructions.render_chat(config)
             self.assertIn("ASD-STE100", rendered, style)
-            self.assertIn("TLDR", rendered, style)
             self.assertIn("one word, one meaning, one part of speech", rendered, style)
+            self.assertIn("Where a reply uses sections", rendered, style)
+            self.assertIn("A short reply needs none", rendered, style)
 
     def test_the_engineer_style_line_no_longer_restates_the_standard(self) -> None:
         # The floor names it under every style, so the terse style saying it
@@ -140,12 +141,12 @@ class ChatBudgetTests(unittest.TestCase):
     def test_the_shipped_output_style_names_both_standards(self) -> None:
         text = (ROOT / "output-styles" / "copydesk.md").read_text(encoding="utf-8")
         self.assertIn("ASD-STE100", text)
-        self.assertIn("TLDR", text)
+        self.assertIn("Where a reply uses sections", text)
 
     def test_the_rules_block_names_the_standard_and_the_opening_shape(self) -> None:
         block = PRESET["instructions"]["rules_block"]
         self.assertIn("ASD-STE100", block)
-        self.assertIn("TLDR", block)
+        self.assertIn("Where a reply uses sections", block)
 
     def test_no_instruction_prose_uses_the_banned_verb_forms(self) -> None:
         """A preset that trips its own rule is not defensible.
@@ -236,6 +237,74 @@ class ConditionalStructureTests(unittest.TestCase):
         # The terminal list is conditional there too, not only in the floor.
         self.assertIn("once a reply does use structure", block)
         self.assertNotIn("recorded in Decision 3. They do not apply to files", block)
+
+
+class ConditionalSummaryTests(unittest.TestCase):
+    """The summary opening was ordered on every reply, with no condition.
+
+    Models rendered `Open TLDR-first` as a literal `TLDR:` label above
+    three-line answers with nothing to summarise. The order also contradicted
+    `structure-when-earned`, which bans decoration on a short reply. The
+    clause now states the same condition that rule already tests.
+    """
+
+    STYLES = ("plain", "general", "engineer", "editorial")
+
+    def surfaces(self) -> dict:
+        """Every place a rule reaches a model, keyed by name for the message."""
+        rendered = {}
+        for style in self.STYLES:
+            config_ = resolved()
+            config_["channels"]["chat"]["style"] = style
+            rendered[f"chat/{style}"] = instructions.render_chat(config_)
+        rendered["output-style"] = (ROOT / "output-styles" / "copydesk.md").read_text(encoding="utf-8")
+        rendered["reminder.sh"] = (ROOT / "hooks" / "reminder.sh").read_text(encoding="utf-8")
+        rendered["docs/styles.md"] = (ROOT / "docs" / "styles.md").read_text(encoding="utf-8")
+        for field in ("rules_block", "categories", "reminder"):
+            rendered[f"preset/{field}"] = PRESET["instructions"][field]
+        return rendered
+
+    def test_no_rendered_surface_orders_a_literal_label(self) -> None:
+        """Fails on the shipped 0.9.0 wording, which every surface carried."""
+        for name, text in self.surfaces().items():
+            self.assertNotIn("tldr", text.lower(), name)
+
+    def test_the_standard_survives_on_every_surface_that_carried_it(self) -> None:
+        """The control. Finding no label proves nothing on its own.
+
+        A scan that returns nothing returns nothing for a broken scan too.
+        The clause had two halves and only one changed, so the other half
+        must still be found by the same scan over the same text.
+        """
+        named = {
+            name: text for name, text in self.surfaces().items() if name != "preset/categories"
+        }
+        self.assertGreaterEqual(len(named), 8)
+        for name, text in named.items():
+            self.assertIn("ASD-STE100", text, name)
+
+    def test_the_clause_states_its_own_condition(self) -> None:
+        clause = styles.FLOOR["summary-line"]
+        self.assertIn("Where a reply uses sections", clause)
+        self.assertIn("A short reply needs none", clause)
+
+    def test_the_condition_matches_the_one_structure_already_tests(self) -> None:
+        # Two clauses, one test. Written differently they would fight.
+        for style in self.STYLES:
+            config_ = resolved()
+            config_["channels"]["chat"]["style"] = style
+            rendered = instructions.render_chat(config_)
+            self.assertLess(
+                rendered.index("never as decoration"),
+                rendered.index("Where a reply uses sections"),
+                style,
+            )
+
+    def test_the_standard_stayed_out_of_the_condition(self) -> None:
+        # The split must not have made ASD-STE100 conditional on sections.
+        self.assertNotIn("sections", styles.FLOOR["target-form"])
+        self.assertIn("ASD-STE100", styles.FLOOR["target-form"])
+        self.assertNotIn("ASD-STE100", styles.FLOOR["summary-line"])
 
 
 class PrecedenceTests(unittest.TestCase):

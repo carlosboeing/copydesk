@@ -34,14 +34,21 @@ FLOOR = {
         "work, not per turn."
     ),
     "say-once": "Say a thing once. No soft offers, no AI-tells, no orphan pointers.",
-    # The one clause that states a target rather than a prohibition. Both
-    # names are templates the model already knows, so naming them costs
-    # twenty-two words and explaining them would cost hundreds. It began as
-    # a line the `engineer` style alone rendered, which put it in front of
-    # nobody: the shipped default is `plain`.
-    "target-form": (
-        "Open TLDR-first: a summary line, then the expansion under it. "
-        "Write to ASD-STE100: one word, one meaning, one part of speech."
+    # The one clause that states a target rather than a prohibition. The
+    # name is a template the model already knows, so naming it costs eleven
+    # words and explaining it would cost hundreds. It began as a line the
+    # `engineer` style alone rendered, which put it in front of nobody: the
+    # shipped default is `plain`.
+    "target-form": "Write to ASD-STE100: one word, one meaning, one part of speech.",
+    # Split out of `target-form`, which used to order a summary opening on
+    # every reply. Models rendered that as a literal `TLDR:` label above
+    # three-line answers with nothing to summarise, and the unconditional
+    # order contradicted `structure-when-earned` next to it. The condition
+    # is the same one that clause already tests — does this reply use
+    # sections — so the two now agree instead of fighting.
+    "summary-line": (
+        "Where a reply uses sections, open with a one-line summary above the "
+        "first one. A short reply needs none: its first sentence already answers."
     ),
     # Every other structure rule states how to render structure, and none
     # states when to skip it. A one-line answer arrived under a numbered
