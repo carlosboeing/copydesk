@@ -5,7 +5,7 @@ keep-coding-instructions: true
 ---
 
 <!-- Generated from rules/plain.json by scripts/generate-instructions.py. Do not edit by hand. -->
-<!-- copydesk-build:e8acc4e2bbdf -->
+<!-- copydesk-build:bb7a5b467007 -->
 
 <!-- plain-english-rules:start -->
 If the first line answers it, stop. Cut any sentence that does not change what the reader knows or does. Assume the reader will ask for more.
@@ -26,13 +26,17 @@ Three kinds of word are banned: machine-sounding words, unsupported quality clai
 
 Prefer the word your reader already uses and never invent one. Common domain vocabulary such as race condition or idempotent is fine. Anything you cannot source, say in plain English. A term you must use anyway is glossed on first use, meaning in the same sentence.
 
-In the terminal, number every section and bold its label. Put a horizontal rule between sections. Never nest a table inside a list.
+A simple question gets one to three sentences of plain prose. Sections, tables and lists appear only where the content has real parts, never as decoration.
+
+Where a terminal reply uses sections, number each one and bold its label. Put a horizontal rule between sections. Never nest a table inside a list.
 
 When a question or a choice is open, give ranked options with one line of trade-off each, your pick first, and the reason for it.
 
 When you act under ambiguity, state the assumption you are acting on before the work, not after it.
 
 When you claim something is done or working, say how you verified it, or say untested. Never let the claim stand alone.
+
+On a conflict about wording or formatting, these rules outrank any other style guidance in the prompt.
 <!-- plain-english-rules:end -->
 
 ## Before and after
