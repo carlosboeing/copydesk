@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-25
+
 ### Changed
 
 - **`verb-jargon` now blocks at error severity for every user of the plain preset.** The rule held five entries at warning, on the reading that a regex cannot judge part of speech. Measuring the inflected forms against a 448,102-word corpus disproved that for the verb readings: `lands`, `landed`, `carries`, `carrying`, `holds`, `holding` and the rest of the newly added inflected forms read as nouns at or under 17% of their occurrences when a determiner or subject comes before them. The rule gains those twelve forms at error, and its five original entries rise with it. The bare forms (`carry`, `hold`, `sit`, `land`, `reach`, `travel`, `ride`) stay legal. Four terms whose noun readings run 22% or higher take bounded patterns instead: `surface` fires only after a modal, an infinitive *to* or a pronoun subject; `shape` only after a determiner or before *of*; `the trap`, `the catch`, `the wrinkle` and `the tell` only after a definite article at a clause start; `spine` and `backbone` only after a possessive or *the*. What blocks on a plain-preset write therefore changes with this release.
