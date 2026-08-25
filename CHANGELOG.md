@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **A write that passed with warnings counts as a first-time pass.** `copydesk stats` counted every first attempt in the write total, then counted only `pass` and `block` in the rows below it. A `warn` decision means the write went through with warnings printed beside it, so it fell out of both rows. In one log of 54 writes, 2 warn events were reported nowhere and the pass rate read 79.6% where the true figure was 83.3%. The rows now add up to the total, and both `copydesk stats` and `copydesk report` state how many of the first-time passes came with warnings.
+- **The report window counts calendar days.** The window length rounded an elapsed-seconds span and added one, so events inside a single day printed as `(2 days)` once they spanned more than twelve hours. It now counts inclusive calendar days between the two dates the report already prints, and a single day reads `(1 day)`.
+- **The dead first definition of `effective_preset` is gone.** `lib/linter.py` defined the function twice in a row, and the first body was a docstring alone, so the second definition replaced it before it ever ran. The surviving definition takes the docstring that states the fail-open contract. Reported as [issue 78](https://github.com/carlosboeing/copydesk/issues/78).
+
 ## [0.8.0] - 2026-08-25
 
 ### Changed
