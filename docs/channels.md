@@ -67,7 +67,8 @@ Within a layer, actions resolve from most specific to least specific:
 Later configuration layers (project config over user config) override earlier layers.
 
 ### Glob rules
-- Globs match relative to the configuration file root.
+- Globs in a project or local file match relative to that file's own directory.
+- Globs in the user file match the absolute path, because a user file names no directory.
 - `**` matches across directory boundaries.
 - `*` matches within a single path segment.
 - Negative patterns starting with `!` can re-include paths ignored by broader patterns.

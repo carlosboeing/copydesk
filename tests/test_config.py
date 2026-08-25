@@ -17,6 +17,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 LIBRARY = REPOSITORY_ROOT / "lib"
 sys.path.insert(0, str(LIBRARY))
 
+import channels  # noqa: E402
 import config  # noqa: E402
 import linter  # noqa: E402
 
@@ -531,6 +532,113 @@ class RuleValidationTests(unittest.TestCase):
     def test_boolean_for_integer_threshold_is_refused(self) -> None:
         with self.assertRaises(config.ConfigError):
             config.resolve(RULES_DIR, None, user_path=self._write('{"version": 1, "rules": {"sentence-length": {"max": true}}}'))
+
+
+class PathLayerRootTests(unittest.TestCase):
+    """Which directory a `paths` pattern is written against, layer by layer.
+
+    A project or local file names its own directory. A user file names no
+    directory at all, so its patterns are matched against the absolute path.
+    """
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.repo = self.root / "repo"
+        (self.repo / ".scratch" / "drafts").mkdir(parents=True)
+        (self.repo / "docs").mkdir(parents=True)
+        (self.repo / "notes").mkdir(parents=True)
+        self.draft = self._write(self.repo / ".scratch" / "drafts" / "draft.md")
+        self.public_doc = self._write(self.repo / "docs" / "pub.md")
+        self.note = self._write(self.repo / "notes" / "x.md")
+
+    def _write(self, path: Path) -> Path:
+        path.write_text("text\n", encoding="utf-8")
+        return path
+
+    def _user(self, document: dict) -> Path:
+        return write_json(self.root / "user" / "config.json", document)
+
+    def _project(self, document: dict) -> Path:
+        return write_json(self.repo / "copydesk.config.json", document)
+
+    def _action(self, document: Path, **layers) -> str:
+        resolved = config.resolve(RULES_DIR, document, **layers)
+        return channels.decide(str(document), resolved).action
+
+    def test_a_user_structural_glob_warns_the_tree_it_names(self) -> None:
+        user = self._user({"version": 1, "paths": {"warn": ["**/.scratch/**/*.md"]}})
+        self.assertEqual(
+            self._action(self.draft, user_path=user, project_path=None, local_path=None),
+            "warn",
+        )
+
+    def test_control_the_same_user_glob_leaves_a_file_outside_that_tree_blocked(self) -> None:
+        user = self._user({"version": 1, "paths": {"warn": ["**/.scratch/**/*.md"]}})
+        self.assertEqual(
+            self._action(self.public_doc, user_path=user, project_path=None, local_path=None),
+            "block",
+        )
+
+    def test_a_user_glob_works_the_same_with_a_project_file_present(self) -> None:
+        # Before the fix the user layer was anchored to whichever directory
+        # the run happened to compute, so the same pattern fired only when a
+        # project file existed. The verdict is now the project file's business
+        # to change, not its business to enable.
+        user = self._user({"version": 1, "paths": {"warn": ["**/.scratch/**/*.md"]}})
+        project = self._project({"version": 1})
+        self.assertEqual(
+            self._action(self.draft, user_path=user, project_path=project, local_path=None),
+            "warn",
+        )
+        self.assertEqual(
+            self._action(self.public_doc, user_path=user, project_path=project, local_path=None),
+            "block",
+        )
+
+    def test_a_user_absolute_glob_claims_only_its_own_tree(self) -> None:
+        elsewhere = self.root / "elsewhere" / "notes"
+        elsewhere.mkdir(parents=True)
+        outside = self._write(elsewhere / "x.md")
+        user = self._user({"version": 1, "paths": {"warn": [f"{self.repo}/notes/**"]}})
+        self.assertEqual(
+            self._action(self.note, user_path=user, project_path=None, local_path=None),
+            "warn",
+        )
+        self.assertEqual(
+            self._action(outside, user_path=user, project_path=None, local_path=None),
+            "block",
+        )
+
+    def test_a_project_glob_still_means_the_project_directory(self) -> None:
+        project = self._project({"version": 1, "paths": {"warn": ["notes/**"]}})
+        nested = self.repo / "docs" / "notes"
+        nested.mkdir()
+        decoy = self._write(nested / "x.md")
+        self.assertEqual(
+            self._action(self.note, user_path=None, project_path=project, local_path=None),
+            "warn",
+        )
+        self.assertEqual(
+            self._action(decoy, user_path=None, project_path=project, local_path=None),
+            "block",
+        )
+
+    def test_a_channel_glob_still_resolves_against_the_project_directory(self) -> None:
+        # The channel root is the last rule naming a directory. A user rule
+        # names none, so a project `match` glob keeps its own anchor.
+        project = self._project(
+            {"version": 1, "channels": {"commits": {"match": ["docs/**"]}}}
+        )
+        user = self._user({"version": 1, "paths": {"warn": ["**/.scratch/**/*.md"]}})
+        resolved = config.resolve(
+            RULES_DIR, self.public_doc, user_path=user, project_path=project, local_path=None
+        )
+        self.assertEqual(channels.decide(str(self.public_doc), resolved).channel, "commits")
+        without = config.resolve(
+            RULES_DIR, self.public_doc, user_path=None, project_path=project, local_path=None
+        )
+        self.assertEqual(channels.decide(str(self.public_doc), without).channel, "commits")
 
 
 if __name__ == "__main__":

@@ -157,7 +157,11 @@ def decide(path: Optional[str], resolved: dict) -> Decision:
     action = _action_for(path, rules)
     if action == "ignore":
         return Decision("ignore", None)
-    root = rules[-1].root if rules else ""
+    # Channel globs are written against a project, so the channel root is the
+    # last rule that names a directory. A user-layer rule carries an empty
+    # root because its own patterns match absolute paths, and taking that
+    # root here would hand `docs/**` an absolute path it can never match.
+    root = next((rule.root for rule in reversed(rules) if rule.root), "")
     channel = _channel_for(relative_to(path, root), resolved.get("channels") or {})
     if channel is None:
         return Decision("ignore", None)

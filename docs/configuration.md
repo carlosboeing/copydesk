@@ -14,6 +14,8 @@ CopyDesk discovers and merges configuration from three locations:
 
 Discovery walks up from the document being checked until the root or git boundary is reached.
 
+A `paths` glob in the user file matches the absolute path, so write it as `**/notes/**` or as a full path.
+
 ## Resolution order
 
 1. Built-in base preset (`plain`).
