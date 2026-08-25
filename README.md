@@ -65,7 +65,7 @@ Most unguided agent writing shares four flaws. Sentences stretch past forty word
 
 Post-hoc linters catch these issues in CI or after saving. That costs a full retry round trip or reviewer attention.
 
-Measured across [1.5 million words of real transcripts](docs/evidence/observational-baseline.md), terminal chat carries 9.14 blocking violations per 1,000 words against 5.42 in documents. Chat never becomes a saved file, so a post-hoc file linter cannot inspect it. Prevention through compiled context instructions is the only way to reach chat.
+Measured across [1.5 million words of real transcripts](docs/evidence/observational-baseline.md), terminal chat shows 9.14 blocking violations per 1,000 words against 5.42 in documents. Chat never becomes a saved file, so a post-hoc file linter cannot inspect it. Prevention through compiled context instructions is the only way to reach chat.
 
 ## Contents
 
@@ -153,7 +153,7 @@ A repository whose commit-msg hook already exists is never overwritten: `hook ad
 
 ## Managing the pre-commit hook
 
-The commit-msg gate checks message prose. The pre-commit gate checks the Markdown a commit carries:
+The commit-msg gate checks message prose. The pre-commit gate checks the Markdown a commit adds:
 
 ```bash
 copydesk install --git-hook
@@ -167,7 +167,7 @@ To commit anyway:
 git commit --no-verify
 ```
 
-The same instruction sits inside the installed hook, so it is there when you need it. Findings at warn severity print but never block, whatever your configuration says about blocking. A missing `copydesk` binary or an internal error lets the commit through rather than bricking the repository.
+The same instruction lives inside the installed hook, so it is there when you need it. Findings at warn severity print but never block, whatever your configuration says about blocking. A missing `copydesk` binary or an internal error lets the commit through rather than bricking the repository.
 
 A `pre-commit` hook CopyDesk did not write is never overwritten: the installer prints the lines to append instead, chaining the check into your own script. Running the command again refreshes a hook CopyDesk wrote. To remove it, delete `.git/hooks/pre-commit`, or the file under `core.hooksPath` if you set one.
 

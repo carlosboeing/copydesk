@@ -15,7 +15,7 @@ No competing tool publishes a measurement like this, which is the reason it is h
 | Chat | 15,711 | 1,556,107 | 14,222 | 9.1395 |
 | Markdown documents | 2,729 | 626,153 | 3,396 | 5.4236 |
 
-Chat carries roughly two-thirds more violations per word than documents, and chat is the half no file linter ever sees. That gap is the argument for covering chat at all.
+Chat shows roughly two-thirds more violations per word than documents, and chat is the half no file linter ever sees. That gap is the argument for covering chat at all.
 
 ## By rule
 

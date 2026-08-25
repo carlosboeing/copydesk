@@ -14,7 +14,7 @@ The tool needed a name it could keep through a language rewrite and a public rel
 
 **`copydesk`**, written `CopyDesk` in prose.
 
-A copydesk is the editorial station that reads copy before it goes to print, which is where this tool sits.
+A copydesk is the editorial station that reads copy before it goes to print, which is where this tool works.
 
 It was free on npm, PyPI, crates.io, Homebrew, RubyGems, NuGet, Docker Hub and the Go module proxy, with no live product collision, no slang reading and no homophone.
 
@@ -38,7 +38,7 @@ npm's similarity check runs at publish time only. There is no advance query and 
 
 The sibling rejection was re-tested on the same day and is permanent. npm names `cross-env` as the collision. It normalises to `crossenv`, which differs from `crossrev` at two positions, and it is among the most-downloaded packages on the registry.
 
-Nothing on npm sits that close to `copydesk`.
+Nothing on npm comes that close to `copydesk`.
 
 The `-ai` suffix is therefore a workaround for one name rather than a convention. A scoped `@carlosboeing/copydesk` was considered and declined. It buys symmetry with a constraint this project does not have, at the cost of a longer name everywhere.
 
@@ -47,9 +47,9 @@ The installed command is `copydesk` regardless, because the `bin` field decides 
 ## The instructive rejections
 
 - **`copylint`** — `copylint.io` is a live product doing brand-rule checks on website copy. Same name, same concept.
-- **`strunk`** — carries a slang meaning. `blunt` and `bluntly` fail the same screen.
+- **`strunk`** — has a slang meaning. `blunt` and `bluntly` fail the same screen.
 - **`plainvoice`** — `plainvoice.io` is a live on-device dictation product.
-- **`housestyle`** — in npm's namespace "style" reads as CSS, so the package would be misfiled on sight.
+- **`housestyle`** — in npm's namespace "style" names CSS, so the package would be misfiled on sight.
 - **`lexis`** and the `lex*` neighbourhood — LEXIS is a registered trademark of LexisNexis for text and information retrieval products.
 - **Every short real word** — `rubric`, `winnow`, `weir`, `limpid`, `folio`, `pithy`, `taut`, `stark` and eighteen others are taken on both npm and PyPI. That naming era is closed to new entrants.
 

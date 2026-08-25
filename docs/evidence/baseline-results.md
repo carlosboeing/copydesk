@@ -30,7 +30,7 @@ Two continuous ten-turn sequences, each a single session rather than ten separat
 
 A third sequence and a synthetic corpus were dropped. Multi-turn sessions at this model and effort cache roughly 150,000 tokens per turn, and the runs kept hitting five-hour rate limits. Two full sequences measured properly beat six sequences measured badly.
 
-Continuity matters here. The question is whether style holds across a long session, and ten separate prompts cannot answer it.
+Continuity matters here. The question is whether style persists across a long session, and ten separate prompts cannot answer it.
 
 ## Checkpoint summary
 
@@ -63,7 +63,7 @@ Session `87f3870d-b81d-4eaa-a95e-c295710c4da9`.
 | 09 | 426 | 0 | 0.00 | 1 | none |
 | 10 | 542 | 4 | 7.38 | 6 | `announcing-opener` 1, `long-sentence-rate` 1, `sentence-length` 1, `banned-word` 1 |
 
-Turn 06 reads as the worst turn at 13.57 and is the shortest at 221 words. A per-1,000-word rate over a short turn is noisy, which is why the checkpoint summary reports turns 1, 5 and 10 rather than a single peak.
+Turn 06 scores as the worst turn at 13.57 and is the shortest at 221 words. A per-1,000-word rate over a short turn is noisy, which is why the checkpoint summary reports turns 1, 5 and 10 rather than a single peak.
 
 ### Markdown written during the sequence
 
