@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-26
+
 ### Added
 
 - **Worked Before/After pairs and a keep-these list in the output style.** The rendered instructions carried zero examples, so the model was told what to avoid and never shown what to write instead. `output-styles/copydesk.md` now ends with one pair per rule, ranked by how often that rule fired in the worst document measured: `verb-jargon` 71, `sentence-length` 36, `banned-word` 3, `orphan-pointer` 2, `paragraph-length` 1. A five-item keep-these list follows, naming what the rules must not flatten — a specific number or path, a named actor, uneven sentence length, a real aside, a hedge that marks real uncertainty. Both sections sit outside the `plain-english-rules` markers, so they reach the output style, which loads once per session, and never the per-turn reminder or a spliced instruction block. Every defect line is fenced, and the linter exempts fences, so the examples quote what they ban without tripping it.
