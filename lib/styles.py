@@ -34,6 +34,15 @@ FLOOR = {
         "work, not per turn."
     ),
     "say-once": "Say a thing once. No soft offers, no AI-tells, no orphan pointers.",
+    # The one clause that states a target rather than a prohibition. Both
+    # names are templates the model already knows, so naming them costs
+    # twenty-two words and explaining them would cost hundreds. It began as
+    # a line the `engineer` style alone rendered, which put it in front of
+    # nobody: the shipped default is `plain`.
+    "target-form": (
+        "Open TLDR-first: a summary line, then the expansion under it. "
+        "Write to ASD-STE100: one word, one meaning, one part of speech."
+    ),
 }
 
 
