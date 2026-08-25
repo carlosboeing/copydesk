@@ -77,7 +77,7 @@ class ChatBudgetTests(unittest.TestCase):
         self.assertLessEqual(words, instructions.BUDGETS["chat"])
 
     def test_the_budget_is_the_designed_one(self) -> None:
-        self.assertEqual(instructions.BUDGETS["chat"], 290)
+        self.assertEqual(instructions.BUDGETS["chat"], 336)
 
     def test_no_banned_word_token_list_reaches_the_chat_block(self) -> None:
         rendered = instructions.render_chat(resolved())
@@ -179,6 +179,124 @@ class ChatBudgetTests(unittest.TestCase):
             instructions.word_count(instructions.render_chat(off)),
             instructions.word_count(instructions.render_chat(resolved())),
         )
+
+
+class ConditionalStructureTests(unittest.TestCase):
+    """Structure was mandated with no condition on it.
+
+    Every structure rule said how to render a section and none said when to
+    skip one, so a one-line answer arrived under a numbered heading with a
+    horizontal rule under it. The rendering rules stay; a condition now sits
+    above them.
+    """
+
+    STYLES = ("plain", "general", "engineer", "editorial")
+
+    def test_every_style_gets_the_condition(self) -> None:
+        for style in self.STYLES:
+            config_ = resolved()
+            config_["channels"]["chat"]["style"] = style
+            rendered = instructions.render_chat(config_)
+            self.assertIn("one to three sentences of plain prose", rendered, style)
+            self.assertIn("never as decoration", rendered, style)
+
+    def test_the_terminal_rendering_rules_survive(self) -> None:
+        # The condition must not have deleted the mechanics it governs.
+        rendered = instructions.render_chat(resolved())
+        self.assertIn("bold its label", rendered)
+        self.assertIn("horizontal rule between sections", rendered)
+        self.assertIn("Never nest a table inside a list", rendered)
+
+    def test_the_rendering_rules_are_no_longer_unconditional(self) -> None:
+        """The control for the assertions above.
+
+        Finding the mechanics present proves nothing on its own, because they
+        were present before. This pins the direction of the change: the
+        sentence that ordered numbering with no condition is gone.
+        """
+        self.assertNotIn("In the terminal, number every section", instructions._CHAT_STRUCTURE)
+        self.assertIn("Where a terminal reply uses sections", instructions._CHAT_STRUCTURE)
+
+    def test_the_condition_is_read_before_the_mechanics(self) -> None:
+        rendered = instructions.render_chat(resolved())
+        self.assertLess(
+            rendered.index("never as decoration"),
+            rendered.index("bold its label"),
+        )
+
+    def test_the_shipped_output_style_carries_the_condition(self) -> None:
+        text = (ROOT / "output-styles" / "copydesk.md").read_text(encoding="utf-8")
+        self.assertIn("one to three sentences of plain prose", text)
+        self.assertIn("never as decoration", text)
+
+    def test_the_rules_block_states_the_condition(self) -> None:
+        block = PRESET["instructions"]["rules_block"]
+        self.assertIn("one to three sentences of plain prose", block)
+        self.assertIn("never as decoration", block)
+        # The terminal list is conditional there too, not only in the floor.
+        self.assertIn("once a reply does use structure", block)
+        self.assertNotIn("recorded in Decision 3. They do not apply to files", block)
+
+
+class PrecedenceTests(unittest.TestCase):
+    """Two injection points, and no documented precedence between them.
+
+    The output style is appended to the system prompt; the rules block is
+    spliced into an instruction file and arrives as a user message. Nothing
+    orders either against the rest of the prompt, so a conflict with other
+    formatting guidance resolved silently.
+    """
+
+    STYLES = ("plain", "general", "engineer", "editorial")
+
+    def test_every_style_gets_the_precedence_clause(self) -> None:
+        for style in self.STYLES:
+            config_ = resolved()
+            config_["channels"]["chat"]["style"] = style
+            rendered = instructions.render_chat(config_)
+            self.assertIn("these rules outrank", rendered, style)
+
+    def test_the_clause_is_scoped_to_wording_and_formatting(self) -> None:
+        """The control on the claim's breadth.
+
+        An unscoped clause would read as outranking a correctness or safety
+        instruction. The scope is the whole reason the sentence is safe to
+        ship into every session.
+        """
+        clause = styles.FLOOR["precedence"]
+        self.assertIn("wording or formatting", clause)
+        self.assertIn("style guidance", clause)
+
+    def test_the_clause_closes_the_chat_block(self) -> None:
+        # Stated mid-block it would read as governing only its neighbours.
+        rendered = instructions.render_chat(resolved())
+        self.assertTrue(
+            rendered.rstrip().endswith(styles.FLOOR["precedence"]), rendered[-200:]
+        )
+
+    def test_the_clause_stays_short(self) -> None:
+        self.assertLessEqual(instructions.word_count(styles.FLOOR["precedence"]), 25)
+
+    def test_the_shipped_output_style_carries_the_clause(self) -> None:
+        text = (ROOT / "output-styles" / "copydesk.md").read_text(encoding="utf-8")
+        self.assertIn("these rules outrank", text)
+
+    def test_the_rules_block_states_the_clause(self) -> None:
+        block = PRESET["instructions"]["rules_block"]
+        self.assertIn("these rules outrank any other style guidance", block)
+
+    def test_neither_clause_reaches_the_documents_channel(self) -> None:
+        """The documents channel defers to the repository's own template.
+
+        `CRAFT` tells the model to follow the repository's conventions where
+        it has them, so a clause claiming CopyDesk outranks other formatting
+        guidance would contradict the instruction beside it. The condition on
+        structure is equally a chat instruction: a document is not a simple
+        question answered in three sentences.
+        """
+        rendered = instructions.render_documents(resolved())
+        self.assertNotIn("these rules outrank", rendered)
+        self.assertNotIn("one to three sentences of plain prose", rendered)
 
 
 class SelfAuditTests(unittest.TestCase):

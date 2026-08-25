@@ -59,8 +59,11 @@ SCHEMA_URL = (
 # test_the_chat_block_fits_its_budget, never an install. The floor's
 # target-form clause then took the default render to 282: twenty-two words
 # for the two standards that were shipping in the preset and reaching no
-# rendered surface at all.
-BUDGETS = {"chat": 290, "documents": 260, "commits": 25, "reviews": 25}
+# rendered surface at all. Making structure conditional then cost 46 and
+# took the default to 328: 26 for the structure-when-earned clause, 17 for
+# the precedence clause, and 3 to put a condition on the terminal rendering
+# rules that used to read as an unconditional order to add sections.
+BUDGETS = {"chat": 336, "documents": 260, "commits": 25, "reviews": 25}
 
 _STOPPING_RULES = (
     "If the first line answers it, stop. "
@@ -68,8 +71,12 @@ _STOPPING_RULES = (
     "Assume the reader will ask for more."
 )
 
+# Rendering mechanics, not a reason to add structure. The floor's
+# structure-when-earned clause decides whether a reply gets sections at all;
+# these three say how to draw them once it does. Read unconditionally, the
+# first sentence was an order to number the sections of a two-line answer.
 _CHAT_STRUCTURE = (
-    "In the terminal, number every section and bold its label. "
+    "Where a terminal reply uses sections, number each one and bold its label. "
     "Put a horizontal rule between sections. Never nest a table inside a list."
 )
 
@@ -313,9 +320,16 @@ def render_chat(resolved: dict) -> str:
         _VERBOSITY_LINES.get(settings.get("verbosity", "low"), _VERBOSITY_LINES["low"]),
         inst.get("categories", ""),
         VOCABULARY,
+        # The condition sits immediately above the rendering mechanics it
+        # governs. Separated, the two read as unrelated instructions and the
+        # mechanics win, because they are the concrete pair.
+        styles.FLOOR["structure-when-earned"],
         _CHAT_STRUCTURE,
     ]
     parts.extend(guidance.render(settings.get("guidance") or {}))
+    # Last, so it closes over every rule above it. A precedence clause stated
+    # mid-block reads as governing only its neighbours.
+    parts.append(styles.FLOOR["precedence"])
     return "\n\n".join(part for part in parts if part)
 
 

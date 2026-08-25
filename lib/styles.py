@@ -43,6 +43,26 @@ FLOOR = {
         "Open TLDR-first: a summary line, then the expansion under it. "
         "Write to ASD-STE100: one word, one meaning, one part of speech."
     ),
+    # Every other structure rule states how to render structure, and none
+    # states when to skip it. A one-line answer arrived under a numbered
+    # heading with a horizontal rule under it, because nothing said not to.
+    # The condition has to sit above the rendering rules, not beside them:
+    # a style can pick the shape of structure, never whether to use any.
+    "structure-when-earned": (
+        "A simple question gets one to three sentences of plain prose. "
+        "Sections, tables and lists appear only where the content has real "
+        "parts, never as decoration."
+    ),
+    # Two injection points deliver these rules: the output style, appended
+    # to the system prompt, and the rules block spliced into an instruction
+    # file, which arrives as a user message. No documented precedence orders
+    # them against anything else in the prompt, so a conflict resolves
+    # silently. The scope is deliberately narrow — wording and formatting —
+    # so the clause never reads as outranking a correctness instruction.
+    "precedence": (
+        "On a conflict about wording or formatting, these rules outrank any "
+        "other style guidance in the prompt."
+    ),
 }
 
 
