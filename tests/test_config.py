@@ -472,18 +472,21 @@ class ChannelTests(unittest.TestCase):
         resolved, _ = linter.effective_preset(doc)
         # Assert the effective threshold, not the preset id or the source
         # list: merging a style changes neither, so a correct implementation
-        # would fail an assertion on those.
-        self.assertEqual(resolved["rules"]["sentence-length"]["hardMax"], 25)
+        # would fail an assertion on those. `max` is the discriminator, not
+        # `hardMax`: engineer and plain now share a 40-word hard cap, so
+        # `hardMax` no longer tells the two styles apart.
+        self.assertEqual(resolved["rules"]["sentence-length"]["max"], 20)
         self.assertEqual(resolved["provenance"]["channels.reviews.style"],
                          str(self.root / "copydesk.config.json"))
 
     def test_a_documents_file_keeps_the_plain_threshold(self) -> None:
-        # The control for the test above. Without it, 25 could be the default.
+        # The control for the test above. Without it, 20 could be the default.
         (self.root / "copydesk.config.json").write_text('{"version": 1}', encoding="utf-8")
         doc = self.root / "doc.md"
         doc.write_text("x\n", encoding="utf-8")
         linter._PRESET_CACHE.clear()
         resolved, _ = linter.effective_preset(doc)
+        self.assertEqual(resolved["rules"]["sentence-length"]["max"], 25)
         self.assertEqual(resolved["rules"]["sentence-length"]["hardMax"], 40)
 
 

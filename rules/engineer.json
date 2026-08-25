@@ -7,9 +7,9 @@
   "patterns": [],
   "rules": {
     "sentence-length": {
-      "severity": "error",
+      "severity": "warn",
       "max": 20,
-      "hardMax": 25
+      "hardMax": 40
     },
     "avg-sentence-length": {
       "severity": "warn",

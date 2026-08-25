@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `engineer` style refused a chat turn over one 26-word sentence.** It set `sentence-length` to `error`, with a 20-word target and a 25-word cap. `lib/linter.py` promotes any sentence past the hard cap to `error` whatever severity a preset declares. A chat reply is one turn, so a 26-word sentence refused the turn, while the same sentence in a document drew a warning. Claude Code leaves the refused reply on screen and appends the replacement, so the reader saw the same answer two or three times. Local gate telemetry across 29 chat turns measured 24 first attempts refused, or 83%, at 2.14 visible messages per turn. `sentence-length` appeared in 27 of those refusals and was the only blocking rule in 10 of them. `engineer` now declares `warn` with a 40-word hard cap, the same cap the `plain` preset uses. The 20-word target stays, so the style still asks for shorter sentences and still reports every sentence past 20 words. Replaying the same telemetry against the new preset leaves 17 first attempts refused, or 59%, at 1.76 visible messages per turn. `warn` on its own would not have fixed it. The hard-cap promotion ignores the declared severity, so the cap moves with it. `plain`, `general` and `editorial` are unchanged.
+
 ## [0.9.1] - 2026-08-26
 
 ### Fixed
