@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-08-26
+
 ### Changed
 
 - The sentence splitter no longer breaks on a colon that starts an inline clause. A paragraph with “Nothing is lost: the manifest binds each shard by digest.” now counts as one sentence.
