@@ -148,7 +148,7 @@ the defect the gate reported, and the right line is the same fact, allowed.
 + The installer copies the rule data next to the linter.
 ```
 
-**sentence-length**, 36 findings. The cap is 25 words. Cut at a clause boundary and let the second half stand alone.
+**sentence-length**, 36 findings. The cap is 20 words. Cut at a clause boundary and let the second half stand alone.
 
 ```diff
 - The gate refuses the write, prints the findings, records a telemetry event and

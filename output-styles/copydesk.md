@@ -5,7 +5,7 @@ keep-coding-instructions: true
 ---
 
 <!-- Generated from rules/plain.json by scripts/generate-instructions.py. Do not edit by hand. -->
-<!-- copydesk-build:872019e70ce4 -->
+<!-- copydesk-build:0838d71f1d37 -->
 
 <!-- plain-english-rules:start -->
 If the first line answers it, stop. Cut any sentence that does not change what the reader knows or does. Assume the reader will ask for more.
@@ -22,7 +22,7 @@ Short sentences. Structure where it helps, prose where it does not.
 
 Give the answer and one line of support.
 
-Three kinds of word are banned: machine-sounding words, unsupported quality claims, and opaque jargon. Also banned: soft offers, openers announcing your next step, figurative idioms, and pointers back to earlier text.
+Three kinds of word are banned: machine-sounding words, unsupported quality claims, and opaque jargon. Also banned: soft offers, openers announcing or hedging your next step, figurative idioms, and pointers back to earlier text.
 
 Prefer the word your reader already uses and never invent one. Common domain vocabulary such as race condition or idempotent is fine. Anything you cannot source, say in plain English. A term you must use anyway is glossed on first use, meaning in the same sentence.
 
@@ -53,7 +53,7 @@ the defect the gate reported, and the right line is the same fact, allowed.
 + The installer copies the rule data next to the linter.
 ```
 
-**sentence-length**, 36 findings. The cap is 25 words. Cut at a clause boundary and let the second half stand alone.
+**sentence-length**, 36 findings. The cap is 20 words. Cut at a clause boundary and let the second half stand alone.
 
 ```diff
 - The gate refuses the write, prints the findings, records a telemetry event and
