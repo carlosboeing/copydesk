@@ -83,7 +83,7 @@ INNER_DIFF_CHAR_CAP = 4096
 OUTER_DIFF_LINE_CAP = 2000
 # Whitespace-delimited words emitted by hooks/reminder.sh on every user prompt.
 # tests/test_telemetry.py reads the hook and fails if this drifts from the text.
-REMINDER_WORD_COUNT = 61
+REMINDER_WORD_COUNT = 85
 
 
 @dataclass(frozen=True)
@@ -360,7 +360,7 @@ _URL = re.compile(r"https?://[^\s)\]>]+")
 _HEADING = re.compile(r"(?m)^[ \t]*#{1,6}[ \t]+.*(?:\n|$)")
 _LIST_MARKER = re.compile(r"^\s*(?:[-*]|\d+\.)\s+", re.MULTILINE)
 _LIST_LINE = re.compile(r"^\s*(?:[-*]|\d+\.)\s+")
-_SENTENCE_SPLIT = re.compile(r"(?<=[.!?:])\s+")
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 # A git trailer: `Token: value`, as `git interpret-trailers` reads the final
 # block. Token is alphanumeric plus hyphen; the value must be non-empty.
 _TRAILER_LINE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*:\s+\S")
@@ -473,6 +473,12 @@ def _sentence_records(text: str, *, subject_is_own_unit: bool = False) -> list[S
         segment = "\n".join(lines[start:end])
         normalized = _LIST_MARKER.sub(lambda match: " " * len(match.group(0)), segment)
         base = line_offsets[start]
+        if subject_is_own_unit and start == 0:
+            prefix_match = _CONVENTIONAL_PREFIX.match(normalized)
+            if prefix_match:
+                prefix_len = len(prefix_match.group(0))
+                normalized = normalized[prefix_len:]
+                base += prefix_len
         cursor = 0
         for part in _SENTENCE_SPLIT.split(normalized):
             offset = normalized.find(part, cursor)
@@ -601,12 +607,12 @@ def _term_is_sentence_initial(line: str, column: int) -> bool:
     bare = stripped.rstrip("*_`\"'“‘>#|[]( \t")
     if not bare:
         return True
-    return bare.endswith((".", "!", "?", ":", ";"))
+    return bare.endswith((".", "!", "?"))
 
 
 def _sentence_around(line: str, column: int) -> str:
     starts = [0]
-    for match in re.finditer(r"[.!?:]\s+", line):
+    for match in re.finditer(r"[.!?]\s+", line):
         starts.append(match.end())
     start = max(s for s in starts if s <= column)
     ends = [m.start() for m in re.finditer(r"[.!?]", line) if m.start() > column]

@@ -21,7 +21,7 @@
     },
     "paragraph-length": {
       "severity": "error",
-      "maxSentences": 3
+      "maxSentences": 4
     }
   }
 }

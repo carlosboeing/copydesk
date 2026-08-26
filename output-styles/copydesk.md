@@ -4,8 +4,8 @@ description: Structured but plain writing — full technical content, simpler se
 keep-coding-instructions: true
 ---
 
-<!-- Generated from rules/plain.json by scripts/generate-instructions.py. Do not edit by hand. -->
-<!-- copydesk-build:872019e70ce4 -->
+<!-- Generated, a build artifact, from rules/plain.json by scripts/generate-instructions.py. Do not edit by hand. -->
+<!-- copydesk-build:7147ed242ce6 -->
 
 <!-- plain-english-rules:start -->
 If the first line answers it, stop. Cut any sentence that does not change what the reader knows or does. Assume the reader will ask for more.
@@ -14,17 +14,17 @@ Answer first, in every channel with a reader waiting.
 
 A closing block appears only when a decision is blocked on the reader. An open question is never restated. One decisions block per piece of work, not per turn.
 
-Say a thing once. No soft offers, no AI-tells, no orphan pointers.
+Say a thing once. No soft offers, no AI-tells (machine tells), no orphan pointers.
 
-Write to ASD-STE100: one word, one meaning, one part of speech.
+Write to ASD-STE100 (word list): one word, one meaning, one part of speech.
 
 Short sentences. Structure where it helps, prose where it does not.
 
 Give the answer and one line of support.
 
-Three kinds of word are banned: machine-sounding words, unsupported quality claims, and opaque jargon. Also banned: soft offers, openers announcing your next step, figurative idioms, and pointers back to earlier text.
+Three kinds of word are banned: machine-sounding words, unsupported quality claims, and opaque jargon. Also banned: soft offers, openers announcing or hedging your next step, figurative idioms, and pointers back to earlier text.
 
-Prefer the word your reader already uses and never invent one. Common domain vocabulary such as race condition or idempotent is fine. Anything you cannot source, say in plain English. A term you must use anyway is glossed on first use, meaning in the same sentence.
+Prefer the word your reader already uses and never invent one. Common domain vocabulary such as race condition or idempotent is fine. Anything you cannot source, say in plain English (common). A term you must use anyway is glossed on first use, meaning in the same sentence.
 
 A simple question gets one to three sentences of plain prose. Sections, tables and lists appear only where the content has real parts, never as decoration.
 
@@ -53,7 +53,7 @@ the defect the gate reported, and the right line is the same fact, allowed.
 + The installer copies the rule data next to the linter.
 ```
 
-**sentence-length**, 36 findings. The cap is 25 words. Cut at a clause boundary and let the second half stand alone.
+**sentence-length**, 36 findings. The cap is 20 words. Cut at a clause boundary and let the second half stand alone.
 
 ```diff
 - The gate refuses the write, prints the findings, records a telemetry event and

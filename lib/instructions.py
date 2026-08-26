@@ -97,7 +97,7 @@ _CHAT_STRUCTURE = (
 VOCABULARY = (
     "Prefer the word your reader already uses and never invent one. Common domain "
     "vocabulary such as race condition or idempotent is fine. Anything you cannot "
-    "source, say in plain English. A term you must use anyway is glossed on first "
+    "source, say in plain English (common). A term you must use anyway is glossed on first "
     "use, meaning in the same sentence."
 )
 
@@ -148,7 +148,7 @@ the defect the gate reported, and the right line is the same fact, allowed.
 + The installer copies the rule data next to the linter.
 ```
 
-**sentence-length**, 36 findings. The cap is 25 words. Cut at a clause boundary and let the second half stand alone.
+**sentence-length**, 36 findings. The cap is 20 words. Cut at a clause boundary and let the second half stand alone.
 
 ```diff
 - The gate refuses the write, prints the findings, records a telemetry event and
@@ -290,7 +290,7 @@ def render_output_style(resolved: dict, writer: str) -> str:
         f"description: {styles.DESCRIPTIONS[styles.preset_for(chat_style)]}\n"
         f"keep-coding-instructions: {str(style['keep_coding_instructions']).lower()}\n"
         "---\n\n"
-        f"<!-- Generated from rules/{resolved.get('id', 'plain')}.json"
+        f"<!-- Generated, a build artifact, from rules/{resolved.get('id', 'plain')}.json"
         f" by {writer}. Do not edit by hand. -->\n"
         f"<!-- {FINGERPRINT_MARKER}"
     )

@@ -193,10 +193,28 @@ class CommitMessageTests(unittest.TestCase):
         records = linter._sentence_records(
             linter.exclude_markdown(text), subject_is_own_unit=True
         )
-        # The conventional prefix carries a colon, which punctuation-splitting
-        # has always broken on; the unit boundary is what keeps the body out.
+        # The conventional prefix carries a colon, which the splitter now
+        # ignores inside prose; the unit boundary is what keeps the body out.
         self.assertEqual(records[0].text, "capture the status under set -e")
         self.assertTrue(records[1].text.startswith("the chained hook block"))
+
+    def test_colon_introducing_inline_clause_does_not_split(self) -> None:
+        text = "Nothing is lost: the manifest binds each shard by digest."
+        records = linter._sentence_records(text)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].text, text)
+        # Paragraph counter must see one sentence, not two
+        para = (
+            "Sentence one here. "
+            "Nothing is lost: the manifest binds each shard by digest. "
+            "Sentence three here. "
+            "Sentence four here."
+        )
+        findings = [f for f in linter.lint(para) if f.check == "paragraph-length"]
+        self.assertEqual(findings, [])
+        para_five = para + " Sentence five here."
+        findings_five = [f for f in linter.lint(para_five) if f.check == "paragraph-length"]
+        self.assertTrue(findings_five)
 
 
 class CapStillAppliesTests(unittest.TestCase):
