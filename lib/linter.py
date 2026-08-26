@@ -474,10 +474,7 @@ def _sentence_records(text: str, *, subject_is_own_unit: bool = False) -> list[S
         normalized = _LIST_MARKER.sub(lambda match: " " * len(match.group(0)), segment)
         base = line_offsets[start]
         if subject_is_own_unit and start == 0:
-            try:
-                prefix_match = _CONVENTIONAL_PREFIX.match(normalized)
-            except NameError:
-                prefix_match = None
+            prefix_match = _CONVENTIONAL_PREFIX.match(normalized)
             if prefix_match:
                 prefix_len = len(prefix_match.group(0))
                 normalized = normalized[prefix_len:]
@@ -610,12 +607,12 @@ def _term_is_sentence_initial(line: str, column: int) -> bool:
     bare = stripped.rstrip("*_`\"'“‘>#|[]( \t")
     if not bare:
         return True
-    return bare.endswith((".", "!", "?", ":", ";"))
+    return bare.endswith((".", "!", "?"))
 
 
 def _sentence_around(line: str, column: int) -> str:
     starts = [0]
-    for match in re.finditer(r"[.!?:]\s+", line):
+    for match in re.finditer(r"[.!?]\s+", line):
         starts.append(match.end())
     start = max(s for s in starts if s <= column)
     ends = [m.start() for m in re.finditer(r"[.!?]", line) if m.start() > column]

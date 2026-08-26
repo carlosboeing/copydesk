@@ -1,12 +1,16 @@
 # CopyDesk
 
-[![npm](https://img.shields.io/npm/v/copydesk.svg)](https://www.npmjs.com/package/copydesk)
-[![test](https://github.com/carlosboeing/copydesk/actions/workflows/test.yml/badge.svg)](https://github.com/carlosboeing/copydesk/actions/workflows/test.yml)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![python: 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
-[![status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-orange.svg)](docs/ROADMAP.md)
+[![npm](https://img.shields.io/npm/v/copydesk.svg)](https://www.npmjs.com/package/copydesk).
 
-**A prose gate and style system for AI coding agents.**
+[![test](https://github.com/carlosboeing/copydesk/actions/workflows/test.yml/badge.svg)](https://github.com/carlosboeing/copydesk/actions/workflows/test.yml).
+
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE).
+
+[![python: 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/).
+
+[![status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-orange.svg)](docs/ROADMAP.md).
+
+**A prose gate and style system for AI coding agents**.
 
 It prevents violations before generation, and refuses the write when a violation slips through.
 
@@ -159,7 +163,9 @@ The commit-msg gate checks message prose. The pre-commit gate checks the Markdow
 copydesk install --git-hook
 ```
 
-The hook runs `copydesk check --staged` before every commit. It judges the lines the commit adds, compared against HEAD: touching a clean paragraph passes no matter what else the file hides, an added banned word refuses the commit, and a deletion blocks only for a rule HEAD did not already break. Staged content is checked, so uncommitted edits in your working tree are not judged.
+The hook runs `copydesk check --staged` before every commit. It judges the lines the commit adds, compared against HEAD.
+
+Touching a clean paragraph passes no matter what else the file hides. An added banned word refuses the commit, and a deletion blocks only for a rule HEAD did not already break. Staged content is checked, so uncommitted edits in your working tree are not judged.
 
 To commit anyway:
 

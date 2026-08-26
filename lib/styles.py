@@ -33,13 +33,13 @@ FLOOR = {
         "An open question is never restated. One decisions block per piece of "
         "work, not per turn."
     ),
-    "say-once": "Say a thing once. No soft offers, no AI-tells, no orphan pointers.",
+    "say-once": "Say a thing once. No soft offers, no AI-tells (machine tells), no orphan pointers.",
     # The one clause that states a target rather than a prohibition. The
     # name is a template the model already knows, so naming it costs eleven
     # words and explaining it would cost hundreds. It began as a line the
     # `engineer` style alone rendered, which put it in front of nobody: the
     # shipped default is `plain`.
-    "target-form": "Write to ASD-STE100: one word, one meaning, one part of speech.",
+    "target-form": "Write to ASD-STE100 (word list): one word, one meaning, one part of speech.",
     # Split out of `target-form`, which used to order a summary opening on
     # every reply. Models rendered that as a literal `TLDR:` label above
     # three-line answers with nothing to summarise, and the unconditional

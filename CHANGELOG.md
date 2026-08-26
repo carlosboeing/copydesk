@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- The sentence splitter no longer breaks on a colon that starts an inline clause. A paragraph with “Nothing is lost: the manifest binds each shard by digest.” now counts as one sentence.
+- The reminder now has literal-verb and em-dash guidance at 85 words.
+- The `engineer` style now allows four sentences per paragraph.
+- Documentation sentences that crossed the 40-word hard cap were split at clause boundaries.
+
+### Added
+
+- Community tokens: “tapestry”, “beacon”, “unleash”, “footgun”, “belt-and-suspenders”, “smoking gun” and hedge openers “To be clear,”, “Honestly,”, “In fairness,”, “Truth be told,”.
+
 ## [0.9.2] - 2026-08-26
 
 ### Changed
