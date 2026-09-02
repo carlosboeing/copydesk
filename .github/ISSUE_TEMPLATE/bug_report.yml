@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a reproducible problem in CopyDesk.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a reproducible problem. Do not include private data or security details.
+  - type: input
+    id: version
+    attributes:
+      label: CopyDesk version
+      description: Which version shows the problem?
+      placeholder: 0.9.3
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the operating system and Python version.
+      placeholder: macOS 15, Python 3.12
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the observed result and include relevant output.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How can we reproduce it?
+      description: List the smallest command, input, or document that shows the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true

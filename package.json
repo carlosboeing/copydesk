@@ -35,6 +35,7 @@
     "copydesk.schema.json",
     "VERSION",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "!**/__pycache__",
     "!**/*.pyc",
     "!**/*.pyo"

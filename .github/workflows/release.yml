@@ -28,11 +28,10 @@ on:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Pack and verify without publishing"
-        type: boolean
-        default: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -40,14 +39,16 @@ permissions:
 jobs:
   verify:
     name: Verify the release is coherent
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
@@ -100,6 +101,7 @@ jobs:
 
             const required = [
               "LICENSE", "README.md", "VERSION", "package.json",
+              "THIRD_PARTY_NOTICES.md",
               "bin/copydesk", "lib/linter.py", "lib/config.py",
               "rules/plain-english.json", "hooks/gate.sh", "hooks/reminder.sh",
             ];
@@ -143,25 +145,27 @@ jobs:
   publish:
     name: Publish to npm
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
-    if: github.event_name == 'push' || inputs.dry_run == false
+    if: ${{ github.event_name == 'push' }}
     permissions:
       contents: write   # to create the GitHub Release
       id-token: write   # to mint the OIDC credential for trusted publishing
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false   # never cache in a release build
 
-      - name: Trusted publishing needs npm 11.5.1 or later
+      - name: Use npm 12.0.2 for trusted publishing
         run: |
-          npm install -g npm@latest
-          npm --version
+          npm install -g npm@12.0.2
+          test "$(npm --version)" = "12.0.2"
 
       - name: Publish
         # No NODE_AUTH_TOKEN. With the secret absent it resolves to an empty
@@ -190,13 +194,15 @@ jobs:
   smoke:
     name: Install from the registry and run it
     needs: [verify, publish]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
+    if: ${{ github.event_name == 'push' }}
+    permissions: {}
     steps:
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.9"
       # A publish nobody installed is a publish nobody verified. This runs the

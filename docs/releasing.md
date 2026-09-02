@@ -1,14 +1,14 @@
 # Releasing
 
-A release is a tag push. Everything else is automated by [`.github/workflows/release.yml`](../.github/workflows/release.yml).
+A release is an annotated three-component version tag pushed from the default branch. Everything else is automated by [`.github/workflows/release.yml`](../.github/workflows/release.yml).
 
 ## What the workflow does
 
-Three jobs, in order. Each one can stop the release.
+The tag path has three jobs, in order. A manual workflow run executes only `verify` and cannot publish.
 
 **`verify`** runs the suite on the exact commit and checks the generated instructions still match the preset. It refuses to continue unless `VERSION`, `package.json`, `bin/copydesk --version` and the tag all agree.
 
-It then inspects the tarball. Ten required files must be present. `eval/`, `tests/`, `docs/`, `.workbench/` and compiled bytecode must be absent. The whole thing must stay under 200 kB.
+It then inspects the tarball. Eleven required files must be present. Evaluation, test, documentation, and compiled bytecode files must be absent. The whole thing must stay under 200 kB.
 
 **`publish`** publishes to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements), then creates a GitHub Release whose body is this version's section of `CHANGELOG.md`.
 
@@ -36,8 +36,8 @@ It cannot be used for a package's first publish. npm requires a package to exist
 
 ```bash
 # 1. Set the version in one place and let the checks catch the rest.
-echo "0.2.0" > VERSION
-npm version 0.2.0 --no-git-tag-version
+echo "0.10.0" > VERSION
+npm version 0.10.0 --no-git-tag-version
 
 # 2. Move the changelog's Unreleased entries under the new heading.
 $EDITOR CHANGELOG.md
@@ -46,10 +46,19 @@ $EDITOR CHANGELOG.md
 #     A test pins it to VERSION, so the suite fails until this is done.
 $EDITOR README.md
 
-# 3. Commit, tag, push.
-git commit -am "chore(release): 0.2.0"
-git tag -a v0.2.0 -m "CopyDesk 0.2.0"
-git push origin main v0.2.0
+# 3. Verify the release branch before opening its pull request.
+python3 -m unittest discover tests/
+python3 scripts/generate-instructions.py --check
+npm pack --dry-run --json
+
+# 4. Merge the release pull request with the required squash policy.
+
+# 5. Update a local default branch, verify it again, then create and push the tag.
+git switch main
+git pull --ff-only origin main
+python3 -m unittest discover tests/
+git tag -a v0.10.0 -m "CopyDesk 0.10.0"
+git push origin v0.10.0
 ```
 
 The floating `v0` tag is moved by hand, and only for a release people should follow:
@@ -59,9 +68,15 @@ git tag -f -a v0 -m "Floating tag for the 0.x line"
 git push -f origin v0
 ```
 
-## Rehearsing without publishing
+## Verifying without publishing
 
-Run the workflow manually from the Actions tab with **dry run** left ticked. The `verify` job runs in full and `publish` is skipped, so the guards can be exercised at any time.
+Run the release workflow manually from the Actions tab. The `verify` job runs in full, while `publish` and `smoke` are skipped. Manual dispatch has no publish switch.
+
+The workflow publishes only after a three-component version tag reaches the repository. Do not use a manual run to publish.
+
+## Recovering from a failed tag
+
+Three-component release tags are immutable. If verification or publication fails after a tag is pushed, keep that tag, fix the release on the default branch, and use the next patch version. Confirm the package and GitHub Release state before retrying.
 
 ## If npm refuses the name
 

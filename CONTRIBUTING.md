@@ -44,10 +44,18 @@ A body is read by people who have never seen the branch. Open with what changes 
 
 An issue title is one clause under 60 characters naming the change or the symptom. A body says what was measured and cites `file:line` for code that already exists.
 
+Bug reports and feature requests use the structured forms in the issue tracker. Use [SUPPORT.md](SUPPORT.md) for questions that do not need a code change.
+
+## Continuous integration
+
+Every push and pull request runs the suite, generated-instruction check, shellcheck, documentation self-check, shipped-surface matrix, and npm packaging matrix on Node 18 and 24. The `required` check is the stable aggregate for those jobs and must keep that name.
+
+Workflow actions are pinned to full commit SHAs. Dependabot checks those pins each week. Do not replace a SHA with a branch or version tag.
+
 ## Commits
 
 Conventional Commits: `<type>(<scope>): <description>`, imperative mood, subject at most 72 characters. The body explains why.
 
 ## Releasing
 
-A release is a tag push. See [docs/releasing.md](docs/releasing.md).
+A release is an annotated three-component version tag pushed from the default branch. Manual release workflow runs verify the package without publishing. See [docs/releasing.md](docs/releasing.md).

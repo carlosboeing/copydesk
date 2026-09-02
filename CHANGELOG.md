@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Community health files for conduct, support, issue intake, and code ownership.
+- A separate third-party notice file for the adapted linter code.
+
+### Changed
+
+- CI now uses least-privilege permissions, immutable action pins, safe cancellation, and a stable `required` aggregate check.
+- CI pins `actions/checkout` v7.0.1, `actions/setup-python` v7.0.0, and `actions/setup-node` v7.0.0, and tests the current Python 3.14 line.
+- Manual release workflow runs verify only. npm publication remains limited to three-component version tags.
+
 ## [0.9.3] - 2026-08-26
 
 ### Changed
