@@ -5,6 +5,9 @@
     "warn": [
       "CHANGELOG.md",
       "CONTRIBUTING.md",
+      "CODE_OF_CONDUCT.md",
+      "SUPPORT.md",
+      "THIRD_PARTY_NOTICES.md",
       "docs/adrs/*.md",
       "docs/evidence/*.md",
       "docs/releasing.md"

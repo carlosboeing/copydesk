@@ -85,6 +85,7 @@ Measured across [1.5 million words of real transcripts](docs/evidence/observatio
 - [Evidence](#evidence)
 - [Project status](#project-status)
 - [Contributing](#contributing)
+- [Support](#support)
 - [Security](#security)
 - [Licence and credits](#licence-and-credits)
 
@@ -365,12 +366,16 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for future plans and [CHANGELOG.md](CHANG
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for test execution and contribution guidelines.
 
+## Support
+
+Use [SUPPORT.md](SUPPORT.md) for usage questions, bug reports, and feature requests. The [issue tracker](https://github.com/carlosboeing/copydesk/issues) is the public place for questions and reports.
+
 ## Security
 
-CopyDesk runs locally and makes no outbound network connections. Document contents never leave your machine. See [SECURITY.md](SECURITY.md).
+CopyDesk runs locally and makes no outbound network connections. Document contents never leave your machine. See [SECURITY.md](SECURITY.md) for private vulnerability reports.
 
 ## Licence and credits
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). Notices for adapted third-party code are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 `lib/linter.py` is adapted from [`AminBlg/SimpleEnglish`](https://github.com/AminBlg/SimpleEnglish) (MIT).

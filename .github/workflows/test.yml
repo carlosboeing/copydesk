@@ -4,10 +4,17 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   suite:
     name: Python ${{ matrix.python }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -16,10 +23,12 @@ jobs:
         # what makes that claim checkable rather than assumed.
         # The suite exercises eval/ as well as the linter, and eval/ needs
         # tomllib. The shipped surface is tested separately and reaches lower.
-        python: ["3.11", "3.12", "3.13"]
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
       - name: Run the suite
@@ -27,11 +36,13 @@ jobs:
 
   instructions:
     name: Generated instructions match the preset
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
       - name: Re-render and compare
@@ -40,10 +51,12 @@ jobs:
 
   shellcheck:
     name: shellcheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # shellcheck is preinstalled on the GitHub-hosted Ubuntu image. Installing
       # it through apt added minutes and then hung.
       - name: Check every shell script
@@ -59,29 +72,33 @@ jobs:
 
   self-check:
     name: CopyDesk checks its own documentation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
       - name: Lint the public docs with the tool itself
-        run: python3 bin/copydesk check README.md CONTRIBUTING.md SECURITY.md CHANGELOG.md docs/*.md docs/adrs/*.md docs/evidence/*.md output-styles/*.md
+        run: python3 bin/copydesk check README.md CONTRIBUTING.md SECURITY.md SUPPORT.md CODE_OF_CONDUCT.md THIRD_PARTY_NOTICES.md CHANGELOG.md docs/*.md docs/adrs/*.md docs/evidence/*.md output-styles/*.md
         # The shipped output style was absent from this list, so a rules
         # paragraph that broke the rules it carries reached a release.
 
   shipped-surface:
     name: Shipped surface on Python ${{ matrix.python }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         python: ["3.9", "3.10"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
       # Only what npm publishes: bin, lib, rules, hooks, output-styles. The
@@ -100,3 +117,68 @@ jobs:
           set -e
           test "$status" -eq 1 || { echo "expected exit 1 for findings, got $status"; exit 1; }
           echo "shipped surface works on $(python3 --version)"
+
+  package:
+    name: npm package on Node ${{ matrix.node }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["18", "24"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Pack the npm surface
+        run: |
+          set -euo pipefail
+          node -e "const p=require('./package.json'); const want='>=18'; if(p.engines.node!==want){console.error('engines.node is '+p.engines.node+', expected '+want);process.exit(1)}"
+          npm pack --dry-run --json > pack.json
+          node -e "const [pack] = require('./pack.json'); if (!pack.files.some(file => file.path === 'bin/copydesk')) process.exit(1)"
+
+  required:
+    name: required
+    if: ${{ always() }}
+    needs: [suite, instructions, shellcheck, self-check, shipped-surface, package]
+    permissions: {}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every mandatory job to pass
+        env:
+          SUITE: ${{ needs.suite.result }}
+          INSTRUCTIONS: ${{ needs.instructions.result }}
+          SHELLCHECK: ${{ needs.shellcheck.result }}
+          SELF_CHECK: ${{ needs['self-check'].result }}
+          SHIPPED_SURFACE: ${{ needs['shipped-surface'].result }}
+          PACKAGE: ${{ needs.package.result }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for job in suite instructions shellcheck self-check shipped-surface package; do
+            case "$job" in
+              suite) result="$SUITE" ;;
+              instructions) result="$INSTRUCTIONS" ;;
+              shellcheck) result="$SHELLCHECK" ;;
+              self-check) result="$SELF_CHECK" ;;
+              shipped-surface) result="$SHIPPED_SURFACE" ;;
+              package) result="$PACKAGE" ;;
+            esac
+
+            case "$result" in
+              success) ;;
+              skipped)
+                echo "::error::$job was skipped but is mandatory"
+                failed=1
+                ;;
+              *)
+                echo "::error::$job finished with result $result"
+                failed=1
+                ;;
+            esac
+          done
+          exit "$failed"

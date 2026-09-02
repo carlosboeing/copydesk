@@ -2,9 +2,7 @@
 
 ## Reporting
 
-Report a vulnerability through GitHub's private advisory form at
-https://github.com/carlosboeing/copydesk/security/advisories/new, or by
-opening an issue if the problem has no exploitation risk.
+Report a vulnerability through [GitHub's private advisory form](https://github.com/carlosboeing/copydesk/security/advisories/new). Do not include security details in a public issue. For general questions, see [SUPPORT.md](SUPPORT.md).
 
 Expect an acknowledgement within a week. CopyDesk is maintained by one person,
 so please allow time before disclosing publicly.
@@ -20,4 +18,4 @@ Worth knowing when judging severity.
 
 ## Supported versions
 
-Pre-1.0. Only the latest release gets fixes.
+Before 1.0.0, only the latest release gets fixes. Older releases are unsupported.

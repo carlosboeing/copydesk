@@ -1,6 +1,14 @@
-MIT License
+# Third-party notices
 
-Copyright (c) 2026 Carlos Boeing
+CopyDesk includes code adapted from the project below. The notice applies to the adapted code in `lib/linter.py`.
+
+## AminBlg/SimpleEnglish
+
+Source: [`evals/ste_lint.py`](https://github.com/AminBlg/SimpleEnglish/blob/59bf6702197a5aadc96d197ea17f290d8d50dcd3/evals/ste_lint.py) at commit `59bf6702197a5aadc96d197ea17f290d8d50dcd3`.
+
+The adapted parts are the whitespace tokenizer, sentence splitter, exclusion approach, and line-oriented reporting. CopyDesk replaces the upstream ASD-STE100 rule list and does not retain its bans on contractions, modal verbs, or semicolons.
+
+MIT License, Copyright (c) 2026 AminBlg.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
