@@ -1,6 +1,14 @@
-# 3. Config compiles to instructions
+---
+date: 2026-08-20
+title: "Config compiles to instructions"
+type: adr
+status: approved
+authors:
+  - "Carlos Boeing"
+  - "claude-opus-5 (claude-code)"
+---
 
-Date: 2026-08-20
+# 3. Config compiles to instructions
 
 ## Status
 
