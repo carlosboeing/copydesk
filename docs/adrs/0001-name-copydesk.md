@@ -1,6 +1,14 @@
-# 1. The tool is named CopyDesk
+---
+date: 2026-08-19
+title: "The tool is named CopyDesk"
+type: adr
+status: approved
+authors:
+  - "Carlos Boeing"
+  - "claude-opus-5 (claude-code)"
+---
 
-Date: 2026-08-19
+# 1. The tool is named CopyDesk
 
 ## Status
 

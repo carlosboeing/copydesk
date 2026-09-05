@@ -1,6 +1,14 @@
-# 2. Rules are a hybrid under a uniform contract
+---
+date: 2026-08-19
+title: "Rules are a hybrid under a uniform contract"
+type: adr
+status: approved
+authors:
+  - "Carlos Boeing"
+  - "claude-opus-5 (claude-code)"
+---
 
-Date: 2026-08-19
+# 2. Rules are a hybrid under a uniform contract
 
 ## Status
 
