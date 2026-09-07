@@ -66,10 +66,19 @@ SCHEMA_URL = (
 # the same condition on the summary opening cost 14 more and took the default
 # to 342: the clause states its own test now, where the unconditional order
 # it replaces produced a literal label above replies with nothing to summarise.
-BUDGETS = {"chat": 350, "documents": 260, "commits": 25, "reviews": 25}
+# Cutting the two lines that restated the answer-first rule then took the
+# default render back to 331: nine words for the opening sentence of
+# `_STOPPING_RULES`, which said what `FLOOR["answer-first"]` says one
+# paragraph later, and eleven for the length sentence of
+# `structure-when-earned`, which set a length the verbosity dial already sets.
+BUDGETS = {"chat": 332, "documents": 260, "commits": 25, "reviews": 25}
 
+# "If the first line answers it, stop" opened this constant and said what
+# FLOOR["answer-first"] says one paragraph later. Two renders of one rule
+# read as two rules, and a model that has already answered first has no way
+# to tell them apart. The floor clause is the keeper: it ships under every
+# style, where this constant is the preset's own.
 _STOPPING_RULES = (
-    "If the first line answers it, stop. "
     "Cut any sentence that does not change what the reader knows or does. "
     "Assume the reader will ask for more."
 )

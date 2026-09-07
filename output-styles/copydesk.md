@@ -5,10 +5,10 @@ keep-coding-instructions: true
 ---
 
 <!-- Generated, a build artifact, from rules/plain.json by scripts/generate-instructions.py. Do not edit by hand. -->
-<!-- copydesk-build:7147ed242ce6 -->
+<!-- copydesk-build:5f6d335b0168 -->
 
 <!-- plain-english-rules:start -->
-If the first line answers it, stop. Cut any sentence that does not change what the reader knows or does. Assume the reader will ask for more.
+Cut any sentence that does not change what the reader knows or does. Assume the reader will ask for more.
 
 Answer first, in every channel with a reader waiting.
 
@@ -26,7 +26,7 @@ Three kinds of word are banned: machine-sounding words, unsupported quality clai
 
 Prefer the word your reader already uses and never invent one. Common domain vocabulary such as race condition or idempotent is fine. Anything you cannot source, say in plain English (common). A term you must use anyway is glossed on first use, meaning in the same sentence.
 
-A simple question gets one to three sentences of plain prose. Sections, tables and lists appear only where the content has real parts, never as decoration.
+Sections, tables and lists appear only where the content has real parts, never as decoration.
 
 Where a reply uses sections, open with a one-line summary above the first one. A short reply needs none: its first sentence already answers.
 
