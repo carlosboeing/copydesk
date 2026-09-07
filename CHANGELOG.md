@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-09-08
+
 ### Added
 
 - Community health files for conduct, support, issue intake, and code ownership.
