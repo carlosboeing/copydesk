@@ -947,6 +947,30 @@ class ChannelBlockTests(unittest.TestCase):
         self.assertIn("72", rendered)
         self.assertIn("why", rendered)
 
+    def test_the_block_opens_with_a_heading_and_notice(self) -> None:
+        # A host document owns everything outside the markers, so the block
+        # has to name itself: without a heading its rules read as part of
+        # whatever section sits above the splice point.
+        body = instructions.render_agents_block(resolved(), include_chat=True)
+        self.assertTrue(body.startswith("## Writing rules\n"))
+        self.assertIn("copydesk setup --repair", body)
+        self.assertLess(body.index("## Writing rules"), body.index("Answer first"))
+
+    def test_the_heading_survives_chat_being_left_out(self) -> None:
+        # The omission flag drops a channel, not the frame: a file only
+        # Claude Code reads still gets a headed block.
+        body = instructions.render_agents_block(resolved())
+        self.assertTrue(body.startswith("## Writing rules\n"))
+
+    def test_an_empty_block_stays_empty(self) -> None:
+        # A lone heading would splice into the host as a section with no
+        # body. The all-channels-off case returns the empty string, asserted
+        # in full above; this pins the heading's part in that.
+        config = resolved()
+        for name in ("chat", "documents", "commits", "reviews"):
+            config["channels"][name] = {"enabled": False}
+        self.assertNotIn("Writing rules", instructions.render_agents_block(config, include_chat=True))
+
     def test_the_block_orders_chat_documents_commits(self) -> None:
         # The markers around this body are applied where the block is
         # spliced, and are asserted against the installed file by the
