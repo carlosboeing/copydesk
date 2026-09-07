@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-09-08
+
 ### Added
 
 - The agents block opens with a `## Writing rules` heading and a generated-by notice. A host document owns everything outside the splice markers, so the block had no line naming what it was, and its rules read as part of whatever section sat above the markers. The heading is fixed at H2, matching the teaching block's `## Before and after` and `## Keep these`; the notice is an HTML comment, following the output style's precedent. An all-channels-off block still renders empty.
