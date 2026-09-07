@@ -55,8 +55,11 @@ FLOOR = {
     # heading with a horizontal rule under it, because nothing said not to.
     # The condition has to sit above the rendering rules, not beside them:
     # a style can pick the shape of structure, never whether to use any.
+    # It opened with "A simple question gets one to three sentences of plain
+    # prose", which set a length. Length is the verbosity dial's job, and the
+    # dial renders its own line four paragraphs above this one. What no other
+    # clause states is the second sentence, so that is what stayed.
     "structure-when-earned": (
-        "A simple question gets one to three sentences of plain prose. "
         "Sections, tables and lists appear only where the content has real "
         "parts, never as decoration."
     ),

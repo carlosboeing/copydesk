@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- The chat block drops two lines that restated the answer-first rule, and its budget falls from 350 words to 332. `_STOPPING_RULES` opened with "If the first line answers it, stop", which said what `FLOOR["answer-first"]` says one paragraph later. `structure-when-earned` opened with "A simple question gets one to three sentences of plain prose", which set a length the verbosity dial sets four paragraphs above it. Both surviving clauses keep the instruction no other clause states.
 - CI now uses least-privilege permissions, immutable action pins, safe cancellation, and a stable `required` aggregate check.
 - CI pins `actions/checkout` v7.0.1, `actions/setup-python` v7.0.0, and `actions/setup-node` v7.0.0, and tests the current Python 3.14 line.
 - Manual release workflow runs verify only. npm publication remains limited to three-component version tags.

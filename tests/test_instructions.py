@@ -77,7 +77,7 @@ class ChatBudgetTests(unittest.TestCase):
         self.assertLessEqual(words, instructions.BUDGETS["chat"])
 
     def test_the_budget_is_the_designed_one(self) -> None:
-        self.assertEqual(instructions.BUDGETS["chat"], 350)
+        self.assertEqual(instructions.BUDGETS["chat"], 332)
 
     def test_no_banned_word_token_list_reaches_the_chat_block(self) -> None:
         rendered = instructions.render_chat(resolved())
@@ -198,8 +198,12 @@ class ConditionalStructureTests(unittest.TestCase):
             config_ = resolved()
             config_["channels"]["chat"]["style"] = style
             rendered = instructions.render_chat(config_)
-            self.assertIn("one to three sentences of plain prose", rendered, style)
             self.assertIn("never as decoration", rendered, style)
+            # The length half of this clause was cut: the verbosity dial
+            # already sets length, four paragraphs above. What no other
+            # clause states is when to skip structure, and that is what
+            # every style must still receive.
+            self.assertNotIn("one to three sentences of plain prose", rendered, style)
 
     def test_the_terminal_rendering_rules_survive(self) -> None:
         # The condition must not have deleted the mechanics it governs.
@@ -227,12 +231,10 @@ class ConditionalStructureTests(unittest.TestCase):
 
     def test_the_shipped_output_style_carries_the_condition(self) -> None:
         text = (ROOT / "output-styles" / "copydesk.md").read_text(encoding="utf-8")
-        self.assertIn("one to three sentences of plain prose", text)
         self.assertIn("never as decoration", text)
 
     def test_the_rules_block_states_the_condition(self) -> None:
         block = PRESET["instructions"]["rules_block"]
-        self.assertIn("one to three sentences of plain prose", block)
         self.assertIn("never as decoration", block)
         # The terminal list is conditional there too, not only in the floor.
         self.assertIn("once a reply does use structure", block)
